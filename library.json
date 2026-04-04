@@ -1,0 +1,48 @@
+{
+  "name": "MB85RC",
+  "version": "1.0.0",
+  "description": "Production-grade MB85RC256V FRAM I2C memory driver.",
+  "keywords": [
+    "mb85rc",
+    "mb85rc256v",
+    "fram",
+    "feram",
+    "memory",
+    "i2c",
+    "esp32",
+    "arduino",
+    "platformio"
+  ],
+  "authors": [
+    {
+      "name": "Thymos Solution s.r.o",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz"
+    },
+    {
+      "name": "Jan Havelka",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz",
+      "maintainer": true
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/janhavelka/MB85RC.git"
+  },
+  "license": "MIT",
+  "homepage": "https://www.thymos.cz",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "headers": [
+    "MB85RC/MB85RC.h"
+  ],
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src"
+  }
+}
