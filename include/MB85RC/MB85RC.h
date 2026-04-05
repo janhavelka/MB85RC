@@ -26,6 +26,11 @@ struct DeviceId {
   uint8_t densityCode = 0;     ///< Density nibble from Product ID (expect 0x5)
 };
 
+/// Raw 3-byte Device ID payload as returned on the bus.
+struct DeviceIdRaw {
+  uint8_t bytes[cmd::DEVICE_ID_LEN] = {};
+};
+
 /// Snapshot of current driver settings/state without performing I2C.
 struct SettingsSnapshot {
   bool initialized = false;       ///< True after begin() succeeds and before end()
@@ -36,6 +41,14 @@ struct SettingsSnapshot {
   bool hasNowMsHook = false;
   bool currentAddressKnown = false;
   uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read
+};
+
+/// Result of comparing expected bytes with FRAM contents.
+struct VerifyResult {
+  bool match = false;
+  size_t mismatchOffset = 0;      ///< First mismatching byte offset from the requested start
+  uint8_t expected = 0;           ///< Expected byte at mismatchOffset
+  uint8_t actual = 0;             ///< Actual byte read at mismatchOffset
 };
 
 /// MB85RC256V FRAM driver class
@@ -171,11 +184,31 @@ public:
   /// @return Status::Ok() on success
   Status readDeviceId(DeviceId& id);
 
+  /// Read the raw 3-byte Device ID payload from the device.
+  /// @param raw Output raw Device ID bytes as transmitted on the bus
+  /// @return Status::Ok() on success
+  Status readDeviceIdRaw(DeviceIdRaw& raw);
+
   /// Read the byte at the device's current internal address pointer.
   /// The pointer is undefined after power-on until a memory read/write succeeds.
   /// @param value Output byte
   /// @return Status::Ok() on success
   Status readCurrentAddress(uint8_t& value);
+
+  /// Read multiple bytes using repeated documented current-address-read operations.
+  /// The pointer is undefined after power-on until a memory read/write succeeds.
+  /// @param buf Output buffer
+  /// @param len Number of bytes to read
+  /// @return Status::Ok() on success
+  Status readCurrentAddress(uint8_t* buf, size_t len);
+
+  /// Compare FRAM contents against an expected buffer.
+  /// @param address Starting memory address (0x0000-0x7FFF)
+  /// @param expected Expected bytes
+  /// @param len Number of bytes to compare
+  /// @param out Comparison result
+  /// @return Status::Ok() on successful comparison transaction(s)
+  Status verify(uint16_t address, const uint8_t* expected, size_t len, VerifyResult& out);
 
   /// Get the memory size in bytes (32768 for MB85RC256V).
   /// @return Memory size
@@ -219,6 +252,12 @@ private:
 
   /// Read Device ID using tracked path (for public API)
   Status _readDeviceIdTracked(DeviceId& id);
+
+  /// Read raw Device ID bytes using raw path
+  Status _readDeviceIdBytesRaw(DeviceIdRaw& raw);
+
+  /// Read raw Device ID bytes using tracked path
+  Status _readDeviceIdBytesTracked(DeviceIdRaw& raw);
 
   /// Validate address is within range
   static bool _isValidAddress(uint16_t address);

@@ -10,14 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Runtime settings snapshot and current-address-read coverage are now validated by the native test suite, including rollover and chunked transfer paths.
 - The bringup CLI now includes `hexdump`, `text`, `strings`, and `crc` commands for practical on-hardware memory inspection.
+- Added raw Device ID access, multi-byte current-address reads, and a `verify()` helper for content comparison.
 
 ### Changed
 - `getSettings()` now reports the cached runtime snapshot even before `begin()` so the example CLI can inspect defaults without extra I2C.
 - The bringup CLI now uses stricter numeric parsing and bounded stress-count validation for closer parity with the stronger sibling libraries.
+- The bringup CLI now exposes `idraw` and `verify`, and `current <len>` uses the library bulk current-address helper.
 
 ### Fixed
 - `readDeviceId()` health tracking now goes through the tracked transport wrapper path instead of calling `_updateHealth()` manually.
 - README device characteristics now match the MB85RC256V documentation for endurance and retained-data wording.
+- `begin()` and `end()` now clear stale runtime/config snapshots instead of leaking old state after shutdown or failed re-initialization.
+- Internal memory helpers now defensively validate null/zero-length misuse paths before touching fixed buffers.
 
 ### Added
 - `SettingsSnapshot`, `getSettings()`, `isInitialized()`, and `getConfig()` for runtime/config inspection

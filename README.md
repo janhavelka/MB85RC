@@ -8,8 +8,9 @@ Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduin
 - Health monitoring with `READY`, `DEGRADED`, and `OFFLINE` states
 - Deterministic managed-synchronous lifecycle: `begin()`, `tick()`, `end()`
 - Chunked read/write support with rollover at `0x7FFF -> 0x0000`
-- Current-address read support for the documented internal address-pointer flow
+- Current-address read support for the documented internal address-pointer flow, including multi-byte helper coverage
 - Device ID verification on `begin()` (`Manufacturer ID = 0x00A`, `Product ID = 0x510`)
+- Raw Device ID access and verify/compare helpers for diagnostics
 - Runtime settings snapshot API for examples and diagnostics
 
 ## Installation
@@ -80,15 +81,18 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `Status readByte(uint16_t addr, uint8_t& out)` - read one byte
 - `Status read(uint16_t addr, uint8_t* buf, size_t len)` - read a block with chunking and rollover
 - `Status readCurrentAddress(uint8_t& out)` - read from the device's current internal address pointer
+- `Status readCurrentAddress(uint8_t* buf, size_t len)` - repeat documented current-address reads into a buffer
 - `Status writeByte(uint16_t addr, uint8_t value)` - write one byte
 - `Status write(uint16_t addr, const uint8_t* data, size_t len)` - write a block with chunking and rollover
 - `Status fill(uint16_t addr, uint8_t value, size_t len)` - fill a region with a constant byte
+- `Status verify(uint16_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - compare FRAM contents against expected bytes
 
 ### Diagnostics
 
 - `Status probe()` - check presence without health tracking
 - `Status recover()` - manual recovery attempt
 - `Status readDeviceId(DeviceId& out)` - read manufacturer, product, and density fields
+- `Status readDeviceIdRaw(DeviceIdRaw& out)` - read the raw 3-byte Device ID payload
 - `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime state without I2C
 
 ### State And Health
@@ -121,6 +125,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 
 - `read()`, `write()`, and `fill()` intentionally preserve the documented rollover from `0x7FFF` to `0x0000`.
 - `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
+- The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior.
+- `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
 - The `WP` pin is hardware-only. The driver does not control or sense write-protect state over I2C.
 - The datasheet software-reset bus sequence is transport-owned by design because the library never drives SDA/SCL directly.
 
@@ -129,8 +135,9 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `examples/01_basic_bringup_cli/`
   - `cfg` / `settings` for runtime/config snapshots
   - `read` / `dump` / `hexdump` for wrap-aware hex+ASCII memory dumps
-  - `text`, `strings`, and `crc` for live memory inspection on hardware
+  - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware
   - `current` / `cur` for current-address reads
+  - `id` / `idraw` for parsed and raw Device ID visibility
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
 
 ### CLI Inspection Examples
@@ -141,6 +148,8 @@ text 0x0000 64            # Escaped text-oriented view
 strings                   # Scan the whole chip for printable ASCII strings
 strings 0x1000 512 6      # Scan a window with a minimum string length
 crc 0x0000 1024           # CRC32 over a region for quick verification
+verify 0x0020 55 55 55 55 # Compare live FRAM bytes against expected values
+idraw                     # Show the raw 3-byte Device ID payload
 current 16                # Read 16 bytes from the current internal address
 ```
 

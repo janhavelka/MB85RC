@@ -568,12 +568,10 @@ void printCurrentAddressReadRange(uint16_t len) {
 
   while (remaining > 0) {
     const uint16_t chunk = (remaining > sizeof(readBuf)) ? sizeof(readBuf) : remaining;
-    for (uint16_t i = 0; i < chunk; ++i) {
-      st = device.readCurrentAddress(readBuf[i]);
-      if (!st.ok()) {
-        printStatus(st);
-        return;
-      }
+    st = device.readCurrentAddress(readBuf, chunk);
+    if (!st.ok()) {
+      printStatus(st);
+      return;
     }
     printHexDump(startAddr, readBuf, chunk);
     startAddr = wrapMemoryAddress(startAddr, chunk);
@@ -1016,12 +1014,14 @@ void printHelp() {
   helpItem("text <addr> [len]", "Escaped ASCII-focused view (default len=64)");
   helpItem("strings [addr len [minLen]]", "Scan printable ASCII strings (default whole chip, min=4)");
   helpItem("crc <addr> <len>", "Compute CRC32 over a memory region");
+  helpItem("verify <addr> <byte> [byte...]", "Compare FRAM contents against expected bytes");
   helpItem("write <addr> <byte> [byte...]", "Write byte(s) to address");
   helpItem("fill <addr> <value> <len>", "Fill memory region with value");
   helpItem("current / cur [len]", "Read byte(s) from current internal address");
 
   helpSection("Device Info");
   helpItem("id", "Read device ID (manufacturer, product, density)");
+  helpItem("idraw", "Read raw 3-byte Device ID payload");
   helpItem("size", "Print memory size");
 
   helpSection("Diagnostics");
@@ -1079,6 +1079,18 @@ void processCommand(const String& cmdLine) {
     }
     Serial.printf("Device ID: Manufacturer=0x%03X Product=0x%03X Density=0x%02X\n",
                   id.manufacturerId, id.productId, id.densityCode);
+    return;
+  }
+
+  if (cmd == "idraw") {
+    MB85RC::DeviceIdRaw raw;
+    MB85RC::Status st = device.readDeviceIdRaw(raw);
+    if (!st.ok()) {
+      printStatus(st);
+      return;
+    }
+    Serial.printf("Device ID raw: %02X %02X %02X\n",
+                  raw.bytes[0], raw.bytes[1], raw.bytes[2]);
     return;
   }
 
@@ -1214,6 +1226,86 @@ void processCommand(const String& cmdLine) {
     printRangeCrc32(addr, len);
     if (rangeWraps(addr, len)) {
       Serial.println("  Note: CRC region wrapped across 0x7FFF -> 0x0000.");
+    }
+    return;
+  }
+
+  if (cmd == "verify") {
+    LOGW("Usage: verify <addr> <byte> [byte...]");
+    return;
+  }
+
+  if (cmd.startsWith("verify ")) {
+    String args = cmd.substring(7);
+    args.trim();
+
+    const int firstSpace = args.indexOf(' ');
+    if (firstSpace < 0) {
+      LOGW("Usage: verify <addr> <byte> [byte...]");
+      return;
+    }
+
+    const String addrStr = args.substring(0, firstSpace);
+    String dataStr = args.substring(firstSpace + 1);
+    dataStr.trim();
+
+    uint16_t addr = 0;
+    if (!parseAddress(addrStr, addr)) {
+      LOGW("Address out of range (max 0x%04X)", MB85RC::cmd::MAX_MEM_ADDRESS);
+      return;
+    }
+
+    uint8_t expected[MB85RC::cmd::MAX_WRITE_CHUNK];
+    size_t count = 0;
+    while (dataStr.length() > 0) {
+      if (count >= sizeof(expected)) {
+        LOGW("Too many verify bytes (max %u per command)",
+             static_cast<unsigned>(sizeof(expected)));
+        return;
+      }
+
+      dataStr.trim();
+      const int space = dataStr.indexOf(' ');
+      String token;
+      if (space < 0) {
+        token = dataStr;
+        dataStr = "";
+      } else {
+        token = dataStr.substring(0, space);
+        dataStr = dataStr.substring(space + 1);
+      }
+
+      if (!parseByte(token, expected[count])) {
+        LOGW("Invalid byte value: %s", token.c_str());
+        return;
+      }
+      count++;
+    }
+
+    if (count == 0) {
+      LOGW("No verify data provided");
+      return;
+    }
+
+    MB85RC::VerifyResult result;
+    MB85RC::Status st = device.verify(addr, expected, count, result);
+    if (!st.ok()) {
+      printStatus(st);
+      return;
+    }
+
+    if (result.match) {
+      Serial.printf("Verified %u byte(s) at 0x%04X%s\n",
+                    static_cast<unsigned>(count),
+                    addr,
+                    rangeWraps(addr, static_cast<uint16_t>(count)) ? " (wrapped)" : "");
+    } else {
+      const uint16_t mismatchAddr = wrapMemoryAddress(addr, result.mismatchOffset);
+      Serial.printf("Verify mismatch at +0x%04lX (addr 0x%04X): expected 0x%02X, actual 0x%02X\n",
+                    static_cast<unsigned long>(result.mismatchOffset),
+                    mismatchAddr,
+                    result.expected,
+                    result.actual);
     }
     return;
   }

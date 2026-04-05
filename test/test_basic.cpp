@@ -261,13 +261,56 @@ void test_begin_detects_device_not_found() {
                           static_cast<uint8_t>(st.code));
 }
 
+void test_failed_begin_clears_stale_runtime_snapshot() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+
+  Config good = makeConfig(bus);
+  good.i2cAddress = 0x57;
+  good.i2cTimeoutMs = 25;
+  good.offlineThreshold = 4;
+  TEST_ASSERT_TRUE(dev.begin(good).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0001, 0xAA).ok());
+
+  Config bad = makeConfig(bus);
+  bad.i2cWrite = nullptr;
+  bad.i2cWriteRead = nullptr;
+  Status st = dev.begin(bad);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.offlineThreshold);
+  TEST_ASSERT_FALSE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
+}
+
 void test_end_transitions_to_uninit() {
   FakeBus bus;
   MB85RC::MB85RC dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0000, 0x11).ok());
   dev.end();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
                           static_cast<uint8_t>(dev.state()));
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.i2cTimeoutMs);
+  TEST_ASSERT_FALSE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
 }
 
 void test_now_ms_fallback_uses_millis_when_callback_missing() {
@@ -333,7 +376,11 @@ void test_probe_failure_does_not_update_health() {
 void test_diag_methods_reject_not_initialized() {
   MB85RC::MB85RC dev;
   DeviceId id;
+  DeviceIdRaw raw;
   uint8_t value = 0;
+  uint8_t values[2] = {};
+  const uint8_t expected[1] = {0};
+  VerifyResult verify;
 
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.probe().code));
@@ -342,7 +389,13 @@ void test_diag_methods_reject_not_initialized() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.readDeviceId(id).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.readDeviceIdRaw(raw).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(dev.readCurrentAddress(value).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.readCurrentAddress(values, 2).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(dev.verify(0x0000, expected, 1, verify).code));
 }
 
 // ===========================================================================
@@ -576,6 +629,19 @@ void test_read_device_id() {
   TEST_ASSERT_EQUAL_UINT8(0x05, id.densityCode);
 }
 
+void test_read_device_id_raw() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  DeviceIdRaw raw;
+  Status st = dev.readDeviceIdRaw(raw);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_HEX8(DEVID_BYTE0, raw.bytes[0]);
+  TEST_ASSERT_EQUAL_HEX8(DEVID_BYTE1, raw.bytes[1]);
+  TEST_ASSERT_EQUAL_HEX8(DEVID_BYTE2, raw.bytes[2]);
+}
+
 void test_current_address_requires_prior_memory_access() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -662,6 +728,65 @@ void test_read_current_address_reads_next_byte_and_advances() {
   TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
   TEST_ASSERT_TRUE(snap.currentAddressKnown);
   TEST_ASSERT_EQUAL_HEX16(0x0012, snap.currentAddress);
+}
+
+void test_read_current_address_range_reads_multiple_bytes_and_advances() {
+  FakeBus bus;
+  bus.mem[0x0010] = 0xAB;
+  bus.mem[0x0011] = 0xCD;
+  bus.mem[0x0012] = 0xEF;
+  bus.mem[0x0013] = 0x42;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  uint8_t first = 0;
+  TEST_ASSERT_TRUE(dev.readByte(0x0010, first).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xAB, first);
+
+  uint8_t current[3] = {};
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(current, sizeof(current)).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xCD, current[0]);
+  TEST_ASSERT_EQUAL_HEX8(0xEF, current[1]);
+  TEST_ASSERT_EQUAL_HEX8(0x42, current[2]);
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX16(0x0014, snap.currentAddress);
+}
+
+void test_verify_reports_match_and_first_mismatch() {
+  FakeBus bus;
+  bus.mem[0x7FFE] = 0x11;
+  bus.mem[0x7FFF] = 0x22;
+  bus.mem[0x0000] = 0x33;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  VerifyResult result;
+  const uint8_t matchExpected[3] = {0x11, 0x22, 0x33};
+  TEST_ASSERT_TRUE(dev.verify(0x7FFE, matchExpected, sizeof(matchExpected), result).ok());
+  TEST_ASSERT_TRUE(result.match);
+
+  const uint8_t mismatchExpected[3] = {0x11, 0x99, 0x33};
+  TEST_ASSERT_TRUE(dev.verify(0x7FFE, mismatchExpected, sizeof(mismatchExpected), result).ok());
+  TEST_ASSERT_FALSE(result.match);
+  TEST_ASSERT_EQUAL_UINT32(1u, static_cast<uint32_t>(result.mismatchOffset));
+  TEST_ASSERT_EQUAL_HEX8(0x99, result.expected);
+  TEST_ASSERT_EQUAL_HEX8(0x22, result.actual);
+}
+
+void test_verify_rejects_invalid_args() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  VerifyResult result;
+  const uint8_t expected[1] = {0x00};
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(dev.verify(0x0000, nullptr, 1, result).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(dev.verify(0x0000, expected, 0, result).code));
 }
 
 // ===========================================================================
@@ -798,6 +923,7 @@ int main() {
   RUN_TEST(test_begin_success_sets_ready_and_health);
   RUN_TEST(test_begin_normalizes_zero_offline_threshold_in_settings);
   RUN_TEST(test_begin_detects_device_not_found);
+  RUN_TEST(test_failed_begin_clears_stale_runtime_snapshot);
   RUN_TEST(test_end_transitions_to_uninit);
   RUN_TEST(test_now_ms_fallback_uses_millis_when_callback_missing);
   RUN_TEST(test_get_settings_returns_runtime_snapshot);
@@ -827,11 +953,15 @@ int main() {
 
   // Device ID
   RUN_TEST(test_read_device_id);
+  RUN_TEST(test_read_device_id_raw);
   RUN_TEST(test_current_address_requires_prior_memory_access);
   RUN_TEST(test_current_address_tracks_memory_operations_and_settings);
   RUN_TEST(test_recover_invalidates_current_address_tracking);
   RUN_TEST(test_read_current_address_requires_known_pointer);
   RUN_TEST(test_read_current_address_reads_next_byte_and_advances);
+  RUN_TEST(test_read_current_address_range_reads_multiple_bytes_and_advances);
+  RUN_TEST(test_verify_reports_match_and_first_mismatch);
+  RUN_TEST(test_verify_rejects_invalid_args);
 
   // Health tracking
   RUN_TEST(test_write_failure_transitions_to_degraded);
