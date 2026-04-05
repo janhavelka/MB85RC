@@ -18,6 +18,11 @@ REQUIRED_COMMON = [
 ]
 
 MANDATORY_COMMANDS = ["help", "scan", "probe", "recover", "drv", "read", "verbose", "stress"]
+MANDATORY_PATTERNS = {
+    "cfg/settings command": r'cmd == "cfg" \|\| cmd == "settings"',
+    "current command": r'cmd == "current" \|\| cmd == "cur"',
+    "dump command": r'cmd\.startsWith\("read "\) \|\| cmd\.startsWith\("dump "\)',
+}
 
 
 def fail(msg: str) -> None:
@@ -57,8 +62,9 @@ def main() -> int:
         if re.search(rf"\b{re.escape(cmd)}\b", text) is None:
             fail(f"mandatory command '{cmd}' missing in {bringup_main.as_posix()}")
 
-    if re.search(r"\bcfg\b", text) is None and re.search(r"\bsettings\b", text) is None:
-        fail("either 'cfg' or 'settings' command must be present")
+    for label, pattern in MANDATORY_PATTERNS.items():
+        if re.search(pattern, text) is None:
+            fail(f"missing {label}")
 
     print("CLI contract PASSED")
     return 0

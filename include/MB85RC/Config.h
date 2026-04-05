@@ -20,9 +20,9 @@ using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
 
 /// I2C write-then-read callback signature
 /// @param addr     I2C device address (7-bit)
-/// @param txData   Pointer to data to write
-/// @param txLen    Number of bytes to write
-/// @param rxData   Pointer to buffer for read data
+/// @param txData   Pointer to data to write (nullable when txLen == 0)
+/// @param txLen    Number of bytes to write (0 allowed for read-only transactions)
+/// @param rxData   Pointer to buffer for read data (nullable when rxLen == 0)
 /// @param rxLen    Number of bytes to read
 /// @param timeoutMs Maximum time to wait for completion
 /// @param user     User context pointer passed through from Config

@@ -18,6 +18,32 @@
 
 namespace transport {
 
+inline bool interfaceReset(int sda, int scl) {
+#if defined(ARDUINO_ARCH_ESP32)
+  // 9 SCL pulses + STOP is the standard bus recovery / interface-reset sequence.
+  pinMode(scl, OUTPUT);
+  pinMode(sda, INPUT_PULLUP);
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(scl, LOW);
+    delayMicroseconds(5);
+    digitalWrite(scl, HIGH);
+    delayMicroseconds(5);
+  }
+
+  pinMode(sda, OUTPUT);
+  digitalWrite(sda, LOW);
+  delayMicroseconds(5);
+  digitalWrite(scl, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(sda, HIGH);
+  delayMicroseconds(5);
+#else
+  (void)sda;
+  (void)scl;
+#endif
+  return true;
+}
+
 inline MB85RC::Status mapWireResult(uint8_t result, const char* context) {
   switch (result) {
     case 0:
@@ -86,7 +112,7 @@ inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
  * The timeout parameter is advisory; bus timeout ownership stays with initWire().
  *
  * @param addr I2C 7-bit address
- * @param tx TX buffer to send
+ * @param tx TX buffer to send (nullable when txLen == 0)
  * @param txLen TX length
  * @param rx RX buffer for readback
  * @param rxLen RX length
@@ -106,23 +132,25 @@ inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLe
   if ((txLen > 0 && tx == nullptr) || (rxLen > 0 && rx == nullptr)) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid I2C read params");
   }
-  if (txLen == 0 || rxLen == 0) {
+  if (txLen == 0 && rxLen == 0) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "I2C read length invalid");
   }
   if (txLen > 128 || rxLen > 128) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "I2C read exceeds buffer");
   }
 
-  wire->beginTransmission(addr);
-  size_t written = wire->write(tx, txLen);
-  if (written != txLen) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C write incomplete",
-                                 static_cast<int32_t>(written));
-  }
+  if (txLen > 0) {
+    wire->beginTransmission(addr);
+    size_t written = wire->write(tx, txLen);
+    if (written != txLen) {
+      return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C write incomplete",
+                                   static_cast<int32_t>(written));
+    }
 
-  uint8_t result = wire->endTransmission(false);  // Repeated start
-  if (result != 0) {
-    return mapWireResult(result, "I2C write phase failed");
+    uint8_t result = wire->endTransmission(false);  // Repeated start
+    if (result != 0) {
+      return mapWireResult(result, "I2C write phase failed");
+    }
   }
 
   size_t read = wire->requestFrom(addr, static_cast<uint8_t>(rxLen));
@@ -152,26 +180,7 @@ inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLe
  * @return true on success
  */
 inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
-#if defined(ARDUINO_ARCH_ESP32)
-  // Toggle SCL to release any stuck slave
-  pinMode(scl, OUTPUT);
-  pinMode(sda, INPUT_PULLUP);
-  for (int i = 0; i < 9; i++) {
-    digitalWrite(scl, LOW);
-    delayMicroseconds(5);
-    digitalWrite(scl, HIGH);
-    delayMicroseconds(5);
-  }
-  // Generate STOP condition
-  pinMode(sda, OUTPUT);
-  digitalWrite(sda, LOW);
-  delayMicroseconds(5);
-  digitalWrite(scl, HIGH);
-  delayMicroseconds(5);
-  digitalWrite(sda, HIGH);
-  delayMicroseconds(5);
-#endif
-
+  interfaceReset(sda, scl);
   Wire.begin(sda, scl);
   Wire.setClock(freq);
   Wire.setTimeOut(timeoutMs);

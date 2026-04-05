@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Runtime settings snapshot and current-address-read coverage are now validated by the native test suite, including rollover and chunked transfer paths.
+- The bringup CLI now includes `hexdump`, `text`, `strings`, and `crc` commands for practical on-hardware memory inspection.
+
+### Changed
+- `getSettings()` now reports the cached runtime snapshot even before `begin()` so the example CLI can inspect defaults without extra I2C.
+- The bringup CLI now uses stricter numeric parsing and bounded stress-count validation for closer parity with the stronger sibling libraries.
+
+### Fixed
+- `readDeviceId()` health tracking now goes through the tracked transport wrapper path instead of calling `_updateHealth()` manually.
+- README device characteristics now match the MB85RC256V documentation for endurance and retained-data wording.
+
+### Added
+- `SettingsSnapshot`, `getSettings()`, `isInitialized()`, and `getConfig()` for runtime/config inspection
+- `readCurrentAddress()` plus CLI `current` / `cur` support for the documented current-address read flow
+- Wrap-aware CLI `dump` alias and rollover-friendly read/write/fill example behavior
+- Native tests for rollover, current-address tracking, settings snapshots, and read-only transport calls
+
+### Fixed
+- Device ID tracked reads now update health only through tracked transport wrappers
+- Example `Wire` transport now supports read-only transactions required by current-address reads
+- README documentation now points to the correct implementation-manual path and documents transport-owned bus reset handling
+
 ## [1.0.0] - 2026-04-04
 
 ### Added

@@ -15,6 +15,12 @@ namespace {
 static constexpr size_t MAX_WRITE_BUF = cmd::MAX_WRITE_CHUNK + cmd::ADDRESS_BYTES;
 static constexpr size_t FILL_CHUNK_SIZE = 64;
 
+void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
+  id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
+  id.productId = static_cast<uint16_t>(((raw[1] & 0x0F) << 8) | raw[2]);
+  id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -31,6 +37,8 @@ Status MB85RC::begin(const Config& config) {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
+  _currentAddressKnown = false;
+  _currentAddress = 0;
 
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
@@ -73,6 +81,20 @@ void MB85RC::tick(uint32_t nowMs) {
 void MB85RC::end() {
   _initialized = false;
   _driverState = DriverState::UNINIT;
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+}
+
+Status MB85RC::getSettings(SettingsSnapshot& out) const {
+  out.initialized = _initialized;
+  out.state = _driverState;
+  out.i2cAddress = _config.i2cAddress;
+  out.i2cTimeoutMs = _config.i2cTimeoutMs;
+  out.offlineThreshold = _config.offlineThreshold;
+  out.hasNowMsHook = (_config.nowMs != nullptr);
+  out.currentAddressKnown = _currentAddressKnown;
+  out.currentAddress = _currentAddress;
+  return Status::Ok();
 }
 
 // ===========================================================================
@@ -93,7 +115,6 @@ Status MB85RC::probe() {
     return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
                          static_cast<int32_t>((id.manufacturerId << 12) | id.productId));
   }
-
   return Status::Ok();
 }
 
@@ -106,13 +127,19 @@ Status MB85RC::recover() {
   DeviceId id;
   Status st = _readDeviceIdTracked(id);
   if (!st.ok()) {
+    _currentAddressKnown = false;
+    _currentAddress = 0;
     return st;
   }
   if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
+    _currentAddressKnown = false;
+    _currentAddress = 0;
     return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
                          static_cast<int32_t>((id.manufacturerId << 12) | id.productId));
   }
 
+  _currentAddressKnown = false;
+  _currentAddress = 0;
   return Status::Ok();
 }
 
@@ -151,7 +178,7 @@ Status MB85RC::read(uint16_t address, uint8_t* buf, size_t len) {
     }
 
     // Compute effective address with rollover
-    uint16_t addr = static_cast<uint16_t>((address + offset) & cmd::MAX_MEM_ADDRESS);
+    uint16_t addr = _wrapAddress(address, offset);
 
     Status st = _readMemory(addr, buf + offset, chunk);
     if (!st.ok()) {
@@ -198,7 +225,7 @@ Status MB85RC::write(uint16_t address, const uint8_t* buf, size_t len) {
     }
 
     // Compute effective address with rollover
-    uint16_t addr = static_cast<uint16_t>((address + offset) & cmd::MAX_MEM_ADDRESS);
+    uint16_t addr = _wrapAddress(address, offset);
 
     Status st = _writeMemory(addr, buf + offset, chunk);
     if (!st.ok()) {
@@ -232,7 +259,7 @@ Status MB85RC::fill(uint16_t address, uint8_t value, size_t len) {
       toWrite = FILL_CHUNK_SIZE;
     }
 
-    uint16_t addr = static_cast<uint16_t>((address + offset) & cmd::MAX_MEM_ADDRESS);
+    uint16_t addr = _wrapAddress(address, offset);
 
     Status st = _writeMemory(addr, chunk, toWrite);
     if (!st.ok()) {
@@ -257,13 +284,35 @@ Status MB85RC::readDeviceId(DeviceId& id) {
   return _readDeviceIdTracked(id);
 }
 
+Status MB85RC::readCurrentAddress(uint8_t& value) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (!_currentAddressKnown) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Current address undefined until a memory access succeeds");
+  }
+
+  Status st = _i2cWriteReadTrackedAddr(_config.i2cAddress, nullptr, 0, &value, 1);
+  if (!st.ok()) {
+    if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
+      _currentAddressKnown = false;
+    }
+    return st;
+  }
+
+  _setCurrentAddressAfterTransfer(_currentAddress, 1);
+  return Status::Ok();
+}
+
 // ===========================================================================
 // Transport Wrappers
 // ===========================================================================
 
 Status MB85RC::_i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                 uint8_t* rxBuf, size_t rxLen) {
-  if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
+  if ((txLen > 0 && txBuf == nullptr) || (rxLen > 0 && rxBuf == nullptr) ||
+      (txLen == 0 && rxLen == 0)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
   if (_config.i2cWriteRead == nullptr) {
@@ -285,11 +334,17 @@ Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len) {
 
 Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
                                     uint8_t* rxBuf, size_t rxLen) {
-  if (txBuf == nullptr || txLen == 0 || (rxLen > 0 && rxBuf == nullptr)) {
+  return _i2cWriteReadTrackedAddr(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen);
+}
+
+Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
+                                        uint8_t* rxBuf, size_t rxLen) {
+  if ((txLen > 0 && txBuf == nullptr) || (rxLen > 0 && rxBuf == nullptr) ||
+      (txLen == 0 && rxLen == 0)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
 
-  Status st = _i2cWriteReadRaw(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen);
+  Status st = _i2cWriteReadRaw(addr, txBuf, txLen, rxBuf, rxLen);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
@@ -319,12 +374,18 @@ Status MB85RC::_readMemory(uint16_t address, uint8_t* buf, size_t len) {
   addrBuf[0] = static_cast<uint8_t>((address >> 8) & cmd::ADDR_HIGH_MASK);
   addrBuf[1] = static_cast<uint8_t>(address & 0xFF);
 
-  return _i2cWriteReadTracked(addrBuf, cmd::ADDRESS_BYTES, buf, len);
+  Status st = _i2cWriteReadTracked(addrBuf, cmd::ADDRESS_BYTES, buf, len);
+  if (st.ok()) {
+    _setCurrentAddressAfterTransfer(address, len);
+  } else if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
+    _currentAddressKnown = false;
+  }
+  return st;
 }
 
 Status MB85RC::_writeMemory(uint16_t address, const uint8_t* buf, size_t len) {
   // Byte/Sequential Write: [S] [addr W] [addrHi] [addrLo] [data...] [P]
-  // No write delay needed — FRAM writes immediately.
+  // No write delay needed - FRAM writes immediately.
   if (len > cmd::MAX_WRITE_CHUNK) {
     return Status::Error(Err::INVALID_PARAM, "Write chunk too large");
   }
@@ -334,7 +395,13 @@ Status MB85RC::_writeMemory(uint16_t address, const uint8_t* buf, size_t len) {
   payload[1] = static_cast<uint8_t>(address & 0xFF);
   std::memcpy(&payload[cmd::ADDRESS_BYTES], buf, len);
 
-  return _i2cWriteTracked(payload, cmd::ADDRESS_BYTES + len);
+  Status st = _i2cWriteTracked(payload, cmd::ADDRESS_BYTES + len);
+  if (st.ok()) {
+    _setCurrentAddressAfterTransfer(address, len);
+  } else if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
+    _currentAddressKnown = false;
+  }
+  return st;
 }
 
 Status MB85RC::_readDeviceIdRaw(DeviceId& id) {
@@ -355,13 +422,7 @@ Status MB85RC::_readDeviceIdRaw(DeviceId& id) {
     return st;
   }
 
-  // Parse Device ID bytes:
-  //   Byte 0: Manufacturer ID[11:4]
-  //   Byte 1: Manufacturer ID[3:0] | Product ID[11:8]
-  //   Byte 2: Product ID[7:0]
-  id.manufacturerId = static_cast<uint16_t>((rxBuf[0] << 4) | (rxBuf[1] >> 4));
-  id.productId = static_cast<uint16_t>(((rxBuf[1] & 0x0F) << 8) | rxBuf[2]);
-  id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
+  parseDeviceId(rxBuf, id);
 
   return Status::Ok();
 }
@@ -370,26 +431,32 @@ Status MB85RC::_readDeviceIdTracked(DeviceId& id) {
   uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
   uint8_t rxBuf[cmd::DEVICE_ID_LEN] = {};
 
-  // Use raw call but wrap with health tracking manually
-  Status st = _i2cWriteReadRaw(cmd::DEVICE_ID_ADDR_W >> 1, txBuf, 1,
-                                rxBuf, cmd::DEVICE_ID_LEN);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
-  st = _updateHealth(st);
+  Status st = _i2cWriteReadTrackedAddr(cmd::DEVICE_ID_ADDR_W >> 1, txBuf, 1,
+                                       rxBuf, cmd::DEVICE_ID_LEN);
   if (!st.ok()) {
     return st;
   }
 
-  id.manufacturerId = static_cast<uint16_t>((rxBuf[0] << 4) | (rxBuf[1] >> 4));
-  id.productId = static_cast<uint16_t>(((rxBuf[1] & 0x0F) << 8) | rxBuf[2]);
-  id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
+  parseDeviceId(rxBuf, id);
 
   return Status::Ok();
 }
 
 bool MB85RC::_isValidAddress(uint16_t address) {
   return address <= cmd::MAX_MEM_ADDRESS;
+}
+
+uint16_t MB85RC::_wrapAddress(uint16_t address, size_t offset) {
+  return static_cast<uint16_t>((address + offset) & cmd::MAX_MEM_ADDRESS);
+}
+
+void MB85RC::_setCurrentAddressAfterTransfer(uint16_t address, size_t len) {
+  if (len == 0) {
+    return;
+  }
+
+  _currentAddressKnown = true;
+  _currentAddress = _wrapAddress(address, len);
 }
 
 // ===========================================================================

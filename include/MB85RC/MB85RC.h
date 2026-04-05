@@ -26,6 +26,18 @@ struct DeviceId {
   uint8_t densityCode = 0;     ///< Density nibble from Product ID (expect 0x5)
 };
 
+/// Snapshot of current driver settings/state without performing I2C.
+struct SettingsSnapshot {
+  bool initialized = false;       ///< True after begin() succeeds and before end()
+  DriverState state = DriverState::UNINIT;
+  uint8_t i2cAddress = cmd::DEFAULT_ADDRESS;
+  uint32_t i2cTimeoutMs = 0;
+  uint8_t offlineThreshold = 0;
+  bool hasNowMsHook = false;
+  bool currentAddressKnown = false;
+  uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read
+};
+
 /// MB85RC256V FRAM driver class
 class MB85RC {
 public:
@@ -65,12 +77,21 @@ public:
   
   /// Get current driver state
   DriverState state() const { return _driverState; }
+
+  /// Check if begin() has completed successfully.
+  bool isInitialized() const { return _initialized; }
   
   /// Check if driver is ready for operations
   bool isOnline() const { 
     return _driverState == DriverState::READY || 
            _driverState == DriverState::DEGRADED; 
   }
+
+  /// Get a copy of the active configuration.
+  const Config& getConfig() const { return _config; }
+
+  /// Get a snapshot of current configuration/runtime state (no I2C).
+  Status getSettings(SettingsSnapshot& out) const;
   
   // =========================================================================
   // Health Tracking
@@ -150,6 +171,12 @@ public:
   /// @return Status::Ok() on success
   Status readDeviceId(DeviceId& id);
 
+  /// Read the byte at the device's current internal address pointer.
+  /// The pointer is undefined after power-on until a memory read/write succeeds.
+  /// @param value Output byte
+  /// @return Status::Ok() on success
+  Status readCurrentAddress(uint8_t& value);
+
   /// Get the memory size in bytes (32768 for MB85RC256V).
   /// @return Memory size
   static constexpr uint16_t memorySize() { return cmd::MEMORY_SIZE; }
@@ -166,6 +193,10 @@ private:
   /// Raw I2C write (no health tracking)
   Status _i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len);
   
+  /// Tracked I2C write-read to an explicit address (updates health)
+  Status _i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
+                                  uint8_t* rxBuf, size_t rxLen);
+
   /// Tracked I2C write-read (updates health)
   Status _i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen, 
                               uint8_t* rxBuf, size_t rxLen);
@@ -191,6 +222,12 @@ private:
 
   /// Validate address is within range
   static bool _isValidAddress(uint16_t address);
+
+  /// Wrap an address into the valid 15-bit FRAM address space.
+  static uint16_t _wrapAddress(uint16_t address, size_t offset);
+
+  /// Update the tracked current address after a successful memory transaction.
+  void _setCurrentAddressAfterTransfer(uint16_t address, size_t len);
   
   // =========================================================================
   // Health Management
@@ -218,6 +255,8 @@ private:
   uint8_t _consecutiveFailures = 0;
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
+  bool _currentAddressKnown = false;
+  uint16_t _currentAddress = 0;
 };
 
 }  // namespace MB85RC
