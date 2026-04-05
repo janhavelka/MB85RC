@@ -186,12 +186,15 @@ pio test -e native
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 pio run -e esp32s3dev
+pio run -e esp32s2dev
 ```
 
 ## Documentation
 
 - `CHANGELOG.md` - release history
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
+- `docs/datasheet_MB85RC256V.pdf` - primary device datasheet used for verification
+- `docs/datasheet_MB85RC256V_v2.pdf` - alternate revision copy for cross-checking
 - `MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
 
 ## License
