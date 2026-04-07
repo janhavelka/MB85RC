@@ -737,8 +737,8 @@ void runStressMix(int count) {
       {"readMulti",    0, 0},
       {"fill",         0, 0},
       {"readDeviceId", 0, 0},
-      {"recover",      0, 0},
       {"currentAddr",  0, 0},
+      {"recover",      0, 0},
       {"settings",     0, 0},
   };
   const int opCount = static_cast<int>(sizeof(stats) / sizeof(stats[0]));
@@ -785,12 +785,15 @@ void runStressMix(int count) {
         break;
       }
       case 6: {
-        st = device.recover();
+        // current-address reads need a successful addressed memory access first.
+        // Keep this before recover(), because recover() intentionally invalidates
+        // the cached current-address pointer.
+        uint8_t value = 0;
+        st = device.readCurrentAddress(value);
         break;
       }
       case 7: {
-        uint8_t value = 0;
-        st = device.readCurrentAddress(value);
+        st = device.recover();
         break;
       }
       case 8: {

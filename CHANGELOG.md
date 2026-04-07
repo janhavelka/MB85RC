@@ -7,54 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-07
+
 ### Added
-- Runtime settings snapshot and current-address-read coverage are now validated by the native test suite, including rollover and chunked transfer paths.
-- The bringup CLI now includes `hexdump`, `text`, `strings`, and `crc` commands for practical on-hardware memory inspection.
-- Added raw Device ID access, multi-byte current-address reads, and a `verify()` helper for content comparison.
-- Added `examples/common/TypedMemory.h`, an example-only fixed-width codec layer for little-endian integers, `float`, `double`, and `bool`.
-- Added native coverage for deterministic random-access write/read/verify flows and the typed helper layer.
+- First stable release of the MB85RC256V FRAM library.
+- Production-grade MB85RC256V driver with chunked `read()`, `write()`, `writeByte()`, and `fill()` support.
+- Injected I2C transport architecture via `Config::i2cWrite` and `Config::i2cWriteRead`, with no direct `Wire` dependency in the library core.
+- Deterministic managed-synchronous lifecycle with `begin()`, `tick()`, and `end()`.
+- Health tracking with `READY`, `DEGRADED`, and `OFFLINE` driver states plus lifetime success/failure counters and timestamps.
+- Runtime inspection helpers: `SettingsSnapshot`, `getSettings()`, `isInitialized()`, and `getConfig()`.
+- Device ID verification on `begin()` plus public `readDeviceId()` and `readDeviceIdRaw()` helpers.
+- Current-address-read support, including multi-byte current-address reads and tracked pointer rollover behavior.
+- `verify()` helper for comparing FRAM contents against expected bytes without inventing synthetic transport errors.
+- Single bundled bringup CLI example with memory inspection, diagnostics, stress tests, read/write validation, random-access benchmarking, and typed-value demo commands.
+- Example-only `examples/common/TypedMemory.h` helpers for explicit little-endian fixed-width integers, `float`, `double`, and `bool`.
+- Native Unity test coverage for lifecycle, health tracking, rollover behavior, current-address tracking, verify logic, random-access flows, and typed helper coverage.
+- Doxygen configuration and refreshed release documentation for the stable API surface.
+- MIT License.
 
 ### Changed
-- `getSettings()` now reports the cached runtime snapshot even before `begin()` so the example CLI can inspect defaults without extra I2C.
-- The bringup CLI now uses stricter numeric parsing and bounded stress-count validation for closer parity with the stronger sibling libraries.
-- The bringup CLI now exposes `idraw` and `verify`, and `current <len>` uses the library bulk current-address helper.
-- The single bringup CLI example now bundles the read/write suite, random benchmark, and typed-value demo instead of splitting them into separate example entry points.
+- The bringup CLI now serves as the single example entry point and bundles `rw_suite`, `randbench`, and `typed_demo` instead of splitting them into separate example applications.
+- Numeric argument parsing in the example CLI is stricter and bounded for better diagnostic behavior on real hardware.
+- README, portability notes, and release docs now reflect the finalized `v1.0.0` behavior and installation flow.
+- Public header comments were normalized to ASCII-safe wording so generated Doxygen output is clean and stable.
 
 ### Fixed
-- `readDeviceId()` health tracking now goes through the tracked transport wrapper path instead of calling `_updateHealth()` manually.
-- README device characteristics now match the MB85RC256V documentation for endurance and retained-data wording.
+- `readDeviceId()` health tracking now flows only through tracked transport wrappers.
 - `begin()` and `end()` now clear stale runtime/config snapshots instead of leaking old state after shutdown or failed re-initialization.
-- Internal memory helpers now defensively validate null/zero-length misuse paths before touching fixed buffers.
-
-### Added
-- `SettingsSnapshot`, `getSettings()`, `isInitialized()`, and `getConfig()` for runtime/config inspection
-- `readCurrentAddress()` plus CLI `current` / `cur` support for the documented current-address read flow
-- Wrap-aware CLI `dump` alias and rollover-friendly read/write/fill example behavior
-- Native tests for rollover, current-address tracking, settings snapshots, and read-only transport calls
-
-### Fixed
-- Device ID tracked reads now update health only through tracked transport wrappers
-- Example `Wire` transport now supports read-only transactions required by current-address reads
-- README documentation now points to the correct implementation-manual path and documents transport-owned bus reset handling
-
-## [1.0.0] - 2026-04-04
-
-### Added
-- **First stable release**
-- Complete MB85RC256V FRAM driver with chunked read/write/fill
-- Injected I2C transport architecture (no Wire dependency in library)
-- Health monitoring with automatic state tracking (READY/DEGRADED/OFFLINE)
-- Device ID verification (manufacturer, product, density) on `begin()`
-- Configurable I2C address (0x50-0x57 via A0/A1/A2 pins)
-- Non-blocking tick-based architecture (tick is no-op for FRAM)
-- Probe and recover diagnostics with proper health tracking separation
-- Chunked I/O with bounded I2C transactions (MAX_WRITE_CHUNK=126, MAX_READ_CHUNK=128)
-- `fill()` operation for bulk memory initialization
-- `stress_mix` mixed-operation stress test in CLI
-- Basic CLI example (`01_basic_bringup_cli`)
-- Comprehensive Doxygen documentation in public headers
-- Native test suite with Unity
-- MIT License
+- Internal memory helpers now reject null and zero-length misuse paths before touching fixed buffers.
+- The example `Wire` transport now supports read-only transactions required by current-address reads.
+- `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
+- README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
 [Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/janhavelka/MB85RC/releases/tag/v1.0.0
