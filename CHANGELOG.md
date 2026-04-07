@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Single bundled bringup CLI example with memory inspection, diagnostics, stress tests, read/write validation, random-access benchmarking, and typed-value demo commands.
 - Example-only `examples/common/TypedMemory.h` helpers for explicit little-endian fixed-width integers, `float`, `double`, and `bool`.
 - Native Unity test coverage for lifecycle, health tracking, rollover behavior, current-address tracking, verify logic, random-access flows, and typed helper coverage.
+- GitHub Actions CI pipeline with ESP32-S3/S2 builds, native tests, version header check, core timing guard, CLI contract enforcement, and library package validation.
 - Doxygen configuration and refreshed release documentation for the stable API surface.
 - MIT License.
 
