@@ -11,11 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime settings snapshot and current-address-read coverage are now validated by the native test suite, including rollover and chunked transfer paths.
 - The bringup CLI now includes `hexdump`, `text`, `strings`, and `crc` commands for practical on-hardware memory inspection.
 - Added raw Device ID access, multi-byte current-address reads, and a `verify()` helper for content comparison.
+- Added `examples/common/TypedMemory.h`, an example-only fixed-width codec layer for little-endian integers, `float`, `double`, and `bool`.
+- Added native coverage for deterministic random-access write/read/verify flows and the typed helper layer.
 
 ### Changed
 - `getSettings()` now reports the cached runtime snapshot even before `begin()` so the example CLI can inspect defaults without extra I2C.
 - The bringup CLI now uses stricter numeric parsing and bounded stress-count validation for closer parity with the stronger sibling libraries.
 - The bringup CLI now exposes `idraw` and `verify`, and `current <len>` uses the library bulk current-address helper.
+- The single bringup CLI example now bundles the read/write suite, random benchmark, and typed-value demo instead of splitting them into separate example entry points.
 
 ### Fixed
 - `readDeviceId()` health tracking now goes through the tracked transport wrapper path instead of calling `_updateHealth()` manually.

@@ -129,6 +129,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
 - The `WP` pin is hardware-only. The driver does not control or sense write-protect state over I2C.
 - The datasheet software-reset bus sequence is transport-owned by design because the library never drives SDA/SCL directly.
+- Typed storage policy is intentionally kept out of the core driver. If you need fixed-width numeric encoding, use an explicit codec layer such as `examples/common/TypedMemory.h`.
 
 ## Examples
 
@@ -139,6 +140,9 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
+  - `rw_suite` for safe read/write/fill/verify coverage with restore
+  - `randbench [N]` for random-access timing over a scratch window with restore
+  - `typed_demo` for fixed-width integer/float/double storage through the example-side codec layer
 
 ### CLI Inspection Examples
 
@@ -151,6 +155,9 @@ crc 0x0000 1024           # CRC32 over a region for quick verification
 verify 0x0020 55 55 55 55 # Compare live FRAM bytes against expected values
 idraw                     # Show the raw 3-byte Device ID payload
 current 16                # Read 16 bytes from the current internal address
+rw_suite                  # Run a deterministic read/write/fill/verify suite
+randbench 4096            # Time 4096 random writes + 4096 random reads
+typed_demo                # Demonstrate explicit typed value storage
 ```
 
 ### Example Helpers
@@ -170,6 +177,7 @@ current 16                # Read 16 bytes from the current internal address
 | `HealthView.h` | Compact health display helper |
 | `HealthDiag.h` | Verbose health diagnostics helper |
 | `TransportAdapter.h` | Transport alias helper |
+| `TypedMemory.h` | Example-only fixed-width integer/float/double codec on top of the raw driver |
 
 ## Behavioral Contracts
 

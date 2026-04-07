@@ -11,6 +11,7 @@ TwoWire Wire;
 
 #include "MB85RC/MB85RC.h"
 #include "common/I2cTransport.h"
+#include "common/TypedMemory.h"
 
 using namespace MB85RC;
 
@@ -127,6 +128,16 @@ Config makeConfig(FakeBus& bus) {
   cfg.i2cTimeoutMs = 10;
   cfg.offlineThreshold = 3;
   return cfg;
+}
+
+uint32_t nextRandom(uint32_t& state) {
+  if (state == 0U) {
+    state = 0xA341316CU;
+  }
+  state ^= (state << 13);
+  state ^= (state >> 17);
+  state ^= (state << 5);
+  return state;
 }
 
 }  // namespace
@@ -789,6 +800,98 @@ void test_verify_rejects_invalid_args() {
                           static_cast<uint8_t>(dev.verify(0x0000, expected, 0, result).code));
 }
 
+void test_random_access_write_read_verify_sequence() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint16_t WINDOW_ADDR = 0x0300;
+  static constexpr size_t WINDOW_LEN = 256;
+  static constexpr uint32_t OPS = 2048;
+
+  uint8_t expected[WINDOW_LEN] = {};
+  uint32_t seed = 0x13579BDFU;
+
+  for (uint32_t i = 0; i < OPS; ++i) {
+    const size_t index = static_cast<size_t>(nextRandom(seed) % WINDOW_LEN);
+    const uint8_t value = static_cast<uint8_t>(nextRandom(seed) & 0xFFU);
+    expected[index] = value;
+    TEST_ASSERT_TRUE(dev.writeByte(static_cast<uint16_t>(WINDOW_ADDR + index), value).ok());
+  }
+
+  uint8_t actual[WINDOW_LEN] = {};
+  TEST_ASSERT_TRUE(dev.read(WINDOW_ADDR, actual, sizeof(actual)).ok());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, actual, sizeof(actual));
+
+  VerifyResult result;
+  TEST_ASSERT_TRUE(dev.verify(WINDOW_ADDR, expected, sizeof(expected), result).ok());
+  TEST_ASSERT_TRUE(result.match);
+}
+
+void test_typed_memory_round_trips_fixed_width_values() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(typed_memory::writeUint8(dev, 0x0100, 0xABU).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeUint16Le(dev, 0x0101, 0x1234U).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeInt32Le(dev, 0x0103, -1234567).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeUint32Le(dev, 0x0107, 0x11223344UL).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeUint64Le(dev, 0x010B, 0x0123456789ABCDEFULL).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeFloat32Le(dev, 0x0113, 1.25f).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeFloat64Le(dev, 0x0117, -42.5).ok());
+  TEST_ASSERT_TRUE(typed_memory::writeBool(dev, 0x011F, true).ok());
+
+  uint8_t u8 = 0;
+  uint16_t u16 = 0;
+  int32_t i32 = 0;
+  uint32_t u32 = 0;
+  uint64_t u64 = 0;
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  bool flag = false;
+
+  TEST_ASSERT_TRUE(typed_memory::readUint8(dev, 0x0100, u8).ok());
+  TEST_ASSERT_TRUE(typed_memory::readUint16Le(dev, 0x0101, u16).ok());
+  TEST_ASSERT_TRUE(typed_memory::readInt32Le(dev, 0x0103, i32).ok());
+  TEST_ASSERT_TRUE(typed_memory::readUint32Le(dev, 0x0107, u32).ok());
+  TEST_ASSERT_TRUE(typed_memory::readUint64Le(dev, 0x010B, u64).ok());
+  TEST_ASSERT_TRUE(typed_memory::readFloat32Le(dev, 0x0113, f32).ok());
+  TEST_ASSERT_TRUE(typed_memory::readFloat64Le(dev, 0x0117, f64).ok());
+  TEST_ASSERT_TRUE(typed_memory::readBool(dev, 0x011F, flag).ok());
+
+  TEST_ASSERT_EQUAL_HEX8(0xAB, u8);
+  TEST_ASSERT_EQUAL_HEX16(0x1234, u16);
+  TEST_ASSERT_EQUAL_INT32(-1234567, i32);
+  TEST_ASSERT_EQUAL_HEX32(0x11223344UL, u32);
+  TEST_ASSERT_EQUAL_UINT64(0x0123456789ABCDEFULL, u64);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.25f, f32);
+  TEST_ASSERT_TRUE(f64 > -42.5000001 && f64 < -42.4999999);
+  TEST_ASSERT_TRUE(flag);
+
+  TEST_ASSERT_EQUAL_HEX8(0x34, bus.mem[0x0101]);
+  TEST_ASSERT_EQUAL_HEX8(0x12, bus.mem[0x0102]);
+  TEST_ASSERT_EQUAL_HEX8(0x44, bus.mem[0x0107]);
+  TEST_ASSERT_EQUAL_HEX8(0x33, bus.mem[0x0108]);
+  TEST_ASSERT_EQUAL_HEX8(0x22, bus.mem[0x0109]);
+  TEST_ASSERT_EQUAL_HEX8(0x11, bus.mem[0x010A]);
+}
+
+void test_typed_memory_rejects_cross_boundary_values() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  Status st = typed_memory::writeUint32Le(dev, 0x7FFE, 0xCAFEBABEUL);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+
+  uint64_t value = 0;
+  st = typed_memory::readUint64Le(dev, 0x7FF9, value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+}
+
 // ===========================================================================
 // Health tracking tests
 // ===========================================================================
@@ -962,6 +1065,9 @@ int main() {
   RUN_TEST(test_read_current_address_range_reads_multiple_bytes_and_advances);
   RUN_TEST(test_verify_reports_match_and_first_mismatch);
   RUN_TEST(test_verify_rejects_invalid_args);
+  RUN_TEST(test_random_access_write_read_verify_sequence);
+  RUN_TEST(test_typed_memory_round_trips_fixed_width_values);
+  RUN_TEST(test_typed_memory_rejects_cross_boundary_values);
 
   // Health tracking
   RUN_TEST(test_write_failure_transitions_to_degraded);
