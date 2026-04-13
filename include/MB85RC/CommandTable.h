@@ -52,7 +52,7 @@ static constexpr uint8_t DEVICE_ID_LEN = 3;
 /// Memory size in bytes (32,768 = 256 Kbit / 8)
 static constexpr uint16_t MEMORY_SIZE = 32768;
 
-/// Maximum valid memory address (15-bit: 0x0000–0x7FFF)
+/// Maximum valid memory address (15-bit: 0x0000-0x7FFF)
 static constexpr uint16_t MAX_MEM_ADDRESS = 0x7FFF;
 
 /// Address mask for the high byte (MSB must be 0)

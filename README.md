@@ -2,6 +2,8 @@
 
 Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino and PlatformIO.
 
+Stable release: `v1.0.0`
+
 ## Features
 
 - Injected I2C transport with no `Wire` dependency in library code
@@ -21,7 +23,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git
+  https://github.com/janhavelka/MB85RC.git#v1.0.0
 ```
 
 ### Manual
@@ -67,6 +69,14 @@ void loop() {
 ```
 
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()`.
+
+## Release 1.0.0 Highlights
+
+- Stable public API centered on deterministic byte-oriented FRAM access.
+- Injected I2C transport with no `Wire` dependency inside the library core.
+- Health tracking with `READY`, `DEGRADED`, and `OFFLINE` states plus runtime counters.
+- Raw and parsed Device ID support, rollover-aware read/write/fill, and `verify()` diagnostics.
+- One bundled bringup CLI example that covers inspection, diagnostics, validation, benchmarks, and example-side typed storage helpers.
 
 ## API Reference
 
@@ -127,8 +137,10 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
 - The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior.
 - `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
-- The `WP` pin is hardware-only. The driver does not control or sense write-protect state over I2C.
+- The `WP` pin is hardware-only and non-permanent. High disables writes to the entire array, low or open enables writes, and reads still work.
+- There is no software block-protect register, OTP lock region, or permanent write lock in this device family.
 - The datasheet software-reset bus sequence is transport-owned by design because the library never drives SDA/SCL directly.
+- Typed storage policy is intentionally kept out of the core driver. If you need fixed-width numeric encoding, use an explicit codec layer such as `examples/common/TypedMemory.h`.
 
 ## Examples
 
@@ -139,6 +151,9 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
+  - `rw_suite` for safe read/write/fill/verify coverage with restore
+  - `randbench [N]` for random-access timing over a scratch window with restore
+  - `typed_demo` for fixed-width integer/float/double storage through the example-side codec layer
 
 ### CLI Inspection Examples
 
@@ -151,6 +166,9 @@ crc 0x0000 1024           # CRC32 over a region for quick verification
 verify 0x0020 55 55 55 55 # Compare live FRAM bytes against expected values
 idraw                     # Show the raw 3-byte Device ID payload
 current 16                # Read 16 bytes from the current internal address
+rw_suite                  # Run a deterministic read/write/fill/verify suite
+randbench 4096            # Time 4096 random writes + 4096 random reads
+typed_demo                # Demonstrate explicit typed value storage
 ```
 
 ### Example Helpers
@@ -170,6 +188,7 @@ current 16                # Read 16 bytes from the current internal address
 | `HealthView.h` | Compact health display helper |
 | `HealthDiag.h` | Verbose health diagnostics helper |
 | `TransportAdapter.h` | Transport alias helper |
+| `TypedMemory.h` | Example-only fixed-width integer/float/double codec on top of the raw driver |
 
 ## Behavioral Contracts
 
@@ -187,12 +206,14 @@ python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
+doxygen Doxyfile
 ```
 
 ## Documentation
 
 - `CHANGELOG.md` - release history
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
+- `docs/releases/v1.0.0.md` - GitHub release notes for `v1.0.0`
 - `docs/datasheet_MB85RC256V.pdf` - primary device datasheet used for verification
 - `docs/datasheet_MB85RC256V_v2.pdf` - alternate revision copy for cross-checking
 - `MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review

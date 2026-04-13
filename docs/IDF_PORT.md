@@ -1,6 +1,6 @@
 # MB85RC ESP-IDF Portability Status
 
-Last audited: 2026-04-04
+Last audited: 2026-04-07
 
 ## Current Reality
 - Primary runtime remains PlatformIO + Arduino.
@@ -38,4 +38,5 @@ cfg.nowMs = idfNowMs;
 - `python tools/check_core_timing_guard.py` passes.
 - `pio test -e native` passes.
 - Example builds pass (`pio run -e esp32s3dev`, `pio run -e esp32s2dev`).
+- Doxygen docs regenerate cleanly with `doxygen Doxyfile`.
 - No new direct Arduino timing calls outside wrapper fallback.

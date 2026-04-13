@@ -95,9 +95,9 @@ public:
   bool isInitialized() const { return _initialized; }
   
   /// Check if driver is ready for operations
-  bool isOnline() const { 
-    return _driverState == DriverState::READY || 
-           _driverState == DriverState::DEGRADED; 
+  bool isOnline() const {
+    return _driverState == DriverState::READY ||
+           _driverState == DriverState::DEGRADED;
   }
 
   /// Get a copy of the active configuration.
@@ -133,14 +133,14 @@ public:
   // =========================================================================
   
   /// Read a single byte from the specified address.
-  /// @param address Memory address (0x0000–0x7FFF)
+  /// @param address Memory address (0x0000-0x7FFF)
   /// @param value Output byte
   /// @return Status::Ok() on success
   Status readByte(uint16_t address, uint8_t& value);
 
   /// Read multiple bytes starting at the specified address.
   /// Address auto-increments and wraps at 0x7FFF -> 0x0000.
-  /// @param address Starting memory address (0x0000–0x7FFF)
+  /// @param address Starting memory address (0x0000-0x7FFF)
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success
@@ -151,8 +151,8 @@ public:
   // =========================================================================
   
   /// Write a single byte to the specified address.
-  /// FRAM writes are immediate — no write delay needed.
-  /// @param address Memory address (0x0000–0x7FFF)
+  /// FRAM writes are immediate - no write delay needed.
+  /// @param address Memory address (0x0000-0x7FFF)
   /// @param value Byte to write
   /// @return Status::Ok() on success
   Status writeByte(uint16_t address, uint8_t value);
@@ -160,15 +160,15 @@ public:
   /// Write multiple bytes starting at the specified address.
   /// Address auto-increments and wraps at 0x7FFF -> 0x0000.
   /// No page boundary limitations (unlike EEPROM).
-  /// FRAM writes are immediate — no write delay needed.
-  /// @param address Starting memory address (0x0000–0x7FFF)
+  /// FRAM writes are immediate - no write delay needed.
+  /// @param address Starting memory address (0x0000-0x7FFF)
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
   /// @return Status::Ok() on success
   Status write(uint16_t address, const uint8_t* buf, size_t len);
 
   /// Fill a range of memory with a constant byte value.
-  /// @param address Starting memory address (0x0000–0x7FFF)
+  /// @param address Starting memory address (0x0000-0x7FFF)
   /// @param value Fill byte
   /// @param len Number of bytes to fill
   /// @return Status::Ok() on success
@@ -220,7 +220,7 @@ private:
   // =========================================================================
   
   /// Raw I2C write-read (no health tracking)
-  Status _i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen, 
+  Status _i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                           uint8_t* rxBuf, size_t rxLen);
   
   /// Raw I2C write (no health tracking)
@@ -231,7 +231,7 @@ private:
                                   uint8_t* rxBuf, size_t rxLen);
 
   /// Tracked I2C write-read (updates health)
-  Status _i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen, 
+  Status _i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
                               uint8_t* rxBuf, size_t rxLen);
   
   /// Tracked I2C write (updates health)

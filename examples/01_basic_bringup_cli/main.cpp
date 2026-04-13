@@ -4,12 +4,14 @@
 
 #include <Arduino.h>
 #include <cstdlib>
+#include <cstring>
 
 #include "examples/common/Log.h"
 #include "examples/common/BoardConfig.h"
 #include "examples/common/BusDiag.h"
 #include "examples/common/I2cTransport.h"
 #include "examples/common/I2cScanner.h"
+#include "examples/common/TypedMemory.h"
 
 #include "MB85RC/MB85RC.h"
 
@@ -35,6 +37,17 @@ StressStats stressStats;
 static constexpr int DEFAULT_STRESS_COUNT = 10;
 static constexpr int MAX_STRESS_COUNT = 100000;
 static constexpr uint32_t STRESS_PROGRESS_UPDATES = 10U;
+static constexpr int DEFAULT_RANDBENCH_OPS = 4096;
+
+static constexpr uint16_t RW_SUITE_ADDR = 0x0400;
+static constexpr uint16_t RW_SUITE_FILL_ADDR = 0x0460;
+static constexpr uint16_t TYPED_DEMO_ADDR = 0x0600;
+static constexpr uint16_t RANDOM_BENCH_ADDR = 0x2000;
+
+static constexpr size_t RW_SUITE_LEN = 64;
+static constexpr size_t RW_SUITE_FILL_LEN = 16;
+static constexpr size_t TYPED_DEMO_LEN = 28;
+static constexpr size_t RANDOM_BENCH_LEN = 1024;
 
 // ============================================================================
 // Helper Functions
@@ -42,6 +55,16 @@ static constexpr uint32_t STRESS_PROGRESS_UPDATES = 10U;
 
 uint32_t exampleNowMs(void*) {
   return millis();
+}
+
+uint32_t nextRandom(uint32_t& state) {
+  if (state == 0U) {
+    state = 0xA341316CU;
+  }
+  state ^= (state << 13);
+  state ^= (state >> 17);
+  state ^= (state << 5);
+  return state;
 }
 
 const char* errToStr(MB85RC::Err err) {
@@ -299,6 +322,26 @@ uint16_t wrapMemoryAddress(uint16_t address, size_t offset) {
 
 bool rangeWraps(uint16_t address, uint16_t len) {
   return static_cast<uint32_t>(address) + len > MB85RC::cmd::MEMORY_SIZE;
+}
+
+void printBenchmarkLine(const char* label, uint32_t ops, uint32_t elapsedUs, size_t bytesPerOp) {
+  const uint32_t totalBytes = ops * static_cast<uint32_t>(bytesPerOp);
+  const float avgUs = (ops > 0U) ? static_cast<float>(elapsedUs) / static_cast<float>(ops) : 0.0f;
+  const float opsPerSec =
+      (elapsedUs > 0U) ? (1000000.0f * static_cast<float>(ops) / static_cast<float>(elapsedUs))
+                       : 0.0f;
+  const float bytesPerSec =
+      (elapsedUs > 0U)
+          ? (1000000.0f * static_cast<float>(totalBytes) / static_cast<float>(elapsedUs))
+          : 0.0f;
+
+  Serial.printf("  %-18s ops=%lu elapsed=%lu us avg=%.2f us/op rate=%.2f ops/s throughput=%.2f B/s\n",
+                label,
+                static_cast<unsigned long>(ops),
+                static_cast<unsigned long>(elapsedUs),
+                avgUs,
+                opsPerSec,
+                bytesPerSec);
 }
 
 bool isPrintableAscii(uint8_t value) {
@@ -735,8 +778,8 @@ void runStressMix(int count) {
       {"readMulti",    0, 0},
       {"fill",         0, 0},
       {"readDeviceId", 0, 0},
-      {"recover",      0, 0},
       {"currentAddr",  0, 0},
+      {"recover",      0, 0},
       {"settings",     0, 0},
   };
   const int opCount = static_cast<int>(sizeof(stats) / sizeof(stats[0]));
@@ -785,12 +828,15 @@ void runStressMix(int count) {
         break;
       }
       case 6: {
-        st = device.recover();
+        // current-address reads need a successful addressed memory access first.
+        // Keep this before recover(), because recover() intentionally invalidates
+        // the cached current-address pointer.
+        uint8_t value = 0;
+        st = device.readCurrentAddress(value);
         break;
       }
       case 7: {
-        uint8_t value = 0;
-        st = device.readCurrentAddress(value);
+        st = device.recover();
         break;
       }
       case 8: {
@@ -1037,6 +1083,321 @@ void runSelfTest() {
                 static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
 }
 
+void runReadWriteSuite() {
+  struct Result {
+    uint32_t pass = 0;
+    uint32_t fail = 0;
+  } result;
+
+  auto reportCheck = [&](const char* name, bool ok, const char* note) {
+    Serial.printf("  [%s%s%s] %s",
+                  LOG_COLOR_RESULT(ok),
+                  ok ? "PASS" : "FAIL",
+                  LOG_COLOR_RESET,
+                  name);
+    if (note && note[0]) {
+      Serial.printf(" - %s", note);
+    }
+    Serial.println();
+    if (ok) {
+      result.pass++;
+    } else {
+      result.fail++;
+    }
+  };
+  auto reportStatus = [&](const char* name, const MB85RC::Status& st) {
+    reportCheck(name, st.ok(), st.ok() ? "" : errToStr(st.code));
+  };
+
+  Serial.println("=== Read/Write Suite ===");
+
+  uint8_t originalScratch[RW_SUITE_LEN] = {};
+  uint8_t originalFill[RW_SUITE_FILL_LEN] = {};
+  uint8_t originalWrap[8] = {};
+  bool haveScratch = false;
+  bool haveFill = false;
+  bool haveWrap = false;
+
+  MB85RC::Status st = typed_memory::readBytes(device,
+                                              RW_SUITE_ADDR,
+                                              originalScratch,
+                                              sizeof(originalScratch));
+  haveScratch = st.ok();
+  reportStatus("backup scratch region", st);
+
+  st = typed_memory::readBytes(device,
+                               RW_SUITE_FILL_ADDR,
+                               originalFill,
+                               sizeof(originalFill));
+  haveFill = st.ok();
+  reportStatus("backup fill region", st);
+
+  st = device.read(0x7FFC, originalWrap, sizeof(originalWrap));
+  haveWrap = st.ok();
+  reportStatus("backup wrap region", st);
+
+  uint8_t scratchPattern[RW_SUITE_LEN] = {};
+  for (size_t i = 0; i < sizeof(scratchPattern); ++i) {
+    scratchPattern[i] = static_cast<uint8_t>(0x21U + static_cast<uint8_t>(i * 13U));
+  }
+
+  st = device.write(RW_SUITE_ADDR, scratchPattern, sizeof(scratchPattern));
+  reportStatus("write scratch pattern", st);
+
+  MB85RC::VerifyResult verify;
+  st = device.verify(RW_SUITE_ADDR, scratchPattern, sizeof(scratchPattern), verify);
+  reportStatus("verify scratch transaction", st);
+  reportCheck("verify scratch contents", st.ok() && verify.match, "");
+
+  uint8_t readBack[RW_SUITE_LEN] = {};
+  st = device.read(RW_SUITE_ADDR, readBack, sizeof(readBack));
+  reportStatus("read scratch pattern", st);
+  reportCheck("scratch round-trip bytes match",
+              st.ok() && std::memcmp(readBack, scratchPattern, sizeof(readBack)) == 0,
+              "");
+
+  st = device.fill(RW_SUITE_FILL_ADDR, 0xA5, RW_SUITE_FILL_LEN);
+  reportStatus("fill test region", st);
+
+  uint8_t fillReadBack[RW_SUITE_FILL_LEN] = {};
+  st = device.read(RW_SUITE_FILL_ADDR, fillReadBack, sizeof(fillReadBack));
+  reportStatus("read fill region", st);
+  bool fillOk = true;
+  for (size_t i = 0; i < sizeof(fillReadBack); ++i) {
+    if (fillReadBack[i] != 0xA5U) {
+      fillOk = false;
+      break;
+    }
+  }
+  reportCheck("fill bytes match expected", st.ok() && fillOk, "");
+
+  const uint8_t wrapPattern[8] = {0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7};
+  st = device.write(0x7FFC, wrapPattern, sizeof(wrapPattern));
+  reportStatus("write wrap-around pattern", st);
+
+  uint8_t wrapReadBack[8] = {};
+  st = device.read(0x7FFC, wrapReadBack, sizeof(wrapReadBack));
+  reportStatus("read wrap-around pattern", st);
+  reportCheck("wrap-around bytes match",
+              st.ok() && std::memcmp(wrapReadBack, wrapPattern, sizeof(wrapReadBack)) == 0,
+              "");
+
+  if (haveScratch) {
+    reportStatus("restore scratch region",
+                 typed_memory::writeBytes(device,
+                                          RW_SUITE_ADDR,
+                                          originalScratch,
+                                          sizeof(originalScratch)));
+  }
+  if (haveFill) {
+    reportStatus("restore fill region",
+                 typed_memory::writeBytes(device,
+                                          RW_SUITE_FILL_ADDR,
+                                          originalFill,
+                                          sizeof(originalFill)));
+  }
+  if (haveWrap) {
+    reportStatus("restore wrap region", device.write(0x7FFC, originalWrap, sizeof(originalWrap)));
+  }
+
+  Serial.printf("Read/write suite result: pass=%s%lu%s fail=%s%lu%s\n",
+                goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+}
+
+void runRandomBench(int count) {
+  Serial.println("=== Random Access Benchmark ===");
+
+  uint8_t originalWindow[RANDOM_BENCH_LEN] = {};
+  MB85RC::Status st = typed_memory::readBytes(device,
+                                              RANDOM_BENCH_ADDR,
+                                              originalWindow,
+                                              sizeof(originalWindow));
+  if (!st.ok()) {
+    printStatus(st);
+    return;
+  }
+
+  uint8_t shadowWindow[RANDOM_BENCH_LEN];
+  std::memcpy(shadowWindow, originalWindow, sizeof(shadowWindow));
+
+  uint32_t seed = 0x13579BDFU;
+  uint32_t writeElapsedUs = 0;
+  uint32_t readElapsedUs = 0;
+
+  uint32_t startUs = micros();
+  for (int i = 0; i < count; ++i) {
+    const size_t index = static_cast<size_t>(nextRandom(seed) % RANDOM_BENCH_LEN);
+    const uint8_t value = static_cast<uint8_t>(nextRandom(seed) & 0xFFU);
+    st = device.writeByte(static_cast<uint16_t>(RANDOM_BENCH_ADDR + index), value);
+    if (!st.ok()) {
+      break;
+    }
+    shadowWindow[index] = value;
+  }
+  writeElapsedUs = micros() - startUs;
+
+  if (!st.ok()) {
+    printStatus(st);
+    (void)typed_memory::writeBytes(device,
+                                   RANDOM_BENCH_ADDR,
+                                   originalWindow,
+                                   sizeof(originalWindow));
+    return;
+  }
+
+  uint32_t mismatches = 0;
+  seed = 0x2468ACE1U;
+  startUs = micros();
+  for (int i = 0; i < count; ++i) {
+    const size_t index = static_cast<size_t>(nextRandom(seed) % RANDOM_BENCH_LEN);
+    uint8_t value = 0;
+    st = device.readByte(static_cast<uint16_t>(RANDOM_BENCH_ADDR + index), value);
+    if (!st.ok()) {
+      break;
+    }
+    if (value != shadowWindow[index]) {
+      mismatches++;
+    }
+  }
+  readElapsedUs = micros() - startUs;
+
+  if (!st.ok()) {
+    printStatus(st);
+    (void)typed_memory::writeBytes(device,
+                                   RANDOM_BENCH_ADDR,
+                                   originalWindow,
+                                   sizeof(originalWindow));
+    return;
+  }
+
+  MB85RC::VerifyResult verify;
+  st = device.verify(RANDOM_BENCH_ADDR, shadowWindow, sizeof(shadowWindow), verify);
+  if (!st.ok()) {
+    printStatus(st);
+  } else {
+    Serial.printf("  Final window verify: %s%s%s\n",
+                  LOG_COLOR_RESULT(verify.match),
+                  verify.match ? "PASS" : "FAIL",
+                  LOG_COLOR_RESET);
+    if (!verify.match) {
+      Serial.printf("  Mismatch offset: %lu expected=0x%02X actual=0x%02X\n",
+                    static_cast<unsigned long>(verify.mismatchOffset),
+                    verify.expected,
+                    verify.actual);
+    }
+  }
+
+  printBenchmarkLine("random-write-byte", static_cast<uint32_t>(count), writeElapsedUs, 1U);
+  printBenchmarkLine("random-read-byte", static_cast<uint32_t>(count), readElapsedUs, 1U);
+  Serial.printf("  Read mismatches: %lu\n", static_cast<unsigned long>(mismatches));
+
+  st = typed_memory::writeBytes(device,
+                                RANDOM_BENCH_ADDR,
+                                originalWindow,
+                                sizeof(originalWindow));
+  Serial.print("  Restore benchmark window:\n");
+  printStatus(st);
+}
+
+void runTypedDemo() {
+  auto printNamedStatus = [](const char* name, const MB85RC::Status& status) {
+    Serial.print("  ");
+    Serial.print(name);
+    Serial.println(":");
+    printStatus(status);
+  };
+
+  Serial.println("=== Typed Value Demo ===");
+  Serial.println("  Storage format: explicit little-endian, fixed-width, no silent wrap.");
+
+  uint8_t original[TYPED_DEMO_LEN] = {};
+  MB85RC::Status st = typed_memory::readBytes(device, TYPED_DEMO_ADDR, original, sizeof(original));
+  if (!st.ok()) {
+    printStatus(st);
+    return;
+  }
+
+  uint16_t cursor = TYPED_DEMO_ADDR;
+  printNamedStatus("write uint8", typed_memory::writeUint8(device, cursor, 0x7EU));
+  cursor += 1U;
+  printNamedStatus("write uint16 LE", typed_memory::writeUint16Le(device, cursor, 0x1234U));
+  cursor += 2U;
+  printNamedStatus("write int32 LE", typed_memory::writeInt32Le(device, cursor, -1234567));
+  cursor += 4U;
+  printNamedStatus("write uint64 LE",
+                   typed_memory::writeUint64Le(device, cursor, 0x1122334455667788ULL));
+  cursor += 8U;
+  printNamedStatus("write float32 LE", typed_memory::writeFloat32Le(device, cursor, 1.25f));
+  cursor += 4U;
+  printNamedStatus("write float64 LE", typed_memory::writeFloat64Le(device, cursor, -42.5));
+  cursor += 8U;
+  printNamedStatus("write bool", typed_memory::writeBool(device, cursor, true));
+
+  uint8_t u8 = 0;
+  uint16_t u16 = 0;
+  int32_t i32 = 0;
+  uint64_t u64 = 0;
+  float f32 = 0.0f;
+  double f64 = 0.0;
+  bool flag = false;
+
+  cursor = TYPED_DEMO_ADDR;
+  st = typed_memory::readUint8(device, cursor, u8);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 1U;
+  st = typed_memory::readUint16Le(device, cursor, u16);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 2U;
+  st = typed_memory::readInt32Le(device, cursor, i32);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 4U;
+  st = typed_memory::readUint64Le(device, cursor, u64);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 8U;
+  st = typed_memory::readFloat32Le(device, cursor, f32);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 4U;
+  st = typed_memory::readFloat64Le(device, cursor, f64);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+  cursor += 8U;
+  st = typed_memory::readBool(device, cursor, flag);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+
+  Serial.printf("  uint8   = 0x%02X\n", u8);
+  Serial.printf("  uint16  = 0x%04X\n", u16);
+  Serial.printf("  int32   = %ld\n", static_cast<long>(i32));
+  Serial.printf("  uint64  = 0x%08lX%08lX\n",
+                static_cast<unsigned long>(u64 >> 32),
+                static_cast<unsigned long>(u64 & 0xFFFFFFFFULL));
+  Serial.printf("  float   = %.6f\n", static_cast<double>(f32));
+  Serial.printf("  double  = %.6f\n", f64);
+  Serial.printf("  bool    = %s\n", flag ? "true" : "false");
+
+  st = typed_memory::writeUint32Le(device, 0x7FFE, 0xCAFEBABEU);
+  Serial.printf("  Cross-boundary guard: %s%s%s\n",
+                LOG_COLOR_RESULT(st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE),
+                st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE ? "PASS" : "FAIL",
+                LOG_COLOR_RESET);
+
+  st = typed_memory::writeBytes(device, TYPED_DEMO_ADDR, original, sizeof(original));
+  printNamedStatus("restore typed demo region", st);
+}
+
 void printHelp() {
   auto helpSection = [](const char* title) {
     Serial.printf("\n%s[%s]%s\n", LOG_COLOR_GREEN, title, LOG_COLOR_RESET);
@@ -1077,6 +1438,9 @@ void printHelp() {
   helpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
   helpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
   helpItem("selftest", "Run safe self-test report");
+  helpItem("rw_suite", "Run a safe read/write/fill/verify suite and restore data");
+  helpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
+  helpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
 }
 
 void printVersionInfo() {
@@ -1525,6 +1889,33 @@ void processCommand(const String& cmdLine) {
 
   if (cmd == "selftest") {
     runSelfTest();
+    return;
+  }
+
+  if (cmd == "rw_suite") {
+    runReadWriteSuite();
+    return;
+  }
+
+  if (cmd == "typed_demo") {
+    runTypedDemo();
+    return;
+  }
+
+  if (cmd == "randbench") {
+    LOGI("Starting random benchmark: %d writes + %d reads", DEFAULT_RANDBENCH_OPS, DEFAULT_RANDBENCH_OPS);
+    runRandomBench(DEFAULT_RANDBENCH_OPS);
+    return;
+  }
+
+  if (cmd.startsWith("randbench ")) {
+    int count = 0;
+    if (!parseCountArg(cmd.substring(10), count)) {
+      LOGW("Invalid randbench count (1-%d)", MAX_STRESS_COUNT);
+      return;
+    }
+    LOGI("Starting random benchmark: %d writes + %d reads", count, count);
+    runRandomBench(count);
     return;
   }
 
