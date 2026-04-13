@@ -34,6 +34,7 @@ StressStats stressStats;
 
 static constexpr int DEFAULT_STRESS_COUNT = 10;
 static constexpr int MAX_STRESS_COUNT = 100000;
+static constexpr uint32_t STRESS_PROGRESS_UPDATES = 10U;
 
 // ============================================================================
 // Helper Functions
@@ -96,6 +97,37 @@ const char* successRateColor(float pct) {
   if (pct >= 99.9f) return LOG_COLOR_GREEN;
   if (pct >= 80.0f) return LOG_COLOR_YELLOW;
   return LOG_COLOR_RED;
+}
+
+uint32_t stressProgressStep(uint32_t total) {
+  if (total == 0U) {
+    return 0U;
+  }
+  const uint32_t step = total / STRESS_PROGRESS_UPDATES;
+  return (step == 0U) ? 1U : step;
+}
+
+void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, uint32_t failCount) {
+  if (completed == 0U || total == 0U) {
+    return;
+  }
+  const uint32_t step = stressProgressStep(total);
+  if (step == 0U || (completed != total && (completed % step) != 0U)) {
+    return;
+  }
+  const float pct = (100.0f * static_cast<float>(completed)) / static_cast<float>(total);
+  Serial.printf("  Progress: %lu/%lu (%s%.0f%%%s, ok=%s%lu%s, fail=%s%lu%s)\n",
+                static_cast<unsigned long>(completed),
+                static_cast<unsigned long>(total),
+                successRateColor(pct),
+                pct,
+                LOG_COLOR_RESET,
+                goodIfNonZeroColor(okCount),
+                static_cast<unsigned long>(okCount),
+                LOG_COLOR_RESET,
+                goodIfZeroColor(failCount),
+                static_cast<unsigned long>(failCount),
+                LOG_COLOR_RESET);
 }
 
 void printStatus(const MB85RC::Status& st) {
@@ -598,6 +630,11 @@ void finishStressStats() {
   stressStats.active = false;
   stressStats.endMs = millis();
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
+  const float successPct =
+      (stressStats.attempts > 0)
+          ? (100.0f * static_cast<float>(stressStats.success) /
+             static_cast<float>(stressStats.attempts))
+          : 0.0f;
 
   Serial.println("=== Stress Summary ===");
   Serial.printf("  Target: %d\n", stressStats.target);
@@ -609,6 +646,10 @@ void finishStressStats() {
   Serial.printf("  Errors: %s%lu%s\n",
                 goodIfZeroColor(stressStats.errors),
                 static_cast<unsigned long>(stressStats.errors),
+                LOG_COLOR_RESET);
+  Serial.printf("  Success rate: %s%.2f%%%s\n",
+                successRateColor(successPct),
+                successPct,
                 LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
   if (durationMs > 0) {
@@ -642,30 +683,30 @@ void runStress(int count) {
       if (verboseMode) {
         Serial.printf("  [%d] write failed: %s\n", i, errToStr(st.code));
       }
-      continue;
-    }
-
-    uint8_t readBack = 0;
-    st = device.readByte(addr, readBack);
-    if (!st.ok()) {
-      stressStats.errors++;
-      stressStats.lastError = st;
-      if (verboseMode) {
-        Serial.printf("  [%d] read failed: %s\n", i, errToStr(st.code));
+    } else {
+      uint8_t readBack = 0;
+      st = device.readByte(addr, readBack);
+      if (!st.ok()) {
+        stressStats.errors++;
+        stressStats.lastError = st;
+        if (verboseMode) {
+          Serial.printf("  [%d] read failed: %s\n", i, errToStr(st.code));
+        }
+      } else if (readBack != pattern) {
+        stressStats.errors++;
+        stressStats.lastError = MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "data mismatch");
+        if (verboseMode) {
+          Serial.printf("  [%d] mismatch: wrote 0x%02X read 0x%02X\n", i, pattern, readBack);
+        }
+      } else {
+        stressStats.success++;
       }
-      continue;
     }
 
-    if (readBack != pattern) {
-      stressStats.errors++;
-      stressStats.lastError = MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "data mismatch");
-      if (verboseMode) {
-        Serial.printf("  [%d] mismatch: wrote 0x%02X read 0x%02X\n", i, pattern, readBack);
-      }
-      continue;
-    }
-
-    stressStats.success++;
+    printStressProgress(static_cast<uint32_t>(stressStats.attempts),
+                        static_cast<uint32_t>(stressStats.target),
+                        static_cast<uint32_t>(stressStats.success),
+                        stressStats.errors);
   }
 
   const uint32_t successDelta = device.totalSuccess() - succBefore;
@@ -703,6 +744,8 @@ void runStressMix(int count) {
   const uint32_t succBefore = device.totalSuccess();
   const uint32_t failBefore = device.totalFailures();
   const uint32_t startMs = millis();
+  uint32_t okTotal = 0;
+  uint32_t failTotal = 0;
 
   for (int i = 0; i < count; ++i) {
     const int op = i % opCount;
@@ -761,21 +804,22 @@ void runStressMix(int count) {
 
     if (st.ok()) {
       stats[op].ok++;
+      okTotal++;
     } else {
       stats[op].fail++;
+      failTotal++;
       if (verboseMode) {
         Serial.printf("  [%d] %s failed: %s\n", i, stats[op].name, errToStr(st.code));
       }
     }
+
+    printStressProgress(static_cast<uint32_t>(i + 1),
+                        static_cast<uint32_t>(count),
+                        okTotal,
+                        failTotal);
   }
 
   const uint32_t elapsed = millis() - startMs;
-  uint32_t okTotal = 0;
-  uint32_t failTotal = 0;
-  for (int i = 0; i < opCount; ++i) {
-    okTotal += stats[i].ok;
-    failTotal += stats[i].fail;
-  }
 
   Serial.println("=== stress_mix summary ===");
   const float successPct =
