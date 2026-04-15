@@ -116,6 +116,10 @@ const char* goodIfNonZeroColor(uint32_t value) {
   return (value > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
 }
 
+const char* skipCountColor(uint32_t value) {
+  return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
+}
+
 const char* successRateColor(float pct) {
   if (pct >= 99.9f) return LOG_COLOR_GREEN;
   if (pct >= 80.0f) return LOG_COLOR_YELLOW;
@@ -949,10 +953,10 @@ void runSelfTest() {
   if (st.code == MB85RC::Err::NOT_INITIALIZED) {
     reportSkip("probe responds", "driver not initialized");
     reportSkip("remaining checks", "selftest aborted");
-    Serial.printf("Selftest result: pass=%lu fail=%lu skip=%lu\n",
-                  static_cast<unsigned long>(result.pass),
-                  static_cast<unsigned long>(result.fail),
-                  static_cast<unsigned long>(result.skip));
+    Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
+                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
+                  skipCountColor(result.skip), static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
     return;
   }
   reportCheck("probe responds", st.ok(), st.ok() ? "" : errToStr(st.code));
@@ -971,6 +975,9 @@ void runSelfTest() {
               st.ok() && id.productId == MB85RC::cmd::PRODUCT_ID, "");
   reportCheck("density code = 0x05",
               st.ok() && id.densityCode == MB85RC::cmd::DENSITY_CODE, "");
+  MB85RC::DeviceIdRaw rawId;
+  st = device.readDeviceIdRaw(rawId);
+  reportCheck("readDeviceIdRaw", st.ok(), st.ok() ? "" : errToStr(st.code));
 
   // Write/Read test at address 0x0000
   // Save original value first
@@ -988,7 +995,16 @@ void runSelfTest() {
   reportCheck("verify data = 0xA5", st.ok() && readBack == testPattern, "");
 
   // Restore original value
-  device.writeByte(0x0000, origVal);
+  st = device.writeByte(0x0000, origVal);
+  reportCheck("restoreByte(0x0000)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  if (st.ok()) {
+    uint8_t restored = 0;
+    st = device.readByte(0x0000, restored);
+    reportCheck("verify restore(0x0000)", st.ok() && restored == origVal,
+                st.ok() ? "" : errToStr(st.code));
+  } else {
+    reportCheck("verify restore(0x0000)", false, errToStr(st.code));
+  }
 
   // Multi-byte write/read
   uint8_t testBuf[4] = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -1007,7 +1023,16 @@ void runSelfTest() {
   reportCheck("verify multi-byte data", st.ok() && multimatch, "");
 
   // Restore original
-  device.write(0x0010, origBuf, 4);
+  st = device.write(0x0010, origBuf, 4);
+  reportCheck("restore(0x0010, 4)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  if (st.ok()) {
+    uint8_t restoredBuf[4] = {};
+    st = device.read(0x0010, restoredBuf, 4);
+    const bool restoreMatch = st.ok() && (std::memcmp(restoredBuf, origBuf, sizeof(origBuf)) == 0);
+    reportCheck("verify restore(0x0010, 4)", restoreMatch, st.ok() ? "" : errToStr(st.code));
+  } else {
+    reportCheck("verify restore(0x0010, 4)", false, errToStr(st.code));
+  }
 
   // Fill test
   uint8_t origFill[8] = {};
@@ -1030,7 +1055,16 @@ void runSelfTest() {
   reportCheck("verify fill data", st.ok() && fillOk, "");
 
   // Restore original
-  device.write(0x0020, origFill, 8);
+  st = device.write(0x0020, origFill, 8);
+  reportCheck("restore fill area", st.ok(), st.ok() ? "" : errToStr(st.code));
+  if (st.ok()) {
+    uint8_t restoredFill[8] = {};
+    st = device.read(0x0020, restoredFill, 8);
+    const bool restoreFillOk = st.ok() && (std::memcmp(restoredFill, origFill, sizeof(origFill)) == 0);
+    reportCheck("verify restore fill area", restoreFillOk, st.ok() ? "" : errToStr(st.code));
+  } else {
+    reportCheck("verify restore fill area", false, errToStr(st.code));
+  }
 
   // Settings snapshot + current address read / rollover behavior
   MB85RC::SettingsSnapshot snap;
@@ -1065,8 +1099,39 @@ void runSelfTest() {
               st.ok() && snap.currentAddressKnown && snap.currentAddress == 0x0001,
               st.ok() ? "" : errToStr(st.code));
 
-  device.writeByte(MB85RC::cmd::MAX_MEM_ADDRESS, lastOrig);
-  device.writeByte(0x0000, firstOrig);
+  st = device.writeByte(MB85RC::cmd::MAX_MEM_ADDRESS, lastOrig);
+  reportCheck("restoreByte(0x7FFF)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  st = device.writeByte(0x0000, firstOrig);
+  reportCheck("restoreByte(0x0000 after wrap)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  if (st.ok()) {
+    uint8_t verifyFirst = 0;
+    st = device.readByte(0x0000, verifyFirst);
+    reportCheck("verify restore(0x0000 after wrap)",
+                st.ok() && verifyFirst == firstOrig,
+                st.ok() ? "" : errToStr(st.code));
+  } else {
+    reportCheck("verify restore(0x0000 after wrap)", false, errToStr(st.code));
+  }
+  uint8_t verifyLast = 0;
+  st = device.readByte(MB85RC::cmd::MAX_MEM_ADDRESS, verifyLast);
+  reportCheck("verify restore(0x7FFF)",
+              st.ok() && verifyLast == lastOrig,
+              st.ok() ? "" : errToStr(st.code));
+
+  // Invalid address handling
+  uint8_t invalidRead = 0;
+  st = device.readByte(0x8000, invalidRead);
+  reportCheck("readByte(0x8000) rejects",
+              st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
+              st.ok() ? "" : errToStr(st.code));
+  st = device.writeByte(0x8000, 0x00);
+  reportCheck("writeByte(0x8000) rejects",
+              st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
+              st.ok() ? "" : errToStr(st.code));
+  st = device.fill(0x8000, 0x00, 1);
+  reportCheck("fill(0x8000, 1) rejects",
+              st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
+              st.ok() ? "" : errToStr(st.code));
 
   // Recover
   st = device.recover();
@@ -1079,7 +1144,7 @@ void runSelfTest() {
   Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
                 goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
                 goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
-                (result.skip > 0 ? LOG_COLOR_YELLOW : LOG_COLOR_RESET),
+                skipCountColor(result.skip),
                 static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
 }
 
