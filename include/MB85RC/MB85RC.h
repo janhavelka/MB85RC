@@ -81,6 +81,8 @@ public:
   Status probe();
   
   /// Attempt to recover from DEGRADED/OFFLINE state.
+  /// Uses a tracked Device ID read; transport failures and ID mismatches update
+  /// health counters while clearing current-address tracking.
   /// @return Status::Ok() if device now responsive, error otherwise
   Status recover();
   
@@ -275,6 +277,9 @@ private:
   /// Update health counters and state based on operation result.
   /// Called ONLY from tracked transport wrappers.
   Status _updateHealth(const Status& st);
+
+  /// Record a semantic recover failure after a successful tracked I2C transaction.
+  Status _recordFailure(const Status& st);
 
   /// Get current time using injected callback or millis() fallback
   uint32_t _nowMs() const;

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Documented validation behavior for null buffers, zero-length transfers, out-of-range addresses, and current-address tracking.
+
+### Fixed
+
+- Made `recover()` record Device ID mismatches in health tracking instead of returning a semantic error without updating driver state.
+- Guarded health updates against `IN_PROGRESS` statuses and added native coverage for Device ID mismatch and validation no-bus-touch paths.
+
 ## [1.0.0] - 2026-04-07
 
 ### Added

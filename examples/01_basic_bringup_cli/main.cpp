@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "examples/common/CliStyle.h"
 #include "examples/common/Log.h"
 #include "examples/common/BoardConfig.h"
 #include "examples/common/BusDiag.h"
@@ -1464,48 +1465,41 @@ void runTypedDemo() {
 }
 
 void printHelp() {
-  auto helpSection = [](const char* title) {
-    Serial.printf("\n%s[%s]%s\n", LOG_COLOR_GREEN, title, LOG_COLOR_RESET);
-  };
-  auto helpItem = [](const char* cmd, const char* desc) {
-    Serial.printf("  %s%-32s%s - %s\n", LOG_COLOR_CYAN, cmd, LOG_COLOR_RESET, desc);
-  };
-
   Serial.println();
-  Serial.printf("%s=== MB85RC FRAM CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
-  helpSection("Common");
-  helpItem("help / ?", "Show this help");
-  helpItem("version / ver", "Print firmware and library version info");
-  helpItem("scan", "Scan I2C bus");
-  helpItem("cfg / settings", "Show active configuration snapshot");
+  cli::printHelpHeader("MB85RC FRAM CLI Help");
+  cli::printHelpSection("Common");
+  cli::printHelpItem("help / ?", "Show this help");
+  cli::printHelpItem("version / ver", "Print firmware and library version info");
+  cli::printHelpItem("scan", "Scan I2C bus");
+  cli::printHelpItem("cfg / settings", "Show active configuration snapshot");
 
-  helpSection("Memory Operations");
-  helpItem("read / dump / hexdump <addr> [len]", "Hex+ASCII dump with rollover (default len=1)");
-  helpItem("text <addr> [len]", "Escaped ASCII-focused view (default len=64)");
-  helpItem("strings [addr len [minLen]]", "Scan printable ASCII strings (default whole chip, min=4)");
-  helpItem("crc <addr> <len>", "Compute CRC32 over a memory region");
-  helpItem("verify <addr> <byte> [byte...]", "Compare FRAM contents against expected bytes");
-  helpItem("write <addr> <byte> [byte...]", "Write byte(s) to address");
-  helpItem("fill <addr> <value> <len>", "Fill memory region with value");
-  helpItem("current / cur [len]", "Read byte(s) from current internal address");
+  cli::printHelpSection("Memory Operations");
+  cli::printHelpItem("read / dump / hexdump <addr> [len]", "Hex+ASCII dump with rollover (default len=1)");
+  cli::printHelpItem("text <addr> [len]", "Escaped ASCII-focused view (default len=64)");
+  cli::printHelpItem("strings [addr len [minLen]]", "Scan printable ASCII strings (default whole chip, min=4)");
+  cli::printHelpItem("crc <addr> <len>", "Compute CRC32 over a memory region");
+  cli::printHelpItem("verify <addr> <byte> [byte...]", "Compare FRAM contents against expected bytes");
+  cli::printHelpItem("write <addr> <byte> [byte...]", "Write byte(s) to address");
+  cli::printHelpItem("fill <addr> <value> <len>", "Fill memory region with value");
+  cli::printHelpItem("current / cur [len]", "Read byte(s) from current internal address");
 
-  helpSection("Device Info");
-  helpItem("id", "Read device ID (manufacturer, product, density)");
-  helpItem("idraw", "Read raw 3-byte Device ID payload");
-  helpItem("size", "Print memory size");
+  cli::printHelpSection("Device Info");
+  cli::printHelpItem("id", "Read device ID (manufacturer, product, density)");
+  cli::printHelpItem("idraw", "Read raw 3-byte Device ID payload");
+  cli::printHelpItem("size", "Print memory size");
 
-  helpSection("Diagnostics");
-  helpItem("drv", "Show driver state and health");
-  helpItem("iface_reset", "Send 9 SCL pulses + STOP bus recovery sequence");
-  helpItem("probe", "Probe device (no health tracking)");
-  helpItem("recover", "Manual recovery attempt");
-  helpItem("verbose [0|1]", "Enable/disable verbose output");
-  helpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
-  helpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
-  helpItem("selftest", "Run safe self-test report");
-  helpItem("rw_suite", "Run a safe read/write/fill/verify suite and restore data");
-  helpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
-  helpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
+  cli::printHelpSection("Diagnostics");
+  cli::printHelpItem("drv", "Show driver state and health");
+  cli::printHelpItem("iface_reset", "Send 9 SCL pulses + STOP bus recovery sequence");
+  cli::printHelpItem("probe", "Probe device (no health tracking)");
+  cli::printHelpItem("recover", "Manual recovery attempt");
+  cli::printHelpItem("verbose [0|1]", "Enable/disable verbose output");
+  cli::printHelpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
+  cli::printHelpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
+  cli::printHelpItem("selftest", "Run safe self-test report");
+  cli::printHelpItem("rw_suite", "Run a safe read/write/fill/verify suite and restore data");
+  cli::printHelpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
+  cli::printHelpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
 }
 
 void printVersionInfo() {
@@ -2054,7 +2048,7 @@ void setup() {
   LOGI("Device initialized successfully");
   printDriverHealth();
   printHelp();
-  Serial.print("> ");
+  cli::printPrompt();
 }
 
 void loop() {
@@ -2067,7 +2061,7 @@ void loop() {
       if (inputBuffer.length() > 0) {
         processCommand(inputBuffer);
         inputBuffer = "";
-        Serial.print("> ");
+        cli::printPrompt();
       }
     } else {
       inputBuffer += c;

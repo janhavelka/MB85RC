@@ -14,6 +14,7 @@ Stable release: `v1.0.0`
 - Device ID verification on `begin()` (`Manufacturer ID = 0x00A`, `Product ID = 0x510`)
 - Raw Device ID access and verify/compare helpers for diagnostics
 - Runtime settings snapshot API for examples and diagnostics
+- Manual recovery that records transport failures and Device ID mismatches in health tracking
 
 ## Installation
 
@@ -136,6 +137,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `read()`, `write()`, and `fill()` intentionally preserve the documented rollover from `0x7FFF` to `0x0000`.
 - `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
 - The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior.
+- Argument validation errors reject null buffers, zero lengths, and out-of-range start addresses before touching the bus or health counters.
+- `recover()` invalidates current-address tracking and records both I2C failures and Device ID mismatches in driver health.
 - `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
 - The `WP` pin is hardware-only and non-permanent. High disables writes to the entire array, low or open enables writes, and reads still work.
 - There is no software block-protect register, OTP lock region, or permanent write lock in this device family.

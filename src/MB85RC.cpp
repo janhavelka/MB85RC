@@ -142,8 +142,9 @@ Status MB85RC::recover() {
   if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
     _currentAddressKnown = false;
     _currentAddress = 0;
-    return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
-                         static_cast<int32_t>((id.manufacturerId << 12) | id.productId));
+    return _recordFailure(Status::Error(
+        Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
+        static_cast<int32_t>((id.manufacturerId << 12) | id.productId)));
   }
 
   _currentAddressKnown = false;
@@ -566,6 +567,9 @@ Status MB85RC::_updateHealth(const Status& st) {
   if (!_initialized) {
     return st;
   }
+  if (st.inProgress()) {
+    return st;
+  }
 
   const uint32_t now = _nowMs();
   const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
@@ -580,6 +584,33 @@ Status MB85RC::_updateHealth(const Status& st) {
     _driverState = DriverState::READY;
     return st;
   }
+
+  _lastError = st;
+  _lastErrorMs = now;
+  if (_totalFailures < maxU32) {
+    _totalFailures++;
+  }
+  if (_consecutiveFailures < maxU8) {
+    _consecutiveFailures++;
+  }
+
+  if (_consecutiveFailures >= _config.offlineThreshold) {
+    _driverState = DriverState::OFFLINE;
+  } else {
+    _driverState = DriverState::DEGRADED;
+  }
+
+  return st;
+}
+
+Status MB85RC::_recordFailure(const Status& st) {
+  if (!_initialized || st.ok() || st.inProgress()) {
+    return st;
+  }
+
+  const uint32_t now = _nowMs();
+  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
+  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
 
   _lastError = st;
   _lastErrorMs = now;
