@@ -23,6 +23,33 @@ void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
 
 }  // namespace
 
+class MB85RC::ScopedOfflineI2cAllowance {
+public:
+  explicit ScopedOfflineI2cAllowance(MB85RC& driver)
+    : _driver(driver),
+      _previousAllow(driver._allowOfflineI2c),
+      _startedOffline(driver._initialized &&
+                      driver._driverState == DriverState::OFFLINE) {
+    _driver._allowOfflineI2c = true;
+  }
+
+  ~ScopedOfflineI2cAllowance() {
+    _driver._allowOfflineI2c = _previousAllow;
+  }
+
+  Status finishRecovery(const Status& st) {
+    if (!st.ok() && !st.inProgress() && _startedOffline) {
+      _driver._reassertOfflineLatch();
+    }
+    return st;
+  }
+
+private:
+  MB85RC& _driver;
+  bool _previousAllow;
+  bool _startedOffline;
+};
+
 // ===========================================================================
 // Lifecycle
 // ===========================================================================
@@ -131,25 +158,28 @@ Status MB85RC::recover() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
+  ScopedOfflineI2cAllowance allowOfflineI2c(*this);
+
   // Use tracked path so failures update health counters
   DeviceId id;
   Status st = _readDeviceIdTracked(id);
   if (!st.ok()) {
     _currentAddressKnown = false;
     _currentAddress = 0;
-    return st;
+    return allowOfflineI2c.finishRecovery(st);
   }
   if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
     _currentAddressKnown = false;
     _currentAddress = 0;
-    return _recordFailure(Status::Error(
+    st = _recordFailure(Status::Error(
         Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
         static_cast<int32_t>((id.manufacturerId << 12) | id.productId)));
+    return allowOfflineI2c.finishRecovery(st);
   }
 
   _currentAddressKnown = false;
   _currentAddress = 0;
-  return Status::Ok();
+  return allowOfflineI2c.finishRecovery(Status::Ok());
 }
 
 // ===========================================================================
@@ -413,6 +443,10 @@ Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
 
 Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                         uint8_t* rxBuf, size_t rxLen) {
+  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
+    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
+
   if ((txLen > 0 && txBuf == nullptr) || (rxLen > 0 && rxBuf == nullptr) ||
       (txLen == 0 && rxLen == 0)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
@@ -426,6 +460,10 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
 }
 
 Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
+  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
+    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
+
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
@@ -628,6 +666,14 @@ Status MB85RC::_recordFailure(const Status& st) {
   }
 
   return st;
+}
+
+void MB85RC::_reassertOfflineLatch() {
+  _driverState = DriverState::OFFLINE;
+  const uint8_t threshold = _config.offlineThreshold == 0 ? 1 : _config.offlineThreshold;
+  if (_consecutiveFailures < threshold) {
+    _consecutiveFailures = threshold;
+  }
 }
 
 uint32_t MB85RC::_nowMs() const {

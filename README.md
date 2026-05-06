@@ -200,6 +200,7 @@ typed_demo                # Demonstrate explicit typed value storage
 3. Resource ownership: bus, pins, and timeout policy remain application-owned via `Config`.
 4. Memory behavior: no heap allocation in steady-state library operation.
 5. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
+6. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
 
 ## Validation
 

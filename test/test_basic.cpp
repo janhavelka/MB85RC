@@ -520,6 +520,73 @@ void test_recover_reaches_offline_when_threshold_is_one() {
                           static_cast<uint8_t>(dev.state()));
 }
 
+void test_offline_latches_normal_write_without_i2c_until_recover() {
+  FakeBus bus;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 1;
+
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::TIMEOUT, "forced timeout", -11);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT),
+                          static_cast<uint8_t>(dev.recover().code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t writesBefore = bus.writeCalls;
+  Status st = dev.writeByte(0x0000, 0xA5);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_STRING("Driver is offline; call recover()", st.msg);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.recover().ok());
+  TEST_ASSERT_GREATER_THAN_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_failed_recover_from_offline_preserves_latch_after_partial_success() {
+  FakeBus bus;
+  Config cfg = makeConfig(bus);
+  cfg.offlineThreshold = 3;
+
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  bus.readErrorRemaining = 3;
+  bus.readError = Status::Error(Err::TIMEOUT, "forced timeout", -12);
+  uint8_t value = 0;
+  for (uint8_t i = 0; i < 3; ++i) {
+    Status st = dev.readByte(0x0000, value);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT),
+                            static_cast<uint8_t>(st.code));
+  }
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT8(3u, dev.consecutiveFailures());
+
+  bus.badDeviceId = true;
+  Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_ID_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_TRUE(dev.consecutiveFailures() >= 3u);
+
+  bus.badDeviceId = false;
+  const uint32_t writesBefore = bus.writeCalls;
+  st = dev.writeByte(0x0000, 0xA5);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_STRING("Driver is offline; call recover()", st.msg);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+}
+
 void test_recover_preserves_transport_error_code() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -1142,6 +1209,8 @@ int main() {
   RUN_TEST(test_recover_device_id_mismatch_updates_health_once);
   RUN_TEST(test_recover_success_returns_ready);
   RUN_TEST(test_recover_reaches_offline_when_threshold_is_one);
+  RUN_TEST(test_offline_latches_normal_write_without_i2c_until_recover);
+  RUN_TEST(test_failed_recover_from_offline_preserves_latch_after_partial_success);
   RUN_TEST(test_recover_preserves_transport_error_code);
 
   // Memory write/read

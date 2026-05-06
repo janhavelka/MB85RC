@@ -217,6 +217,8 @@ public:
   static constexpr uint16_t memorySize() { return cmd::MEMORY_SIZE; }
 
 private:
+  class ScopedOfflineI2cAllowance;
+
   // =========================================================================
   // Transport Wrappers
   // =========================================================================
@@ -280,6 +282,7 @@ private:
 
   /// Record a semantic recover failure after a successful tracked I2C transaction.
   Status _recordFailure(const Status& st);
+  void _reassertOfflineLatch();
 
   /// Get current time using injected callback or millis() fallback
   uint32_t _nowMs() const;
@@ -291,6 +294,7 @@ private:
   Config _config;
   bool _initialized = false;
   DriverState _driverState = DriverState::UNINIT;
+  bool _allowOfflineI2c = false;
   
   // Health counters
   uint32_t _lastOkMs = 0;
