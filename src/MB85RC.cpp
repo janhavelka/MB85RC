@@ -21,34 +21,25 @@ void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
 }
 
-}  // namespace
-
-class MB85RC::ScopedOfflineI2cAllowance {
+class ScopedOfflineI2cAllowance {
 public:
-  explicit ScopedOfflineI2cAllowance(MB85RC& driver)
-    : _driver(driver),
-      _previousAllow(driver._allowOfflineI2c),
-      _startedOffline(driver._initialized &&
-                      driver._driverState == DriverState::OFFLINE) {
-    _driver._allowOfflineI2c = true;
+  explicit ScopedOfflineI2cAllowance(bool& flag, bool allow) : _flag(flag), _old(flag) {
+    _flag = allow;
   }
 
   ~ScopedOfflineI2cAllowance() {
-    _driver._allowOfflineI2c = _previousAllow;
+    _flag = _old;
   }
 
-  Status finishRecovery(const Status& st) {
-    if (!st.ok() && !st.inProgress() && _startedOffline) {
-      _driver._reassertOfflineLatch();
-    }
-    return st;
-  }
+  ScopedOfflineI2cAllowance(const ScopedOfflineI2cAllowance&) = delete;
+  ScopedOfflineI2cAllowance& operator=(const ScopedOfflineI2cAllowance&) = delete;
 
 private:
-  MB85RC& _driver;
-  bool _previousAllow;
-  bool _startedOffline;
+  bool& _flag;
+  bool _old;
 };
+
+}  // namespace
 
 // ===========================================================================
 // Lifecycle
@@ -158,28 +149,33 @@ Status MB85RC::recover() {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
 
-  ScopedOfflineI2cAllowance allowOfflineI2c(*this);
+  const bool startedOffline = (_driverState == DriverState::OFFLINE);
+  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
+  Status result = [&]() -> Status {
+    // Use tracked path so failures update health counters.
+    DeviceId id;
+    Status st = _readDeviceIdTracked(id);
+    if (!st.ok()) {
+      _currentAddressKnown = false;
+      _currentAddress = 0;
+      return st;
+    }
+    if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
+      _currentAddressKnown = false;
+      _currentAddress = 0;
+      return _recordFailure(Status::Error(
+          Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
+          static_cast<int32_t>((id.manufacturerId << 12) | id.productId)));
+    }
 
-  // Use tracked path so failures update health counters
-  DeviceId id;
-  Status st = _readDeviceIdTracked(id);
-  if (!st.ok()) {
     _currentAddressKnown = false;
     _currentAddress = 0;
-    return allowOfflineI2c.finishRecovery(st);
+    return Status::Ok();
+  }();
+  if (startedOffline && !result.ok() && !result.inProgress()) {
+    _reassertOfflineLatch();
   }
-  if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
-    _currentAddressKnown = false;
-    _currentAddress = 0;
-    st = _recordFailure(Status::Error(
-        Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
-        static_cast<int32_t>((id.manufacturerId << 12) | id.productId)));
-    return allowOfflineI2c.finishRecovery(st);
-  }
-
-  _currentAddressKnown = false;
-  _currentAddress = 0;
-  return allowOfflineI2c.finishRecovery(Status::Ok());
+  return result;
 }
 
 // ===========================================================================

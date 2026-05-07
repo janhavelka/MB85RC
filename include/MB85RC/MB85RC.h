@@ -217,8 +217,6 @@ public:
   static constexpr uint16_t memorySize() { return cmd::MEMORY_SIZE; }
 
 private:
-  class ScopedOfflineI2cAllowance;
-
   // =========================================================================
   // Transport Wrappers
   // =========================================================================
