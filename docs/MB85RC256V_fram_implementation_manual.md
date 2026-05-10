@@ -6,8 +6,8 @@
 
 | # | Filename | Description | Pages / lines |
 |---|----------|-------------|---------------|
-| 1 | `datasheet_MB85RC256V.pdf` | Fujitsu Semiconductor fact sheet (summary), document NP501-00019-2v0-E, dated 2013.5 | 2 |
-| 2 | `datasheet_MB85RC256V_v2.pdf` | Full datasheet by RAMXEED (formerly Fujitsu Semiconductor Memory Solutions), document DS501-00017-11v2-E | 39 |
+| 1 | `MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` | Fujitsu Semiconductor fact sheet (summary), document NP501-00019-2v0-E, dated 2013.5 | 2 |
+| 2 | `MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` | Full datasheet by RAMXEED (formerly Fujitsu Semiconductor Memory Solutions), document DS501-00017-11v2-E | 39 |
 | 3 | `MB85_FRAM.h` | Arduino library header for the MB85 family, with supported-part list, API declarations, inline template implementations, constants, license, and changelog | 241 lines |
 | 4 | `MB85_FRAM.cpp` | Arduino library implementation for probing devices, computing capacity, and issuing I2C requests | 169 lines |
 | 5 | `MB85RC512T-DS6v1-E.pdf` | Official RAMXEED datasheet for MB85RC512T, used to compare 64KB-family protocol, Device ID, High Speed mode, and Sleep mode | 33 |
@@ -18,16 +18,16 @@
 | 10 | `ramxeed_i1_wide_voltage_i2c_family.html` | Official RAMXEED family page for MB85RC1MT / MB85RC512T / MB85RC64TA | web |
 | 11 | `ramxeed_i3_i2c_family.html` | Official RAMXEED family page for MB85RC256V / MB85RC256VN / MB85RC128A / MB85RC64A / MB85RC64V / MB85RC16 / MB85RC16V / MB85RC04 / MB85RC04V | web |
 
-Note: RAMXEED Limited (formerly Fujitsu Semiconductor Memory Solutions Limited) continues to offer and support existing products with Fujitsu part numbers unchanged. [datasheet_MB85RC256V_v2.pdf, p1]
+Note: RAMXEED Limited (formerly Fujitsu Semiconductor Memory Solutions Limited) continues to offer and support existing products with Fujitsu part numbers unchanged. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
 
 ---
 
 ## 2. Device identity and variants
 
-- **Part number**: MB85RC256V [datasheet_MB85RC256V_v2.pdf, p1]
-- **Manufacturer**: RAMXEED Limited (formerly Fujitsu Semiconductor Memory Solutions Limited) [datasheet_MB85RC256V_v2.pdf, p1]
-- **Technology**: FeRAM (Ferroelectric Random Access Memory) — ferroelectric process + silicon gate CMOS [datasheet_MB85RC256V_v2.pdf, p1]
-- **Configuration**: 32,768 words × 8 bits = 256 Kbit (32 KB) [datasheet_MB85RC256V_v2.pdf, p1]
+- **Part number**: MB85RC256V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Manufacturer**: RAMXEED Limited (formerly Fujitsu Semiconductor Memory Solutions Limited) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Technology**: FeRAM (Ferroelectric Random Access Memory) — ferroelectric process + silicon gate CMOS [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Configuration**: 32,768 words × 8 bits = 256 Kbit (32 KB) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
 
 ### Ordering variants
 
@@ -40,7 +40,7 @@ Note: RAMXEED Limited (formerly Fujitsu Semiconductor Memory Solutions Limited) 
 | MB85RC256VPF-G-BCE1 | 8-pin SOP 208mil (FPT-8P-M08), 5.30mm × 5.65mm, 1.27mm pitch | Tube |
 | MB85RC256VPF-G-BCERE1 | 8-pin SOP 208mil | Embossed Carrier tape (500 pcs/reel) |
 
-[datasheet_MB85RC256V_v2.pdf, p16]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p16]
 
 ### Addendum: Fact sheet ordering variants (older suffixes)
 
@@ -51,7 +51,7 @@ The original fact sheet (2013) lists different part numbers for the 208 mil pack
 | MB85RC256VPF-G-JNE2 | 8-pin SOP 208mil (FPT-8P-M08), 5.30mm × 5.24mm, 1.27mm pitch | Tube |
 | MB85RC256VPF-G-JNERE2 | 8-pin SOP 208mil | Embossed Carrier tape |
 
-Note: The fact sheet lists 208 mil package length as 5.24mm, while the v2 datasheet specifies 5.65mm. The v2 datasheet variants (BCE1/BCERE1) supersede the fact sheet variants (JNE2/JNERE2). [datasheet_MB85RC256V.pdf, p1]
+Note: The fact sheet lists 208 mil package length as 5.24mm, while the v2 datasheet specifies 5.65mm. The v2 datasheet variants (BCE1/BCERE1) supersede the fact sheet variants (JNE2/JNERE2). [MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf, p1]
 
 ### Device ID (readable via I2C)
 
@@ -61,31 +61,31 @@ Note: The fact sheet lists 208 mil package length as 5.24mm, while the v2 datash
 | Product ID | 0x510 | 12 bits |
 | Density code | 0x5 | 4 bits (within Product ID) |
 
-Device ID is 3 bytes total, read-only, composed of Manufacturer ID and Product ID. [datasheet_MB85RC256V_v2.pdf, p9]
+Device ID is 3 bytes total, read-only, composed of Manufacturer ID and Product ID. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ---
 
 ## 3. High-level functional summary
 
-The MB85RC256V is a 256-Kbit ferroelectric RAM (FRAM/FeRAM) with an I2C serial interface. It stores data nonvolatilely using ferroelectric memory cells — unlike SRAM, it retains data without a battery. [datasheet_MB85RC256V_v2.pdf, p1]
+The MB85RC256V is a 256-Kbit ferroelectric RAM (FRAM/FeRAM) with an I2C serial interface. It stores data nonvolatilely using ferroelectric memory cells — unlike SRAM, it retains data without a battery. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
 
 **Key differentiators from EEPROM/Flash:**
-- **No write delay**: The device does NOT need a polling sequence after writing. Data is written immediately as each byte is clocked in. No programming wait time (tWC) is required after the Stop Condition. [datasheet_MB85RC256V_v2.pdf, p4, p6, p7]
-- **Endurance**: 10^12 read/write cycles per byte (vs ~10^5–10^6 for EEPROM). Total number of reading AND writing counts toward endurance because FeRAM uses destructive readout. [datasheet_MB85RC256V_v2.pdf, p14]
-- **Data retention**: 10 years at +85°C, 95 years at +55°C, >200 years at +35°C [datasheet_MB85RC256V_v2.pdf, p14]
+- **No write delay**: The device does NOT need a polling sequence after writing. Data is written immediately as each byte is clocked in. No programming wait time (tWC) is required after the Stop Condition. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4, p6, p7]
+- **Endurance**: 10^12 read/write cycles per byte (vs ~10^5–10^6 for EEPROM). Total number of reading AND writing counts toward endurance because FeRAM uses destructive readout. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
+- **Data retention**: 10 years at +85°C, 95 years at +55°C, >200 years at +35°C [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
-The device is suitable for log management, resume data storage, and high-frequency write applications. [datasheet_MB85RC256V.pdf, p1]
+The device is suitable for log management, resume data storage, and high-frequency write applications. [MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf, p1]
 
 ---
 
 ## 4. Interface summary
 
-- **Interface type**: I2C (two-wire serial: SCL + SDA) [datasheet_MB85RC256V_v2.pdf, p1]
-- **Role**: Slave device only [datasheet_MB85RC256V_v2.pdf, p3]
-- **Maximum clock frequency**: 1 MHz (Fast Mode Plus) [datasheet_MB85RC256V_v2.pdf, p1, p12]
-- **Supported I2C modes**: Standard Mode (100 kHz), Fast Mode (400 kHz), Fast Mode Plus (1 MHz) [datasheet_MB85RC256V_v2.pdf, p12]
-- **Max devices on bus**: 8 (using 3-bit address pins A0, A1, A2) [datasheet_MB85RC256V_v2.pdf, p2]
-- **SDA output type**: Open drain (requires external pull-up resistor) [datasheet_MB85RC256V_v2.pdf, p2]
+- **Interface type**: I2C (two-wire serial: SCL + SDA) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Role**: Slave device only [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p3]
+- **Maximum clock frequency**: 1 MHz (Fast Mode Plus) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1, p12]
+- **Supported I2C modes**: Standard Mode (100 kHz), Fast Mode (400 kHz), Fast Mode Plus (1 MHz) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
+- **Max devices on bus**: 8 (using 3-bit address pins A0, A1, A2) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2]
+- **SDA output type**: Open drain (requires external pull-up resistor) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2]
 
 ### I2C Slave Address (Device Address Word)
 
@@ -97,18 +97,18 @@ Bit:  7    6    5    4    3    2    1    0
       ├── Device Type ──┤├─ Addr Code ─┤
 ```
 
-- **Device type code** (upper 4 bits): Fixed `1010` (0xA) [datasheet_MB85RC256V_v2.pdf, p5]
-- **Device address code** (3 bits): Determined by hardware pins A2, A1, A0 [datasheet_MB85RC256V_v2.pdf, p5]
-- **R/W bit**: 0 = write, 1 = read [datasheet_MB85RC256V_v2.pdf, p5]
+- **Device type code** (upper 4 bits): Fixed `1010` (0xA) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
+- **Device address code** (3 bits): Determined by hardware pins A2, A1, A0 [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
+- **R/W bit**: 0 = write, 1 = read [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
 - **7-bit I2C address range**: 0x50–0x57 (depending on A2:A0 pin configuration)
 
-If the device code is not `1010` or the address code does not match pins A2/A1/A0, the device enters standby. [datasheet_MB85RC256V_v2.pdf, p5]
+If the device code is not `1010` or the address code does not match pins A2/A1/A0, the device enters standby. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
 
 ### Memory Addressing
 
-- **Memory address size**: 15 bits (sent as 2 bytes) [datasheet_MB85RC256V_v2.pdf, p7]
+- **Memory address size**: 15 bits (sent as 2 bytes) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 - **Address range**: 0x0000 to 0x7FFF (32,768 bytes)
-- **MSB of high address byte**: Must be set to `0` (address is only 15 bits) [datasheet_MB85RC256V_v2.pdf, p7]
+- **MSB of high address byte**: Must be set to `0` (address is only 15 bits) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 - **Address format**: `[0][A14:A8]` `[A7:A0]` (high byte then low byte)
 
 ---
@@ -132,7 +132,7 @@ If the device code is not `1010` or the address code does not match pins A2/A1/A
 | WP/A0-A2 pull-down resistance | RIN | VIN ≤ VIL(max) | 50 | — | — | kΩ |
 | WP/A0-A2 pull-up resistance | RIN | VIN ≥ VIH(min) | 1 | — | — | MΩ |
 
-[datasheet_MB85RC256V_v2.pdf, p12]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ### AC Timing Characteristics
 
@@ -153,7 +153,7 @@ If the device code is not `1010` or the address code does not match pins A2/A1/A
 | Bus free time (between Stop and Start) | TBUF | min 4700 | min 1300 | min 500 | ns |
 | Noise suppression time (SCL, SDA) | TSP | max 50 | max 50 | max 50 | ns |
 
-[datasheet_MB85RC256V_v2.pdf, p12]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ### Pin Capacitance
 
@@ -162,7 +162,7 @@ If the device code is not `1010` or the address code does not match pins A2/A1/A
 | I/O capacitance (SDA) | CI/O | 15 | pF |
 | Input capacitance (SCL) | CIN | 15 | pF |
 
-Measured at VDD = 5.0V, f = 1 MHz, TA = +25°C. [datasheet_MB85RC256V_v2.pdf, p13]
+Measured at VDD = 5.0V, f = 1 MHz, TA = +25°C. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p13]
 
 ### Gap Fill: Absolute Maximum Ratings
 
@@ -174,7 +174,7 @@ Measured at VDD = 5.0V, f = 1 MHz, TA = +25°C. [datasheet_MB85RC256V_v2.pdf, p1
 | Operation ambient temperature | TA | −40 | +85 | °C |
 | Storage temperature | Tstg | −55 | +125 | °C |
 
-All parameters based on VSS = 0 V. Semiconductor devices can be permanently damaged by application of stress in excess of absolute maximum ratings. [datasheet_MB85RC256V_v2.pdf, p11]
+All parameters based on VSS = 0 V. Semiconductor devices can be permanently damaged by application of stress in excess of absolute maximum ratings. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p11]
 
 ### Gap Fill: Recommended Operating Conditions (formal)
 
@@ -183,15 +183,15 @@ All parameters based on VSS = 0 V. Semiconductor devices can be permanently dama
 | Power supply voltage | VDD | 2.7 | — | 5.5 | V |
 | Operation ambient temperature | TA | −40 | — | +85 | °C |
 
-Based on VSS = 0 V. TA is ambient temperature when only this device is working (approximately equal to package surface temperature). Operation outside recommended ranges may adversely affect reliability and could result in device failure. [datasheet_MB85RC256V_v2.pdf, p11]
+Based on VSS = 0 V. TA is ambient temperature when only this device is working (approximately equal to package surface temperature). Operation outside recommended ranges may adversely affect reliability and could result in device failure. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p11]
 
 ### Gap Fill: Standby current measurement conditions detail
 
-The ISB (standby current) values in the DC table above are measured with: SCL and SDA = VDD, A0/A1/A2/WP = 0 V or VDD or Open, under Stop Condition. [datasheet_MB85RC256V_v2.pdf, p12]
+The ISB (standby current) values in the DC table above are measured with: SCL and SDA = VDD, A0/A1/A2/WP = 0 V or VDD or Open, under Stop Condition. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ### Gap Fill: AC measurement conditions
 
-AC characteristics were measured under the following conditions: [datasheet_MB85RC256V_v2.pdf, p12]
+AC characteristics were measured under the following conditions: [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 | Parameter | Value |
 |-----------|-------|
@@ -205,15 +205,15 @@ AC characteristics were measured under the following conditions: [datasheet_MB85
 
 ### Gap Fill: AC test load circuit
 
-The AC timing output specs (particularly TAA — SDA output access time after SCL falling) are measured with a test load of **100 pF** capacitance and **1.8 kΩ** pull-up resistance to VDD. [datasheet_MB85RC256V_v2.pdf, p13]
+The AC timing output specs (particularly TAA — SDA output access time after SCL falling) are measured with a test load of **100 pF** capacitance and **1.8 kΩ** pull-up resistance to VDD. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p13]
 
 ### Gap Fill: TBUF naming note
 
-The TBUF parameter is labeled "Pre-charge time" in the datasheet (not "Bus free time" as in the I2C specification). It represents the minimum time between a Stop condition and the next Start condition. [datasheet_MB85RC256V_v2.pdf, p12]
+The TBUF parameter is labeled "Pre-charge time" in the datasheet (not "Bus free time" as in the I2C specification). It represents the minimum time between a Stop condition and the next Start condition. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ### Critical software-relevant note
 
-**No write cycle time (tWC)**: Unlike EEPROM, FRAM writes are completed in real-time as each byte is clocked in. No polling or wait time is needed after a Stop Condition. [datasheet_MB85RC256V_v2.pdf, p4, p6, p7]
+**No write cycle time (tWC)**: Unlike EEPROM, FRAM writes are completed in real-time as each byte is clocked in. No polling or wait time is needed after a Stop Condition. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4, p6, p7]
 
 ---
 
@@ -230,22 +230,22 @@ The TBUF parameter is labeled "Pre-charge time" in the datasheet (not "Bus free 
 | Power supply rise time (3.3V) | tr | 0.005 | 50 | ms | VDD = 3.3V ± 0.3V |
 | Power supply fall time | tf | 0.5 | 50 | ms | — |
 
-[datasheet_MB85RC256V_v2.pdf, p14]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
 **Power-up signal requirements:**
-- During power-up, SDA and SCL must be held above VDD × 0.8 until VDD reaches VIH(min) = 2.7V [datasheet_MB85RC256V_v2.pdf, p14]
-- SDA and SCL max must remain below VDD + 0.5V during power-up [datasheet_MB85RC256V_v2.pdf, p14]
-- During power-down, SDA and SCL must be held above VDD × 0.8 before VDD falls below VIH(min) [datasheet_MB85RC256V_v2.pdf, p14]
+- During power-up, SDA and SCL must be held above VDD × 0.8 until VDD reaches VIH(min) = 2.7V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
+- SDA and SCL max must remain below VDD + 0.5V during power-up [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
+- During power-down, SDA and SCL must be held above VDD × 0.8 before VDD falls below VIH(min) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
-**WARNING**: If the device does not operate within the specified conditions of read cycle, write cycle, or power on/off sequence, memory data cannot be guaranteed. [datasheet_MB85RC256V_v2.pdf, p14]
+**WARNING**: If the device does not operate within the specified conditions of read cycle, write cycle, or power on/off sequence, memory data cannot be guaranteed. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
 ### Current Address After Power-On
 
-The current address in the memory address buffer is **undefined** immediately after the power is turned on. A Random Read (which sets the address explicitly) or Write operation should be performed before using Current Address Read. [datasheet_MB85RC256V_v2.pdf, p8]
+The current address in the memory address buffer is **undefined** immediately after the power is turned on. A Random Read (which sets the address explicitly) or Write operation should be performed before using Current Address Read. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
 ### Software Reset Sequence
 
-If malfunction occurs after power-on, or communication is interrupted, use one of: [datasheet_MB85RC256V_v2.pdf, p10]
+If malfunction occurs after power-on, or communication is interrupted, use one of: [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
 
 **(1) Software Reset Sequence** (before each command):
 - Send 9 sets of "Start Condition + one '1' data bit" on the I2C bus
@@ -256,7 +256,7 @@ If malfunction occurs after power-on, or communication is interrupted, use one o
 **(2) Command Retry** (after failure):
 - Simply retry the failed command after receiving a failure response
 
-[datasheet_MB85RC256V_v2.pdf, p10]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
 
 ---
 
@@ -273,21 +273,21 @@ If malfunction occurs after power-on, or communication is interrupted, use one o
 | 7 | WP | Input | Write Protect. H = write disabled (entire array). L = write enabled. Internally pulled-down (open = "L" = write enabled). |
 | 8 | VDD | Power | Supply voltage (2.7V to 5.5V) |
 
-[datasheet_MB85RC256V_v2.pdf, p2; datasheet_MB85RC256V.pdf, p2]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2; MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf, p2]
 
 ### Address Pin Behavior
 
-- A0, A1, A2 internally pulled-down — if left open, recognized as "L" (0) [datasheet_MB85RC256V_v2.pdf, p2]
+- A0, A1, A2 internally pulled-down — if left open, recognized as "L" (0) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2]
 - Default I2C address with all pins open: 0x50 (7-bit)
-- Pull-down resistance: min 50 kΩ (at VIL). Pull-up resistance: min 1 MΩ (at VIH). [datasheet_MB85RC256V_v2.pdf, p12]
+- Pull-down resistance: min 50 kΩ (at VIL). Pull-up resistance: min 1 MΩ (at VIH). [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ### Write Protect Pin Behavior
 
-- Internally pulled-down to VSS — open pin defaults to "L" (write enabled) [datasheet_MB85RC256V_v2.pdf, p2, p6]
-- WP = "H": **entire** memory array is write-protected. Write operations are disabled. [datasheet_MB85RC256V_v2.pdf, p6]
-- WP = "L": Entire memory array is writable [datasheet_MB85RC256V_v2.pdf, p6]
-- Read operations always succeed regardless of WP state [datasheet_MB85RC256V_v2.pdf, p6]
-- **IMPORTANT**: During the access period from Start to Stop condition, WP, A0, A1, and A2 pin levels must remain stable at "H" or "L". Do not change them mid-transaction. [datasheet_MB85RC256V_v2.pdf, p15]
+- Internally pulled-down to VSS — open pin defaults to "L" (write enabled) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2, p6]
+- WP = "H": **entire** memory array is write-protected. Write operations are disabled. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
+- WP = "L": Entire memory array is writable [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
+- Read operations always succeed regardless of WP state [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
+- **IMPORTANT**: During the access period from Start to Stop condition, WP, A0, A1, and A2 pin levels must remain stable at "H" or "L". Do not change them mid-transaction. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
 ---
 
@@ -307,7 +307,7 @@ Not applicable to this device. The MB85RC256V has no registers — only a 32,768
 
 ### Device ID Fields
 
-The 3-byte Device ID is encoded as follows: [datasheet_MB85RC256V_v2.pdf, p9]
+The 3-byte Device ID is encoded as follows: [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ```
 Data Byte 1st:  [11:8] of Manufacturer ID  = 0x0
@@ -324,7 +324,7 @@ Byte breakdown:
 | 2nd | Manufacturer ID [3:0] + Product ID [11:8] | 0xA5 |
 | 3rd | Product ID [7:0] | 0x10 |
 
-**Note**: The exact bit packing across the 3 bytes is shown in the datasheet diagram. Manufacturer ID = 0x00A (12 bits), Product ID = 0x510 (12 bits). Density = 0x5 (within Product ID upper nibble). [datasheet_MB85RC256V_v2.pdf, p9]
+**Note**: The exact bit packing across the 3 bytes is shown in the datasheet diagram. Manufacturer ID = 0x00A (12 bits), Product ID = 0x510 (12 bits). Density = 0x5 (within Product ID upper nibble). [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ---
 
@@ -332,7 +332,7 @@ Byte breakdown:
 
 ### Byte Write
 
-Writes a single byte to a specified address. [datasheet_MB85RC256V_v2.pdf, p7]
+Writes a single byte to a specified address. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
 ```
 [S] [1010 A2 A1 A0 0] [ACK] [Addr High: 0+7bits] [ACK] [Addr Low: 8bits] [ACK] [Data: 8bits] [ACK] [P]
@@ -349,11 +349,11 @@ Writes a single byte to a specified address. [datasheet_MB85RC256V_v2.pdf, p7]
 9. Slave ACKs
 10. Master sends Stop
 
-**No write cycle delay required after Stop.** [datasheet_MB85RC256V_v2.pdf, p7]
+**No write cycle delay required after Stop.** [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
 ### Page Write (Sequential Write)
 
-Writes multiple consecutive bytes starting from a specified address. [datasheet_MB85RC256V_v2.pdf, p7]
+Writes multiple consecutive bytes starting from a specified address. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
 ```
 [S] [1010 A2 A1 A0 0] [ACK] [Addr High] [ACK] [Addr Low] [ACK] [Data0] [ACK] [Data1] [ACK] ... [DataN] [ACK] [P]
@@ -361,28 +361,28 @@ Writes multiple consecutive bytes starting from a specified address. [datasheet_
 
 - After Byte Write setup, continue sending data bytes (each ACK'd by slave)
 - **Address auto-increments** after each byte
-- Address **rolls over** from 0x7FFF to 0x0000 at end of memory [datasheet_MB85RC256V_v2.pdf, p7]
+- Address **rolls over** from 0x7FFF to 0x0000 at end of memory [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 - If more than 32K bytes sent, earlier data is overwritten starting from the initial address
 - **No page boundary limitation** — unlike EEPROM, the address simply auto-increments through the entire 32KB array. There is no page buffer.
-- Data is written to FRAM immediately after each ACK response (not buffered and written on Stop). [datasheet_MB85RC256V_v2.pdf, p7]
-- **No write cycle time needed after Stop.** [datasheet_MB85RC256V_v2.pdf, p7]
+- Data is written to FRAM immediately after each ACK response (not buffered and written on Stop). [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
+- **No write cycle time needed after Stop.** [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
 ### Current Address Read
 
-Reads one byte from address N+1, where N was the last accessed address. [datasheet_MB85RC256V_v2.pdf, p8]
+Reads one byte from address N+1, where N was the last accessed address. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
 ```
 [S] [1010 A2 A1 A0 1] [ACK] [Data (N+1)] [NACK] [P]
 ```
 
 - After a previous successful read or write that ended with Stop, the internal address counter holds N+1
-- If last address was 0x7FFF, rolls over to 0x0000 [datasheet_MB85RC256V_v2.pdf, p8]
-- **Current address is UNDEFINED after power-on** — do not use Current Address Read as the first operation after power-on [datasheet_MB85RC256V_v2.pdf, p8]
-- The NACK is issued by the **master** (receiver) to signal end of read [datasheet_MB85RC256V_v2.pdf, p8]
+- If last address was 0x7FFF, rolls over to 0x0000 [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
+- **Current address is UNDEFINED after power-on** — do not use Current Address Read as the first operation after power-on [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
+- The NACK is issued by the **master** (receiver) to signal end of read [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
 ### Random Read
 
-Reads one byte from a specific address. [datasheet_MB85RC256V_v2.pdf, p8]
+Reads one byte from a specific address. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
 ```
 [S] [1010 A2 A1 A0 0] [ACK] [Addr High] [ACK] [Addr Low] [ACK]
@@ -397,7 +397,7 @@ Reads one byte from a specific address. [datasheet_MB85RC256V_v2.pdf, p8]
 
 ### Sequential Read
 
-Reads multiple consecutive bytes starting from a specified address. [datasheet_MB85RC256V_v2.pdf, p9]
+Reads multiple consecutive bytes starting from a specified address. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ```
 [S] [1010 A2 A1 A0 0] [ACK] [Addr High] [ACK] [Addr Low] [ACK]
@@ -406,12 +406,12 @@ Reads multiple consecutive bytes starting from a specified address. [datasheet_M
 
 - After Random Read setup, master ACKs each received byte to continue reading
 - Address auto-increments after each byte
-- Address rolls over from 0x7FFF to 0x0000 [datasheet_MB85RC256V_v2.pdf, p9]
+- Address rolls over from 0x7FFF to 0x0000 [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 - Master sends NACK on the last byte to terminate, then Stop
 
 ### Device ID Read
 
-Reads the 3-byte read-only Device ID. [datasheet_MB85RC256V_v2.pdf, p9]
+Reads the 3-byte read-only Device ID. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ```
 [S] [0xF8] [ACK] [1010 A2 A1 A0 R/W*] [ACK]
@@ -430,7 +430,7 @@ Sequence:
 9. Slave sends 3 bytes of Device ID (1st, 2nd, 3rd) — master ACKs first two
 10. Master sends NACK after 3rd byte, then Stop
 
-**Special behavior**: If master sends ACK (instead of NACK) after the 3rd byte, the device re-sends the Device ID from byte 1 again (looping). [datasheet_MB85RC256V_v2.pdf, p9]
+**Special behavior**: If master sends ACK (instead of NACK) after the 3rd byte, the device re-sends the Device ID from byte 1 again (looping). [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 ---
 
@@ -438,10 +438,10 @@ Sequence:
 
 ### Minimum initialization after power-on
 
-1. **Wait for power-up**: Ensure VDD is stable and SDA/SCL levels meet power-up requirements (SDA, SCL > VDD×0.8 during ramp) [datasheet_MB85RC256V_v2.pdf, p14]
-2. **Optional: Software Reset Sequence**: Send 9× (Start + one "1" bit) to clear any slave that is stuck holding SDA low [datasheet_MB85RC256V_v2.pdf, p10]
-3. **Optional: Read Device ID**: Verify device identity by reading the 3-byte Device ID [datasheet_MB85RC256V_v2.pdf, p9]
-4. **Set address pointer**: Perform a write or Random Read to establish the internal address counter (undefined after power-on) [datasheet_MB85RC256V_v2.pdf, p8]
+1. **Wait for power-up**: Ensure VDD is stable and SDA/SCL levels meet power-up requirements (SDA, SCL > VDD×0.8 during ramp) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
+2. **Optional: Software Reset Sequence**: Send 9× (Start + one "1" bit) to clear any slave that is stuck holding SDA low [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
+3. **Optional: Read Device ID**: Verify device identity by reading the 3-byte Device ID [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
+4. **Set address pointer**: Perform a write or Random Read to establish the internal address counter (undefined after power-on) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
 There is no register configuration required. The device is ready to read/write immediately after power-up stabilization.
 
@@ -454,19 +454,19 @@ The MB85RC256V has two externally meaningful states:
 1. **Active**: Processing an I2C transaction (between Start and Stop conditions)
 2. **Standby**: Idle, waiting for a Start condition (entered after Stop condition, or when addressed with non-matching device code)
 
-[datasheet_MB85RC256V_v2.pdf, p4, p5]
+[MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4, p5]
 
 ### Standby entry conditions:
-- After a Stop condition is received [datasheet_MB85RC256V_v2.pdf, p4]
-- If the received device type code is not `1010` [datasheet_MB85RC256V_v2.pdf, p5]
-- If the received device address code does not match hardware pins A2/A1/A0 [datasheet_MB85RC256V_v2.pdf, p5]
-- If Stop condition is received before ACK during a transaction [datasheet_MB85RC256V_v2.pdf, p4]
+- After a Stop condition is received [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
+- If the received device type code is not `1010` [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
+- If the received device address code does not match hardware pins A2/A1/A0 [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5]
+- If Stop condition is received before ACK during a transaction [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
 
 ### ACK/NACK behavior:
-- Slave sends ACK ("L" on SDA at 9th clock) after successfully receiving each 8-bit field [datasheet_MB85RC256V_v2.pdf, p4]
-- If slave receives Stop before sending/receiving ACK, slave stops operation and enters standby [datasheet_MB85RC256V_v2.pdf, p4]
-- After sending/receiving NACK ("H" on SDA at 9th clock), the slave releases the bus. Master must then generate Stop or Start. [datasheet_MB85RC256V_v2.pdf, p4]
-- During the 9th clock, the transmitter releases SDA to Hi-Z to allow the receiver to drive ACK/NACK [datasheet_MB85RC256V_v2.pdf, p4]
+- Slave sends ACK ("L" on SDA at 9th clock) after successfully receiving each 8-bit field [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
+- If slave receives Stop before sending/receiving ACK, slave stops operation and enters standby [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
+- After sending/receiving NACK ("H" on SDA at 9th clock), the slave releases the bus. Master must then generate Stop or Start. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
+- During the 9th clock, the transmitter releases SDA to Hi-Z to allow the receiver to drive ACK/NACK [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4]
 
 ---
 
@@ -490,23 +490,23 @@ The MB85RC256V has no interrupt output, alert pin, status register, or fault det
 
 ### Memory Organization
 
-- **Size**: 32,768 bytes (256 Kbit) [datasheet_MB85RC256V_v2.pdf, p1]
-- **Address space**: 0x0000 to 0x7FFF (15-bit addressing) [datasheet_MB85RC256V_v2.pdf, p7]
-- **Word size**: 8 bits [datasheet_MB85RC256V_v2.pdf, p1]
-- **Type**: FeRAM (Ferroelectric RAM) — nonvolatile [datasheet_MB85RC256V_v2.pdf, p1]
+- **Size**: 32,768 bytes (256 Kbit) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Address space**: 0x0000 to 0x7FFF (15-bit addressing) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
+- **Word size**: 8 bits [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
+- **Type**: FeRAM (Ferroelectric RAM) — nonvolatile [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p1]
 
 ### Write Behavior — CRITICAL DIFFERENCE FROM EEPROM
 
-- **No write delay**: Data is committed to nonvolatile memory immediately as each byte is clocked in and ACKed. There is NO internal write cycle, NO page buffer, and NO write completion polling needed. [datasheet_MB85RC256V_v2.pdf, p4, p6, p7]
-- **No page size limitation**: Sequential writes auto-increment through the entire 32KB address space without page boundaries. Address wraps from 0x7FFF to 0x0000. [datasheet_MB85RC256V_v2.pdf, p7]
-- **No ACK polling needed**: The "FeRAM ACKNOWLEDGE -- POLLING NOT REQUIRED" section explicitly states that no waiting time for ACK polling occurs, unlike E2PROM which requires Acknowledge Polling to check write completion. [datasheet_MB85RC256V_v2.pdf, p6]
-- **Immediate write**: "Because FeRAM performs the high-speed write operations, the data will be written to FeRAM right after the ACK response finished." [datasheet_MB85RC256V_v2.pdf, p7]
-- **No buffer flush on Stop**: "It is not necessary to take a period for internal write operation cycles from the buffer to the memory after the stop condition is generated." [datasheet_MB85RC256V_v2.pdf, p7]
+- **No write delay**: Data is committed to nonvolatile memory immediately as each byte is clocked in and ACKed. There is NO internal write cycle, NO page buffer, and NO write completion polling needed. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4, p6, p7]
+- **No page size limitation**: Sequential writes auto-increment through the entire 32KB address space without page boundaries. Address wraps from 0x7FFF to 0x0000. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
+- **No ACK polling needed**: The "FeRAM ACKNOWLEDGE -- POLLING NOT REQUIRED" section explicitly states that no waiting time for ACK polling occurs, unlike E2PROM which requires Acknowledge Polling to check write completion. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
+- **Immediate write**: "Because FeRAM performs the high-speed write operations, the data will be written to FeRAM right after the ACK response finished." [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
+- **No buffer flush on Stop**: "It is not necessary to take a period for internal write operation cycles from the buffer to the memory after the stop condition is generated." [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
 ### Endurance
 
-- **Read/write endurance**: Minimum 10^12 cycles per byte [datasheet_MB85RC256V_v2.pdf, p14]
-- **Destructive readout**: FeRAM reads are destructive — the data is restored automatically, but both reads and writes count toward the endurance limit. [datasheet_MB85RC256V_v2.pdf, p14]
+- **Read/write endurance**: Minimum 10^12 cycles per byte [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
+- **Destructive readout**: FeRAM reads are destructive — the data is restored automatically, but both reads and writes count toward the endurance limit. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
 ### Data Retention
 
@@ -516,66 +516,66 @@ The MB85RC256V has no interrupt output, alert pin, status register, or fault det
 | ≤ +55°C | ≥ 95 years |
 | ≤ +35°C | ≥ 200 years |
 
-Minimum values define retention time of data written right after shipment, calculated from qualification results. [datasheet_MB85RC256V_v2.pdf, p14]
+Minimum values define retention time of data written right after shipment, calculated from qualification results. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
 ### Write Protection
 
-- Hardware WP pin: "H" = entire array protected, "L" = entire array writable [datasheet_MB85RC256V_v2.pdf, p6]
+- Hardware WP pin: "H" = entire array protected, "L" = entire array writable [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
 - No software-controlled write protection or block protection
 - No permanent lock or OTP regions
-- WP pin open = write enabled (internal pull-down) [datasheet_MB85RC256V_v2.pdf, p6]
+- WP pin open = write enabled (internal pull-down) [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
 
 ### Reflow Note
 
-"We recommend programming of the device after reflow. Data written before reflow cannot be guaranteed." [datasheet_MB85RC256V_v2.pdf, p15]
+"We recommend programming of the device after reflow. Data written before reflow cannot be guaranteed." [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
 ---
 
 ## 16. Special behaviors, caveats, and footnotes
 
-1. **Address MSB must be 0**: The 15-bit address is sent as 2 bytes. The most significant bit of the high byte MUST be `0`. [datasheet_MB85RC256V_v2.pdf, p7]
+1. **Address MSB must be 0**: The 15-bit address is sent as 2 bytes. The most significant bit of the high byte MUST be `0`. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
-2. **Address rollover**: Address auto-increments and wraps from 0x7FFF to 0x0000 for both reads and writes. [datasheet_MB85RC256V_v2.pdf, p7, p8, p9]
+2. **Address rollover**: Address auto-increments and wraps from 0x7FFF to 0x0000 for both reads and writes. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7, p8, p9]
 
-3. **Undefined current address at power-on**: The internal address counter is undefined after power-on. Do not use Current Address Read as the first memory operation. [datasheet_MB85RC256V_v2.pdf, p8]
+3. **Undefined current address at power-on**: The internal address counter is undefined after power-on. Do not use Current Address Read as the first memory operation. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p8]
 
-4. **Destructive readout endurance**: Both reads and writes count toward the 10^12 endurance limit. This is an inherent property of FeRAM. [datasheet_MB85RC256V_v2.pdf, p14]
+4. **Destructive readout endurance**: Both reads and writes count toward the 10^12 endurance limit. This is an inherent property of FeRAM. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p14]
 
-5. **Pin stability during transactions**: WP, A0, A1, A2 pin levels must remain stable (H or L) for the entire access period from Start to Stop. Do not toggle them during a transaction. [datasheet_MB85RC256V_v2.pdf, p15]
+5. **Pin stability during transactions**: WP, A0, A1, A2 pin levels must remain stable (H or L) for the entire access period from Start to Stop. Do not toggle them during a transaction. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
-6. **Reflow damages pre-programmed data**: Data written before reflow soldering cannot be guaranteed. Program after reflow. [datasheet_MB85RC256V_v2.pdf, p15]
+6. **Reflow damages pre-programmed data**: Data written before reflow soldering cannot be guaranteed. Program after reflow. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
-7. **Device ID re-read behavior**: If master sends ACK after the 3rd Device ID byte (instead of NACK), the device loops back and re-sends the ID from byte 1. [datasheet_MB85RC256V_v2.pdf, p9]
+7. **Device ID re-read behavior**: If master sends ACK after the 3rd Device ID byte (instead of NACK), the device loops back and re-sends the ID from byte 1. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
-8. **Reserved Slave IDs for Device ID**: The Device ID read sequence uses I2C reserved addresses 0xF8 (write) and 0xF9 (read). These are standard I2C Device ID addresses. [datasheet_MB85RC256V_v2.pdf, p9]
+8. **Reserved Slave IDs for Device ID**: The Device ID read sequence uses I2C reserved addresses 0xF8 (write) and 0xF9 (read). These are standard I2C Device ID addresses. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
-9. **SDA level during software reset**: When performing the 9× Start + "1" reset sequence, do not force SDA high if the slave may be driving it low — this prevents bus conflict. Rely on pull-up resistors for Hi-Z state. [datasheet_MB85RC256V_v2.pdf, p10]
+9. **SDA level during software reset**: When performing the 9× Start + "1" reset sequence, do not force SDA high if the slave may be driving it low — this prevents bus conflict. Rely on pull-up resistors for Hi-Z state. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
 
-10. **No write delay confirmation**: The datasheet explicitly states multiple times that no programming wait time exists after Stop. This is a fundamental FeRAM advantage over EEPROM. [datasheet_MB85RC256V_v2.pdf, p4, p6, p7]
+10. **No write delay confirmation**: The datasheet explicitly states multiple times that no programming wait time exists after Stop. This is a fundamental FeRAM advantage over EEPROM. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p4, p6, p7]
 
-11. **Data sampling**: SDA is sampled on the rising edge of SCL and output on the falling edge of SCL. [datasheet_MB85RC256V_v2.pdf, p2]
+11. **Data sampling**: SDA is sampled on the rising edge of SCL and output on the falling edge of SCL. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p2]
 
-12. **ESD protection**: HBM ≥ ±2000V (JESD22-A114 compliant), CDM per JESD22-C101 compliant, Latch-up C-V ≥ ±200V (proprietary method). All variants tested. [datasheet_MB85RC256V_v2.pdf, p15]
+12. **ESD protection**: HBM ≥ ±2000V (JESD22-A114 compliant), CDM per JESD22-C101 compliant, Latch-up C-V ≥ ±200V (proprietary method). All variants tested. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
-13. **Moisture Sensitivity Level**: MSL 3 per IPC/JEDEC J-STD-020E. Relevant for reflow soldering floor life. [datasheet_MB85RC256V_v2.pdf, p15]
+13. **Moisture Sensitivity Level**: MSL 3 per IPC/JEDEC J-STD-020E. Relevant for reflow soldering floor life. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
-14. **Regulatory compliance**: Product complies with REACH Regulations, EU RoHS Directive, and China RoHS. [datasheet_MB85RC256V_v2.pdf, p15]
+14. **Regulatory compliance**: Product complies with REACH Regulations, EU RoHS Directive, and China RoHS. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
-15. **Storage temperature range**: −55°C to +125°C (Tstg). Distinct from operating range of −40°C to +85°C. [datasheet_MB85RC256V_v2.pdf, p11]
+15. **Storage temperature range**: −55°C to +125°C (Tstg). Distinct from operating range of −40°C to +85°C. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p11]
 
-16. **Tray baking note**: Tube and tape/reel packaging have no heat resistance — packages should NOT be baked using tube or tape/reel. Tray packaging is heat-proof up to 150°C max. [datasheet_MB85RC256V_v2.pdf, p21, p24, p28]
+16. **Tray baking note**: Tube and tape/reel packaging have no heat resistance — packages should NOT be baked using tube or tape/reel. Tray packaging is heat-proof up to 150°C max. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p21, p24, p28]
 
 ---
 
 ## 17. Recommended polling and control strategy hints from the docs
 
-1. **Do NOT poll for write completion**: Unlike EEPROM, the MB85RC256V requires no ACK polling or delay after writes. Immediately proceed with the next operation after Stop. [datasheet_MB85RC256V_v2.pdf, p6]
+1. **Do NOT poll for write completion**: Unlike EEPROM, the MB85RC256V requires no ACK polling or delay after writes. Immediately proceed with the next operation after Stop. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p6]
 
-2. **Use Software Reset Sequence** before each command if bus stability is uncertain: Send 9× (Start + one "1" bit) to recover from any hung slave state. [datasheet_MB85RC256V_v2.pdf, p10]
+2. **Use Software Reset Sequence** before each command if bus stability is uncertain: Send 9× (Start + one "1" bit) to recover from any hung slave state. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
 
-3. **Use Command Retry** after failed commands: If an I2C communication fails (NACK received unexpectedly), simply retry the command. [datasheet_MB85RC256V_v2.pdf, p10]
+3. **Use Command Retry** after failed commands: If an I2C communication fails (NACK received unexpectedly), simply retry the command. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10]
 
-4. **Verify device identity on startup**: Use the Device ID read sequence to confirm the correct device is present (Manufacturer ID = 0x00A, Product ID = 0x510). [datasheet_MB85RC256V_v2.pdf, p9]
+4. **Verify device identity on startup**: Use the Device ID read sequence to confirm the correct device is present (Manufacturer ID = 0x00A, Product ID = 0x510). [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
 5. **Maximum throughput**: At 1 MHz Fast Mode Plus, continuous sequential writes or reads can achieve near the full bus bandwidth since there is no write cycle delay.
 
@@ -583,11 +583,11 @@ Minimum values define retention time of data written right after shipment, calcu
 
 ## 18. Ambiguities, conflicts, and missing information
 
-1. **Device ID byte encoding**: The datasheet provides the 3-byte Device ID in a diagram with 12-bit Manufacturer ID (0x00A) and 12-bit Product ID (0x510), but the exact bit-packing across the 3 bytes (24 bits = two 12-bit fields) requires careful reading of the bit-position diagram. The raw hex bytes are not explicitly listed as 0x00, 0xA5, 0x10 — this is inferred from the bit layout. [datasheet_MB85RC256V_v2.pdf, p9]
+1. **Device ID byte encoding**: The datasheet provides the 3-byte Device ID in a diagram with 12-bit Manufacturer ID (0x00A) and 12-bit Product ID (0x510), but the exact bit-packing across the 3 bytes (24 bits = two 12-bit fields) requires careful reading of the bit-position diagram. The raw hex bytes are not explicitly listed as 0x00, 0xA5, 0x10 — this is inferred from the bit layout. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9]
 
-2. **Behavior on write to address with MSB=1**: The datasheet says "input '0' to the most significant bit of the higher address byte" but does not state whether the device ignores bit 15, masks it, or NACKs. Behavior is unspecified. [datasheet_MB85RC256V_v2.pdf, p7]
+2. **Behavior on write to address with MSB=1**: The datasheet says "input '0' to the most significant bit of the higher address byte" but does not state whether the device ignores bit 15, masks it, or NACKs. Behavior is unspecified. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 
-3. **WP pin timing**: The datasheet says WP must remain stable from Start to Stop, but does not specify the exact setup/hold time relative to Start/Stop conditions. [datasheet_MB85RC256V_v2.pdf, p15]
+3. **WP pin timing**: The datasheet says WP must remain stable from Start to Stop, but does not specify the exact setup/hold time relative to Start/Stop conditions. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p15]
 
 4. **Clock stretching**: Not stated in reviewed documentation. It is not mentioned whether the MB85RC256V performs clock stretching.
 
@@ -599,9 +599,9 @@ Minimum values define retention time of data written right after shipment, calcu
 
 8. **Behavior during power brownout**: Not stated in reviewed documentation beyond the power-on/off sequence constraints.
 
-9. **Standby current conditions**: The standby current spec at 25°C lists only a typical value (27 µA) with no max. The max (56 µA) is only given at 85°C. [datasheet_MB85RC256V_v2.pdf, p12]
+9. **Standby current conditions**: The standby current spec at 25°C lists only a typical value (27 µA) with no max. The max (56 µA) is only given at 85°C. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
-10. **Address pins internal pull-down value**: The pull-down resistance for A0-A2 and WP is specified indirectly (min 50 kΩ at VIL), but the exact pull-down resistance is not given as a typical value. [datasheet_MB85RC256V_v2.pdf, p12]
+10. **Address pins internal pull-down value**: The pull-down resistance for A0-A2 and WP is specified indirectly (min 50 kΩ at VIL), but the exact pull-down resistance is not given as a typical value. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
 
 ---
 
@@ -632,56 +632,56 @@ Minimum values define retention time of data written right after shipment, calcu
 
 | Fact | Source | Page / lines |
 |------|--------|--------------|
-| Device configuration 32,768 × 8 bits | datasheet_MB85RC256V_v2.pdf | 1 |
-| Operating frequency 1 MHz max | datasheet_MB85RC256V_v2.pdf | 1 |
-| VDD range 2.7V to 5.5V | datasheet_MB85RC256V_v2.pdf | 1 |
-| Endurance 10^12 cycles/byte | datasheet_MB85RC256V_v2.pdf | 1, 14 |
-| Data retention 10yr/95yr/200yr | datasheet_MB85RC256V_v2.pdf | 14 |
-| Operating current 200 µA max at 1 MHz | datasheet_MB85RC256V_v2.pdf | 1, 12 |
-| Standby current 27 µA typ | datasheet_MB85RC256V_v2.pdf | 1, 12 |
-| Pin assignments and descriptions | datasheet_MB85RC256V_v2.pdf | 2 |
-| A0-A2 internal pull-down, open = "L" | datasheet_MB85RC256V_v2.pdf | 2 |
-| WP internal pull-down, open = write enabled | datasheet_MB85RC256V_v2.pdf | 2, 6 |
-| SDA open-drain output, needs pull-up | datasheet_MB85RC256V_v2.pdf | 2 |
-| Data sampled on SCL rising, output on falling | datasheet_MB85RC256V_v2.pdf | 2 |
-| I2C slave device | datasheet_MB85RC256V_v2.pdf | 3 |
-| Up to 8 devices on same bus | datasheet_MB85RC256V_v2.pdf | 2, 3 |
-| Start/Stop condition definitions | datasheet_MB85RC256V_v2.pdf | 4 |
-| No write delay after Stop condition | datasheet_MB85RC256V_v2.pdf | 4 |
-| ACK/NACK protocol | datasheet_MB85RC256V_v2.pdf | 4 |
-| Device type code 1010 | datasheet_MB85RC256V_v2.pdf | 5 |
-| Device address word format | datasheet_MB85RC256V_v2.pdf | 5 |
-| R/W bit: 0=write, 1=read | datasheet_MB85RC256V_v2.pdf | 5 |
-| Standby on address mismatch | datasheet_MB85RC256V_v2.pdf | 5 |
-| 15-bit memory addressing, 2-byte address | datasheet_MB85RC256V_v2.pdf | 6 |
-| ACK polling not required (FeRAM) | datasheet_MB85RC256V_v2.pdf | 6 |
-| Write protection: WP H=protected, L=writable | datasheet_MB85RC256V_v2.pdf | 6 |
-| Byte Write command | datasheet_MB85RC256V_v2.pdf | 7 |
-| Page Write (sequential write), no page boundary | datasheet_MB85RC256V_v2.pdf | 7 |
-| Address MSB must be 0 | datasheet_MB85RC256V_v2.pdf | 7 |
-| Address rollover 0x7FFF→0x0000 | datasheet_MB85RC256V_v2.pdf | 7, 8, 9 |
-| Data written right after ACK | datasheet_MB85RC256V_v2.pdf | 7 |
-| Current Address Read | datasheet_MB85RC256V_v2.pdf | 8 |
-| Current address undefined after power-on | datasheet_MB85RC256V_v2.pdf | 8 |
-| Random Read | datasheet_MB85RC256V_v2.pdf | 8 |
-| Sequential Read | datasheet_MB85RC256V_v2.pdf | 9 |
-| Device ID (Manufacturer 0x00A, Product 0x510) | datasheet_MB85RC256V_v2.pdf | 9 |
-| Device ID read sequence (0xF8, 0xF9) | datasheet_MB85RC256V_v2.pdf | 9 |
-| Device ID re-read on ACK after 3rd byte | datasheet_MB85RC256V_v2.pdf | 9 |
-| Software Reset Sequence (9× Start + "1") | datasheet_MB85RC256V_v2.pdf | 10 |
-| Command Retry on failure | datasheet_MB85RC256V_v2.pdf | 10 |
-| Absolute maximum ratings | datasheet_MB85RC256V_v2.pdf | 11 |
-| DC characteristics table | datasheet_MB85RC256V_v2.pdf | 12 |
-| AC timing: Standard/Fast/Fast Mode Plus | datasheet_MB85RC256V_v2.pdf | 12 |
-| Pin capacitance 15 pF max | datasheet_MB85RC256V_v2.pdf | 13 |
-| Power-on/off sequence timing | datasheet_MB85RC256V_v2.pdf | 14 |
-| Destructive readout (reads count toward endurance) | datasheet_MB85RC256V_v2.pdf | 14 |
-| Pin stability during transaction (Start to Stop) | datasheet_MB85RC256V_v2.pdf | 15 |
-| Program after reflow, not before | datasheet_MB85RC256V_v2.pdf | 15 |
-| ESD HBM ≥ ±2000V | datasheet_MB85RC256V_v2.pdf | 15 |
-| Ordering information and part numbers | datasheet_MB85RC256V_v2.pdf | 16 |
-| Package: 8-pin SOP 150mil and 208mil | datasheet_MB85RC256V.pdf | 1 |
-| RAMXEED name change from Fujitsu | datasheet_MB85RC256V_v2.pdf | 1 |
+| Device configuration 32,768 × 8 bits | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1 |
+| Operating frequency 1 MHz max | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1 |
+| VDD range 2.7V to 5.5V | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1 |
+| Endurance 10^12 cycles/byte | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1, 14 |
+| Data retention 10yr/95yr/200yr | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 14 |
+| Operating current 200 µA max at 1 MHz | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1, 12 |
+| Standby current 27 µA typ | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1, 12 |
+| Pin assignments and descriptions | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2 |
+| A0-A2 internal pull-down, open = "L" | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2 |
+| WP internal pull-down, open = write enabled | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2, 6 |
+| SDA open-drain output, needs pull-up | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2 |
+| Data sampled on SCL rising, output on falling | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2 |
+| I2C slave device | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 3 |
+| Up to 8 devices on same bus | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 2, 3 |
+| Start/Stop condition definitions | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 4 |
+| No write delay after Stop condition | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 4 |
+| ACK/NACK protocol | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 4 |
+| Device type code 1010 | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 5 |
+| Device address word format | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 5 |
+| R/W bit: 0=write, 1=read | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 5 |
+| Standby on address mismatch | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 5 |
+| 15-bit memory addressing, 2-byte address | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 6 |
+| ACK polling not required (FeRAM) | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 6 |
+| Write protection: WP H=protected, L=writable | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 6 |
+| Byte Write command | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 7 |
+| Page Write (sequential write), no page boundary | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 7 |
+| Address MSB must be 0 | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 7 |
+| Address rollover 0x7FFF→0x0000 | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 7, 8, 9 |
+| Data written right after ACK | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 7 |
+| Current Address Read | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 8 |
+| Current address undefined after power-on | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 8 |
+| Random Read | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 8 |
+| Sequential Read | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 9 |
+| Device ID (Manufacturer 0x00A, Product 0x510) | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 9 |
+| Device ID read sequence (0xF8, 0xF9) | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 9 |
+| Device ID re-read on ACK after 3rd byte | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 9 |
+| Software Reset Sequence (9× Start + "1") | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 10 |
+| Command Retry on failure | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 10 |
+| Absolute maximum ratings | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 11 |
+| DC characteristics table | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 12 |
+| AC timing: Standard/Fast/Fast Mode Plus | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 12 |
+| Pin capacitance 15 pF max | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 13 |
+| Power-on/off sequence timing | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 14 |
+| Destructive readout (reads count toward endurance) | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 14 |
+| Pin stability during transaction (Start to Stop) | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 15 |
+| Program after reflow, not before | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 15 |
+| ESD HBM ≥ ±2000V | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 15 |
+| Ordering information and part numbers | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 16 |
+| Package: 8-pin SOP 150mil and 208mil | MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf | 1 |
+| RAMXEED name change from Fujitsu | MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf | 1 |
 | Library supported/unsupported MB85 family list | MB85_FRAM.h | 7-28 |
 | Library metadata: author, license, Doxygen/clang-format notes, changelog | MB85_FRAM.h | 30-74 |
 | Library constants: BUFFER_LENGTH default, I2C speed constants, min address, max devices | MB85_FRAM.h | 86-99 |
@@ -941,8 +941,8 @@ These are direct observations from the shipped source, plus a short set of expli
 7. `read()` and `write()` both compute `addr % _TotalMemory` with no guard for `_TotalMemory == 0`. [MB85_FRAM.h:134, 180]
 8. `memSize()` uses `if (memNumber <= _DeviceCount)` rather than `< _DeviceCount` for its range check. [MB85_FRAM.cpp:140-141]
 9. `requestI2C()` returns `int8_t`, even though its return values are `Wire.available()` or `dataSize`. [MB85_FRAM.cpp:146-168]
-10. The header exposes `I2C_HIGH_SPEED_MODE = 3400000`, while the MB85RC256V datasheet processed elsewhere in this extraction only specifies Standard, Fast, and Fast Mode Plus operation up to 1 MHz. [MB85_FRAM.h:93-96; datasheet_MB85RC256V_v2.pdf, p12]
-11. When the probe loop tests `memSize = 32768`, it sends address `0x8000`; for MB85RC256V, the datasheet section earlier in this extraction states that the most significant bit of the high address byte is supposed to be `0`, so this probe relies on behavior outside the documented normal address format. [MB85_FRAM.cpp:67-78; datasheet_MB85RC256V_v2.pdf, p7]
+10. The header exposes `I2C_HIGH_SPEED_MODE = 3400000`, while the MB85RC256V datasheet processed elsewhere in this extraction only specifies Standard, Fast, and Fast Mode Plus operation up to 1 MHz. [MB85_FRAM.h:93-96; MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12]
+11. When the probe loop tests `memSize = 32768`, it sends address `0x8000`; for MB85RC256V, the datasheet section earlier in this extraction states that the most significant bit of the high address byte is supposed to be `0`, so this probe relies on behavior outside the documented normal address format. [MB85_FRAM.cpp:67-78; MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7]
 12. In the `read()` and `write()` chip-to-chip wrap logic, `if (device++ == MB85_MAX_DEVICES) device = 0;` increments `device` before `_I2C[device]` is checked. If the current device index is `7`, the next `_I2C[device]` access is `_I2C[8]`. [MB85_FRAM.h:144-151, 193-201]
 13. `getDevice()` subtracts earlier device sizes from `memAddress`, making `memAddress` chip-local, but `endAddress` remains an accumulated total across slots. Its output therefore does not match the comment "end of memory chip" for devices beyond the first slot. [MB85_FRAM.cpp:115-129]
 14. After `read()` or `write()` switches to the next device at a boundary, the code sets `memAddress = 0` but does not recompute `endAddress` for the newly selected device. Subsequent boundary detection therefore keeps using the old `endAddress` value. [MB85_FRAM.h:142-156, 191-205]
@@ -970,20 +970,20 @@ This section extends the MB85RC256V-centric extraction with official RAMXEED sib
 
 | Official part | Addressing structure from vendor docs | Library-compatibility implication |
 |---------------|---------------------------------------|-----------------------------------|
-| MB85RC256V | `1010 + A2/A1/A0 + R/W`, then 2 memory-address bytes; classic 8-device / 2-byte-address member of the family. [datasheet_MB85RC256V_v2.pdf, pp5-8] | This is the model the current library is hard-wired around. |
+| MB85RC256V | `1010 + A2/A1/A0 + R/W`, then 2 memory-address bytes; classic 8-device / 2-byte-address member of the family. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, pp5-8] | This is the model the current library is hard-wired around. |
 | MB85RC512T | `1010 + A2/A1/A0 + R/W`, then 2 memory-address bytes; up to 8 physical devices. [MB85RC512T-DS6v1-E.pdf, pp4-8] | Transaction format matches `requestI2C()`, but the probe loop still cannot identify a 64 KB part because it only tests 8 KB, 16 KB, and 32 KB candidates. [MB85_FRAM.cpp:49-50] |
 | MB85RC64TA | `1010 + A2/A1/A0 + R/W`, then 2 memory-address bytes; up to 8 physical devices. [MB85RC64TA-DS5v1-E.pdf, pp4-5] | This part is address-compatible with the library's transport helper, but the header metadata understates its identification support because official Device-ID data exists. [MB85_FRAM.h:15; MB85RC64TA-DS5v1-E.pdf, p11] |
 | MB85RC1MT | `1010 + A2/A1 + A16 + R/W`, then 2 memory-address bytes; current-address buffer is 17 bits. [MB85RC1MT-DS5v1-E.pdf, pp4, 7] | Not compatible with the library's fixed `0x50`..`0x57` scan and 2-byte helper alone, because the most-significant memory bit A16 must be carried in the device-address word. |
 | MB85RC16V | `1010 + A2/A1/A0 + R/W`, but those three bits are memory upper address bits, not slave-select pins; one lower address byte follows; current-address buffer is 11 bits. [MB85RC16V-DS11v0-E.pdf, pp4-7] | Not compatible with the library's assumption that `0x50`..`0x57` are eight distinct devices and that every request sends two address bytes. |
 | MB85RC04V | `1010 + A2/A1 + A8 + R/W`; A2/A1 are device-select pins, A8 is the upper memory bit; one lower address byte follows; current-address buffer is 9 bits. [MB85RC04V-DS5v1-E.pdf, p4] | Not compatible with the library's eight-slot model because part of the scanned address space is memory selection, not physical-device selection. |
 
-- Inference from the documented device-address-word layouts above: MB85RC256V / MB85RC512T / MB85RC64TA use the normal 7-bit slave-address span `0x50`..`0x57` as true physical-device selection; MB85RC1MT still occupies numeric addresses in that same span, but for a fixed A2/A1 pin setting one physical chip should ACK two of them because A16 is encoded in the address word. [datasheet_MB85RC256V_v2.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4]
+- Inference from the documented device-address-word layouts above: MB85RC256V / MB85RC512T / MB85RC64TA use the normal 7-bit slave-address span `0x50`..`0x57` as true physical-device selection; MB85RC1MT still occupies numeric addresses in that same span, but for a fixed A2/A1 pin setting one physical chip should ACK two of them because A16 is encoded in the address word. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4]
 - Inference from the official MB85RC16V address-word definition: one physical MB85RC16V can legitimately ACK the full `0x50`..`0x57` address span, because those three address bits are documented as memory upper address bits rather than external chip-select pins. [MB85RC16V-DS11v0-E.pdf, pp4-7]
 - Inference from the official MB85RC04V address-word definition: one physical MB85RC04V can ACK two different 7-bit slave addresses for the same A2/A1 pin setting, because A8 is carried in the device-address word. [MB85RC04V-DS5v1-E.pdf, p4]
 
 ### 22.3 Device-ID and optional-command coverage that the local library leaves unused
 
-- Official Device-ID coverage across the checked family is broader than the library header comment suggests. The checked sources explicitly document Device ID for MB85RC512T (`00AH` / `658H`), MB85RC256V (`00AH` / `510H`), MB85RC64TA (`00AH` / `358H`), MB85RC1MT (`00AH` / `758H`), and MB85RC04V (`00AH` / `010H`). [MB85RC512T-DS6v1-E.pdf, p10; datasheet_MB85RC256V_v2.pdf, p9; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8]
+- Official Device-ID coverage across the checked family is broader than the library header comment suggests. The checked sources explicitly document Device ID for MB85RC512T (`00AH` / `658H`), MB85RC256V (`00AH` / `510H`), MB85RC64TA (`00AH` / `358H`), MB85RC1MT (`00AH` / `758H`), and MB85RC04V (`00AH` / `010H`). [MB85RC512T-DS6v1-E.pdf, p10; MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8]
 - MB85RC512T, MB85RC64TA, and MB85RC1MT officially support High Speed mode up to 3.4 MHz, but their datasheets describe this as a protocol state entered by the master-code sequence `0000 1XXX`, followed by an expected NACK, with Stop returning the bus to normal mode. Merely calling `Wire.setClock(3400000)` does not implement that documented entry procedure. [MB85RC512T-DS6v1-E.pdf, p8; MB85RC64TA-DS5v1-E.pdf, p9; MB85RC1MT-DS5v1-E.pdf, p8; MB85_FRAM.cpp:42-43]
 - MB85RC512T, MB85RC64TA, and MB85RC1MT also add an official Sleep mode that is entered with `START + F8H`, device address word, repeated `START + 86H`, and exited by another device address followed by a recovery interval `tREC = 400 us`. No helper for Sleep entry/exit or `tREC` handling exists in the local library. [MB85RC512T-DS6v1-E.pdf, pp9, 16; MB85RC64TA-DS5v1-E.pdf, pp10, 17; MB85RC1MT-DS5v1-E.pdf, pp9, 16; MB85_FRAM.h:110-239; MB85_FRAM.cpp:21-169]
 
@@ -995,28 +995,28 @@ This section extends the MB85RC256V-centric extraction with official RAMXEED sib
 
 ### 22.5 Implementation-facing code and field map
 
-This subsection collapses the checked family data into explicit bus-level codes and fields. These are protocol fields and reserved command bytes, not internal device registers. [datasheet_MB85RC256V_v2.pdf, pp5, 9-10; MB85RC512T-DS6v1-E.pdf, pp4, 8-11; MB85RC64TA-DS5v1-E.pdf, pp4, 9-12; MB85RC1MT-DS5v1-E.pdf, pp4, 8-11; MB85RC16V-DS11v0-E.pdf, pp4, 8; MB85RC04V-DS5v1-E.pdf, pp4, 8-9]
+This subsection collapses the checked family data into explicit bus-level codes and fields. These are protocol fields and reserved command bytes, not internal device registers. [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, pp5, 9-10; MB85RC512T-DS6v1-E.pdf, pp4, 8-11; MB85RC64TA-DS5v1-E.pdf, pp4, 9-12; MB85RC1MT-DS5v1-E.pdf, pp4, 8-11; MB85RC16V-DS11v0-E.pdf, pp4, 8; MB85RC04V-DS5v1-E.pdf, pp4, 8-9]
 
 | Item | Code / field | Where documented in checked family | Meaning for implementation |
 |------|--------------|------------------------------------|----------------------------|
-| Device type code | `1010` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC16V / MB85RC04V [datasheet_MB85RC256V_v2.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4; MB85RC16V-DS11v0-E.pdf, p4; MB85RC04V-DS5v1-E.pdf, p4] | Upper four bits of the normal device address word across all checked parts. |
-| External device-select bits | `A2:A1:A0` | MB85RC256V / MB85RC512T / MB85RC64TA [datasheet_MB85RC256V_v2.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4] | True physical-device addressing; supports up to 8 devices on the bus. |
+| Device type code | `1010` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC16V / MB85RC04V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4; MB85RC16V-DS11v0-E.pdf, p4; MB85RC04V-DS5v1-E.pdf, p4] | Upper four bits of the normal device address word across all checked parts. |
+| External device-select bits | `A2:A1:A0` | MB85RC256V / MB85RC512T / MB85RC64TA [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4] | True physical-device addressing; supports up to 8 devices on the bus. |
 | Device-select plus memory-upper mix | `A2:A1 + A8` | MB85RC04V [MB85RC04V-DS5v1-E.pdf, p4] | Only `A2:A1` are physical chip-select bits; `A8` is part of the memory address. |
 | Memory-upper bits in device word | `A2:A1:A0` | MB85RC16V [MB85RC16V-DS11v0-E.pdf, p4] | These three bits are not slave-select pins; they are memory address bits A10:A8. |
 | Most-significant memory bit in device word | `A16` | MB85RC1MT [MB85RC1MT-DS5v1-E.pdf, pp4, 7] | 1Mbit variant requires variant-aware device-word composition for accesses and current-address reads. |
-| Normal read/write selector | `R/W` | All checked parts [datasheet_MB85RC256V_v2.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4; MB85RC16V-DS11v0-E.pdf, p4; MB85RC04V-DS5v1-E.pdf, p4] | `0 = write`, `1 = read`. |
-| Device-ID reserved slave ID, write phase | `F8H` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC04V [datasheet_MB85RC256V_v2.pdf, p9; MB85RC512T-DS6v1-E.pdf, p10; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8] | First reserved address used to start the Device-ID sequence where supported. |
-| Device-ID reserved slave ID, read phase | `F9H` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC04V [datasheet_MB85RC256V_v2.pdf, p9; MB85RC512T-DS6v1-E.pdf, p10; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8] | Second reserved address used to clock out the 3-byte Device ID. |
+| Normal read/write selector | `R/W` | All checked parts [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p5; MB85RC512T-DS6v1-E.pdf, p4; MB85RC64TA-DS5v1-E.pdf, p4; MB85RC1MT-DS5v1-E.pdf, p4; MB85RC16V-DS11v0-E.pdf, p4; MB85RC04V-DS5v1-E.pdf, p4] | `0 = write`, `1 = read`. |
+| Device-ID reserved slave ID, write phase | `F8H` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC04V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9; MB85RC512T-DS6v1-E.pdf, p10; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8] | First reserved address used to start the Device-ID sequence where supported. |
+| Device-ID reserved slave ID, read phase | `F9H` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC04V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9; MB85RC512T-DS6v1-E.pdf, p10; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8] | Second reserved address used to clock out the 3-byte Device ID. |
 | High Speed entry command | `0000 1XXX` | MB85RC512T / MB85RC64TA / MB85RC1MT [MB85RC512T-DS6v1-E.pdf, p8; MB85RC64TA-DS5v1-E.pdf, p9; MB85RC1MT-DS5v1-E.pdf, p8] | Must be sent after Start to enter 3.4 MHz mode; datasheets state the slave side keeps NACKing this entry command. |
 | Sleep transition start | `F8H` | MB85RC512T / MB85RC64TA / MB85RC1MT [MB85RC512T-DS6v1-E.pdf, p9; MB85RC64TA-DS5v1-E.pdf, p10; MB85RC1MT-DS5v1-E.pdf, p9] | First byte in the Sleep-entry sequence. |
 | Sleep transition second command | `86H` | MB85RC512T / MB85RC64TA / MB85RC1MT [MB85RC512T-DS6v1-E.pdf, p9; MB85RC64TA-DS5v1-E.pdf, p10; MB85RC1MT-DS5v1-E.pdf, p9] | Sent after repeated Start to place the part into Sleep mode. |
-| Software reset / recovery pattern | `9 × (Start + data "1")` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC16V / MB85RC04V [datasheet_MB85RC256V_v2.pdf, p10; MB85RC512T-DS6v1-E.pdf, p11; MB85RC64TA-DS5v1-E.pdf, p12; MB85RC1MT-DS5v1-E.pdf, p11; MB85RC16V-DS11v0-E.pdf, p8; MB85RC04V-DS5v1-E.pdf, p9] | Official bus-recovery sequence; no dedicated register or opcode is defined for it. |
+| Software reset / recovery pattern | `9 × (Start + data "1")` | MB85RC256V / MB85RC512T / MB85RC64TA / MB85RC1MT / MB85RC16V / MB85RC04V [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10; MB85RC512T-DS6v1-E.pdf, p11; MB85RC64TA-DS5v1-E.pdf, p12; MB85RC1MT-DS5v1-E.pdf, p11; MB85RC16V-DS11v0-E.pdf, p8; MB85RC04V-DS5v1-E.pdf, p9] | Official bus-recovery sequence; no dedicated register or opcode is defined for it. |
 
 ### 22.6 Per-part command/support matrix from checked sources
 
 | Part | Byte/Page write | Current/Random/Sequential read | Device ID | High Speed mode | Sleep mode | Software reset / command retry | Address bytes after device word |
 |------|-----------------|--------------------------------|-----------|-----------------|------------|--------------------------------|---------------------------------|
-| MB85RC256V | Yes [datasheet_MB85RC256V_v2.pdf, p7] | Yes [datasheet_MB85RC256V_v2.pdf, pp8-9] | Yes [datasheet_MB85RC256V_v2.pdf, p9] | No checked support beyond 1 MHz/Fm+ [datasheet_MB85RC256V_v2.pdf, p12] | Not documented in checked 256V source | Yes [datasheet_MB85RC256V_v2.pdf, p10] | 2 |
+| MB85RC256V | Yes [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p7] | Yes [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, pp8-9] | Yes [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9] | No checked support beyond 1 MHz/Fm+ [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p12] | Not documented in checked 256V source | Yes [MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p10] | 2 |
 | MB85RC512T | Yes [MB85RC512T-DS6v1-E.pdf, pp6-7] | Yes [MB85RC512T-DS6v1-E.pdf, pp7-8] | Yes [MB85RC512T-DS6v1-E.pdf, p10] | Yes [MB85RC512T-DS6v1-E.pdf, p8] | Yes [MB85RC512T-DS6v1-E.pdf, p9] | Yes [MB85RC512T-DS6v1-E.pdf, p11] | 2 |
 | MB85RC64TA | Yes [MB85RC64TA-DS5v1-E.pdf, pp6-7] | Yes [MB85RC64TA-DS5v1-E.pdf, pp7-9] | Yes [MB85RC64TA-DS5v1-E.pdf, p11] | Yes [MB85RC64TA-DS5v1-E.pdf, p9] | Yes [MB85RC64TA-DS5v1-E.pdf, p10] | Yes [MB85RC64TA-DS5v1-E.pdf, p12] | 2 |
 | MB85RC1MT | Yes [MB85RC1MT-DS5v1-E.pdf, pp6-7] | Yes [MB85RC1MT-DS5v1-E.pdf, pp7-8] | Yes [MB85RC1MT-DS5v1-E.pdf, p10] | Yes [MB85RC1MT-DS5v1-E.pdf, p8] | Yes [MB85RC1MT-DS5v1-E.pdf, p9] | Yes [MB85RC1MT-DS5v1-E.pdf, p11] | 2, plus A16 in device word |
