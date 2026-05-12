@@ -36,7 +36,7 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
 /// @return Current monotonic milliseconds
 using NowMsFn = uint32_t (*)(void* user);
 
-/// Configuration for MB85RC driver
+/// @brief Configuration for MB85RC driver.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer

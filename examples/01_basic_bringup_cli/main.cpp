@@ -109,6 +109,47 @@ const char* stateColor(MB85RC::DriverState st, bool online, uint8_t consecutiveF
   return LOG_COLOR_STATE(online, consecutiveFailures);
 }
 
+const char* addressModelToStr(MB85RC::cmd::AddressModel model) {
+  using MB85RC::cmd::AddressModel;
+  switch (model) {
+    case AddressModel::TWO_BYTE_ADDRESS_PINS:
+      return "2-byte address, A2/A1/A0 select device";
+    case AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+      return "2-byte address, A16 in device address";
+    case AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+      return "1-byte address, upper address bits in device address";
+    case AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      return "1-byte address, A8 in device address";
+    default:
+      return "unknown";
+  }
+}
+
+void printVariantInfo(const MB85RC::cmd::VariantInfo& variant) {
+  Serial.printf("  %-10s %6lu bytes",
+                variant.name,
+                static_cast<unsigned long>(variant.memoryBytes));
+  if (variant.hasDeviceId) {
+    Serial.printf("  product=0x%03X  density=0x%X\n",
+                  variant.productId,
+                  variant.densityCode);
+  } else {
+    Serial.println("  product=n/a  density=n/a");
+  }
+  Serial.printf("    %s; 256V driver support=%s; HS=%s; sleep=%s\n",
+                addressModelToStr(variant.addressModel),
+                variant.supportedByDriver ? "yes" : "no",
+                variant.highSpeedMode ? "yes" : "no",
+                variant.sleepMode ? "yes" : "no");
+}
+
+void printVariantCatalog() {
+  Serial.println("Known MB85RC family variants:");
+  for (size_t i = 0; i < MB85RC::cmd::VARIANT_COUNT; ++i) {
+    printVariantInfo(MB85RC::cmd::KNOWN_VARIANTS[i]);
+  }
+}
+
 const char* goodIfZeroColor(uint32_t value) {
   return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED;
 }
@@ -1486,6 +1527,7 @@ void printHelp() {
   cli::printHelpSection("Device Info");
   cli::printHelpItem("id", "Read device ID (manufacturer, product, density)");
   cli::printHelpItem("idraw", "Read raw 3-byte Device ID payload");
+  cli::printHelpItem("variants", "List known family variants and driver support");
   cli::printHelpItem("size", "Print memory size");
 
   cli::printHelpSection("Diagnostics");
@@ -1546,6 +1588,22 @@ void processCommand(const String& cmdLine) {
     }
     Serial.printf("Device ID: Manufacturer=0x%03X Product=0x%03X Density=0x%02X\n",
                   id.manufacturerId, id.productId, id.densityCode);
+    const MB85RC::cmd::VariantInfo* variant = MB85RC::cmd::findVariantByProductId(id.productId);
+    if (variant != nullptr) {
+      Serial.printf("  Variant: %s (%lu bytes)\n",
+                    variant->name,
+                    static_cast<unsigned long>(variant->memoryBytes));
+      Serial.printf("  256V driver support: %s; access format: %s\n",
+                    variant->supportedByDriver ? "yes" : "no",
+                    variant->uses256vAccessFormat ? "2-byte linear address" : "variant-specific");
+    } else {
+      Serial.println("  Variant: unknown product ID");
+    }
+    return;
+  }
+
+  if (cmd == "variants") {
+    printVariantCatalog();
     return;
   }
 

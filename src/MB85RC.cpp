@@ -56,8 +56,25 @@ Status MB85RC::begin(const Config& config) {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
+  _allowOfflineI2c = false;
   _currentAddressKnown = false;
   _currentAddress = 0;
+
+  auto resetAfterFailedBegin = [this](Status failure) -> Status {
+    _config = Config{};
+    _initialized = false;
+    _driverState = DriverState::UNINIT;
+    _lastOkMs = 0;
+    _lastErrorMs = 0;
+    _lastError = Status::Ok();
+    _consecutiveFailures = 0;
+    _totalFailures = 0;
+    _totalSuccess = 0;
+    _allowOfflineI2c = false;
+    _currentAddressKnown = false;
+    _currentAddress = 0;
+    return failure;
+  };
 
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
@@ -78,11 +95,13 @@ Status MB85RC::begin(const Config& config) {
   DeviceId id;
   Status st = _readDeviceIdRaw(id);
   if (!st.ok()) {
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return resetAfterFailedBegin(
+        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
   }
   if (id.manufacturerId != cmd::MANUFACTURER_ID || id.productId != cmd::PRODUCT_ID) {
-    return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
-                         static_cast<int32_t>((id.manufacturerId << 12) | id.productId));
+    return resetAfterFailedBegin(
+        Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID mismatch",
+                      static_cast<int32_t>((id.manufacturerId << 12) | id.productId)));
   }
 
   _initialized = true;
@@ -107,6 +126,7 @@ void MB85RC::end() {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
+  _allowOfflineI2c = false;
   _currentAddressKnown = false;
   _currentAddress = 0;
 }

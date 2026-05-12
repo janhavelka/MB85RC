@@ -201,6 +201,12 @@ void test_get_settings_before_begin_reports_defaults() {
   TEST_ASSERT_FALSE(settings.hasNowMsHook);
   TEST_ASSERT_FALSE(settings.currentAddressKnown);
   TEST_ASSERT_EQUAL_UINT16(0u, settings.currentAddress);
+
+  const SettingsSnapshot byValue = dev.getSettings();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(settings.state),
+                          static_cast<uint8_t>(byValue.state));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(dev.state()),
+                          static_cast<uint8_t>(dev.driverState()));
 }
 
 // ===========================================================================
@@ -271,6 +277,17 @@ void test_begin_detects_device_not_found() {
   Status st = dev.begin(makeConfig(bus));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
                           static_cast<uint8_t>(st.code));
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.offlineThreshold);
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
 }
 
 void test_begin_detects_device_id_mismatch() {
@@ -283,6 +300,14 @@ void test_begin_detects_device_id_mismatch() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
                           static_cast<uint8_t>(dev.state()));
   TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, snap.i2cAddress);
+  TEST_ASSERT_EQUAL_UINT32(50u, snap.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.offlineThreshold);
+  TEST_ASSERT_FALSE(snap.currentAddressKnown);
 }
 
 void test_failed_begin_clears_stale_runtime_snapshot() {
@@ -802,6 +827,32 @@ void test_read_device_id_raw() {
   TEST_ASSERT_EQUAL_HEX8(DEVID_BYTE2, raw.bytes[2]);
 }
 
+void test_variant_catalog_identifies_known_device_ids() {
+  const cmd::VariantInfo* current = cmd::findVariantByProductId(cmd::PRODUCT_ID);
+  TEST_ASSERT_NOT_NULL(current);
+  TEST_ASSERT_EQUAL_STRING("MB85RC256V", current->name);
+  TEST_ASSERT_EQUAL_UINT32(32768UL, current->memoryBytes);
+  TEST_ASSERT_EQUAL_UINT8(cmd::DENSITY_CODE, current->densityCode);
+  TEST_ASSERT_TRUE(current->supportedByDriver);
+  TEST_ASSERT_TRUE(current->uses256vAccessFormat);
+
+  const cmd::VariantInfo* rc512 = cmd::findVariantByProductId(0x658);
+  TEST_ASSERT_NOT_NULL(rc512);
+  TEST_ASSERT_EQUAL_STRING("MB85RC512T", rc512->name);
+  TEST_ASSERT_EQUAL_UINT32(65536UL, rc512->memoryBytes);
+  TEST_ASSERT_FALSE(rc512->supportedByDriver);
+  TEST_ASSERT_TRUE(rc512->uses256vAccessFormat);
+  TEST_ASSERT_TRUE(rc512->sleepMode);
+
+  const cmd::VariantInfo* rc04 = cmd::findVariantByProductId(0x010);
+  TEST_ASSERT_NOT_NULL(rc04);
+  TEST_ASSERT_EQUAL_STRING("MB85RC04V", rc04->name);
+  TEST_ASSERT_FALSE(rc04->uses256vAccessFormat);
+
+  TEST_ASSERT_NULL(cmd::findVariantByProductId(0x123));
+  TEST_ASSERT_NULL(cmd::findVariantByProductId(0x000));
+}
+
 void test_current_address_requires_prior_memory_access() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -1230,6 +1281,7 @@ int main() {
   // Device ID
   RUN_TEST(test_read_device_id);
   RUN_TEST(test_read_device_id_raw);
+  RUN_TEST(test_variant_catalog_identifies_known_device_ids);
   RUN_TEST(test_current_address_requires_prior_memory_access);
   RUN_TEST(test_current_address_tracks_memory_operations_and_settings);
   RUN_TEST(test_recover_invalidates_current_address_tracking);

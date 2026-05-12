@@ -11,7 +11,7 @@
 
 namespace MB85RC {
 
-/// Driver state for health monitoring
+/// @brief Driver state for health monitoring.
 enum class DriverState : uint8_t {
   UNINIT,    ///< begin() not called or end() called
   READY,     ///< Operational, consecutiveFailures == 0
@@ -19,19 +19,19 @@ enum class DriverState : uint8_t {
   OFFLINE    ///< consecutiveFailures >= offlineThreshold
 };
 
-/// Device ID fields parsed from 3-byte read
+/// @brief Device ID fields parsed from 3-byte read.
 struct DeviceId {
   uint16_t manufacturerId = 0; ///< 12-bit Manufacturer ID (expect 0x00A)
   uint16_t productId = 0;      ///< 12-bit Product ID (expect 0x510)
   uint8_t densityCode = 0;     ///< Density nibble from Product ID (expect 0x5)
 };
 
-/// Raw 3-byte Device ID payload as returned on the bus.
+/// @brief Raw 3-byte Device ID payload as returned on the bus.
 struct DeviceIdRaw {
   uint8_t bytes[cmd::DEVICE_ID_LEN] = {};
 };
 
-/// Snapshot of current driver settings/state without performing I2C.
+/// @brief Snapshot of current driver settings/state without performing I2C.
 struct SettingsSnapshot {
   bool initialized = false;       ///< True after begin() succeeds and before end()
   DriverState state = DriverState::UNINIT;
@@ -43,7 +43,7 @@ struct SettingsSnapshot {
   uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read
 };
 
-/// Result of comparing expected bytes with FRAM contents.
+/// @brief Result of comparing expected bytes with FRAM contents.
 struct VerifyResult {
   bool match = false;
   size_t mismatchOffset = 0;      ///< First mismatching byte offset from the requested start
@@ -51,7 +51,7 @@ struct VerifyResult {
   uint8_t actual = 0;             ///< Actual byte read at mismatchOffset
 };
 
-/// MB85RC256V FRAM driver class
+/// @brief MB85RC256V FRAM driver class.
 class MB85RC {
 public:
   // =========================================================================
@@ -93,6 +93,9 @@ public:
   /// Get current driver state
   DriverState state() const { return _driverState; }
 
+  /// Alias for state() for cross-driver diagnostics.
+  DriverState driverState() const { return state(); }
+
   /// Check if begin() has completed successfully.
   bool isInitialized() const { return _initialized; }
   
@@ -107,6 +110,13 @@ public:
 
   /// Get a snapshot of current configuration/runtime state (no I2C).
   Status getSettings(SettingsSnapshot& out) const;
+
+  /// Get a snapshot of current configuration/runtime state (no I2C).
+  SettingsSnapshot getSettings() const {
+    SettingsSnapshot out;
+    (void)getSettings(out);
+    return out;
+  }
   
   // =========================================================================
   // Health Tracking
