@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documented validation behavior for null buffers, zero-length transfers, out-of-range addresses, and current-address tracking.
+- Reference documentation now uses human-readable vendor PDF names and separates compact chip notes from full PDF extractions under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
 - Explicit recovery bypass internals now use the shared `ScopedOfflineI2cAllowance` / `_reassertOfflineLatch()` procedure so failed recovery attempts that begin from `OFFLINE` keep the latch asserted.
 - Health behavior is now standardized on latched `OFFLINE`: normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch I2C until `recover()` succeeds.
 

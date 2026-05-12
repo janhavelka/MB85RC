@@ -218,9 +218,9 @@ doxygen Doxyfile
 - `CHANGELOG.md` - release history
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
 - `docs/releases/v1.0.0.md` - GitHub release notes for `v1.0.0`
-- `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - primary device datasheet used for verification
-- `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - alternate revision copy for cross-checking
-- `MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
+- `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - primary device datasheet used for verification
+- `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
+- `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
 
 ## License
 
