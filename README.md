@@ -2,7 +2,7 @@
 
 Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino and PlatformIO.
 
-Stable release: `v1.0.0`
+Stable release: `v1.1.0`
 
 ## Features
 
@@ -24,7 +24,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git#v1.0.0
+  https://github.com/janhavelka/MB85RC.git#v1.1.0
 ```
 
 ### Manual
@@ -71,13 +71,13 @@ void loop() {
 
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()`.
 
-## Release 1.0.0 Highlights
+## Release 1.1.0 Highlights
 
-- Stable public API centered on deterministic byte-oriented FRAM access.
-- Injected I2C transport with no `Wire` dependency inside the library core.
-- Health tracking with `READY`, `DEGRADED`, and `OFFLINE` states plus runtime counters.
-- Raw and parsed Device ID support, rollover-aware read/write/fill, and `verify()` diagnostics.
-- One bundled bringup CLI example that covers inspection, diagnostics, validation, benchmarks, and example-side typed storage helpers.
+- Latched `OFFLINE` behavior now keeps normal I2C operations off the bus until explicit `recover()` succeeds.
+- Public MB85RC family variant metadata documents supported and unsupported address models.
+- Cross-library diagnostics now have `driverState()` and a value-returning `getSettings()` overload.
+- Validation and recovery paths now keep health counters aligned with transport failures and Device ID mismatches.
+- The bringup CLI and documentation now cover current validation, health, and family-reference behavior.
 
 ## API Reference
 
@@ -217,7 +217,7 @@ doxygen Doxyfile
 
 - `CHANGELOG.md` - release history
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
-- `docs/releases/v1.0.0.md` - GitHub release notes for `v1.0.0`
+- `CHANGELOG.md` - GitHub release notes by version
 - `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - primary device datasheet used for verification
 - `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
 - `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review

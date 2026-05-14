@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [1.1.0] - 2026-05-14
 
+### Added
+- Public MB85RC family variant metadata, address-model descriptors, and `findVariantByProductId()`.
+- Convenience `driverState()` alias and value-returning `getSettings()` overload for cross-library diagnostics.
 - Native coverage proving latched `OFFLINE` blocks normal I2C operations without touching the bus while `recover()` remains the explicit recovery path.
 
 ### Changed
@@ -56,5 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/MB85RC/releases/tag/v1.0.0
