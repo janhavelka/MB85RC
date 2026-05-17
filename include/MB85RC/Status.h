@@ -18,7 +18,7 @@ enum class Err : uint8_t {
   DEVICE_ID_MISMATCH,        ///< Device ID does not match expected MB85RC256V
   ADDRESS_OUT_OF_RANGE,      ///< Memory address exceeds 0x7FFF
   WRITE_PROTECTED,           ///< Write rejected (WP pin may be high)
-  BUSY,                      ///< Device is busy
+  BUSY,                      ///< Device is busy or driver is latched OFFLINE until recover()
   IN_PROGRESS,               ///< Operation queued / in progress
 
   // I2C transport details (append-only to preserve existing values)

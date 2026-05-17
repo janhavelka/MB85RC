@@ -152,11 +152,11 @@ void printVariantCatalog() {
 }
 
 const char* goodIfZeroColor(uint32_t value) {
-  return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED;
+  return cli::zeroGoodColor(value);
 }
 
 const char* goodIfNonZeroColor(uint32_t value) {
-  return (value > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
+  return cli::nonZeroGoodColor(value);
 }
 
 const char* skipCountColor(uint32_t value) {
@@ -164,9 +164,7 @@ const char* skipCountColor(uint32_t value) {
 }
 
 const char* successRateColor(float pct) {
-  if (pct >= 99.9f) return LOG_COLOR_GREEN;
-  if (pct >= 80.0f) return LOG_COLOR_YELLOW;
-  return LOG_COLOR_RED;
+  return cli::successRateColor(pct);
 }
 
 uint32_t stressProgressStep(uint32_t total) {
@@ -2055,7 +2053,7 @@ void processCommand(const String& cmdLine) {
     return;
   }
 
-  if (cmd.startsWith("stress")) {
+  if (cmd == "stress" || cmd.startsWith("stress ")) {
     int count = DEFAULT_STRESS_COUNT;
     if (cmd.length() > 6) {
       if (!parseCountArg(cmd.substring(6), count)) {

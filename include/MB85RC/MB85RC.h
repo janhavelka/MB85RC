@@ -34,13 +34,13 @@ struct DeviceIdRaw {
 /// @brief Snapshot of current driver settings/state without performing I2C.
 struct SettingsSnapshot {
   bool initialized = false;       ///< True after begin() succeeds and before end()
-  DriverState state = DriverState::UNINIT;
-  uint8_t i2cAddress = cmd::DEFAULT_ADDRESS;
-  uint32_t i2cTimeoutMs = 0;
-  uint8_t offlineThreshold = 0;
-  bool hasNowMsHook = false;
-  bool currentAddressKnown = false;
-  uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read
+  DriverState state = DriverState::UNINIT; ///< Current lifecycle/health state.
+  uint8_t i2cAddress = cmd::DEFAULT_ADDRESS; ///< Active 7-bit I2C address.
+  uint32_t i2cTimeoutMs = 0;      ///< Configured per-transaction I2C timeout.
+  uint8_t offlineThreshold = 0;   ///< Consecutive failures required to enter OFFLINE.
+  bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
+  bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer.
+  uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read.
 };
 
 /// @brief Result of comparing expected bytes with FRAM contents.

@@ -2,7 +2,7 @@
 
 Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino and PlatformIO.
 
-Stable release: `v1.1.0`
+Stable release: `v1.1.1`
 
 ## Features
 
@@ -24,7 +24,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git#v1.1.0
+  https://github.com/janhavelka/MB85RC.git#v1.1.1
 ```
 
 ### Manual
@@ -71,13 +71,20 @@ void loop() {
 
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()`.
 
+## Release 1.1.1 Highlights
+
+- Bringup CLI status output is quieter and more consistent for successful diagnostic/demo commands.
+- Stress progress keeps color on success/fail counters only, so the percentage remains plain text.
+- Stress summaries now distinguish cycles, mixed commands, and tracked I2C health transactions.
+- Serial command input now uses the shared bounded CLI shell helper for cleaner monitor output.
+
 ## Release 1.1.0 Highlights
 
-- Latched `OFFLINE` behavior now keeps normal I2C operations off the bus until explicit `recover()` succeeds.
+- Latched `OFFLINE` behavior keeps normal I2C operations off the bus until explicit `recover()` succeeds.
 - Public MB85RC family variant metadata documents supported and unsupported address models.
-- Cross-library diagnostics now have `driverState()` and a value-returning `getSettings()` overload.
-- Validation and recovery paths now keep health counters aligned with transport failures and Device ID mismatches.
-- The bringup CLI and documentation now cover current validation, health, and family-reference behavior.
+- Cross-library diagnostics have `driverState()` and a value-returning `getSettings()` overload.
+- Validation and recovery paths keep health counters aligned with transport failures and Device ID mismatches.
+- The bringup CLI and documentation cover current validation, health, and family-reference behavior.
 
 ## API Reference
 
@@ -105,10 +112,12 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `Status readDeviceId(DeviceId& out)` - read manufacturer, product, and density fields
 - `Status readDeviceIdRaw(DeviceIdRaw& out)` - read the raw 3-byte Device ID payload
 - `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime state without I2C
+- `SettingsSnapshot getSettings() const` - value-returning snapshot helper for diagnostics
 
 ### State And Health
 
 - `DriverState state() const`
+- `DriverState driverState() const`
 - `bool isInitialized() const`
 - `bool isOnline() const`
 - `const Config& getConfig() const`
@@ -155,8 +164,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - `id` / `idraw` for parsed and raw Device ID visibility
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
   - `rw_suite` for safe read/write/fill/verify coverage with restore
-  - `randbench [N]` for random-access timing over a scratch window with restore
-  - `typed_demo` for fixed-width integer/float/double storage through the example-side codec layer
+  - `randbench [N]` for random-access timing over a scratch window with compact restore status
+  - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
 
 ### CLI Inspection Examples
 
@@ -186,8 +195,9 @@ typed_demo                # Demonstrate explicit typed value storage
 | `I2cTransport.h` | Wire-backed transport adapter |
 | `I2cScanner.h` | Bus scan helper |
 | `BusDiag.h` | Bus diagnostics wrapper |
+| `CliStyle.h` | CLI prompt, help, and color formatting helpers |
 | `CliShell.h` | Simple serial shell helper |
-| `CommandHandler.h` | Example command parsing helpers |
+| `CommandHandler.h` | Legacy char-buffer command parsing helpers |
 | `HealthView.h` | Compact health display helper |
 | `HealthDiag.h` | Verbose health diagnostics helper |
 | `TransportAdapter.h` | Transport alias helper |
@@ -215,9 +225,9 @@ doxygen Doxyfile
 
 ## Documentation
 
-- `CHANGELOG.md` - release history
+- `CHANGELOG.md` - release history and GitHub release note source
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
-- `CHANGELOG.md` - GitHub release notes by version
+- `docs/releases/` - per-release validation summaries
 - `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - primary device datasheet used for verification
 - `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
 - `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review

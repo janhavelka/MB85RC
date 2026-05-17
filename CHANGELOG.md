@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-05-17
+
+### Changed
+
+- Polished bringup CLI serial monitor output for successful diagnostic/demo commands.
+- Stress progress now keeps color only on `ok` and `fail` counters.
+- Stress summaries now label write/read/verify throughput as cycles, mixed-operation throughput as commands, and health counter changes as tracked I2C health deltas.
+- `randbench` and `typed_demo` now use compact `[PASS]` status lines on success while preserving detailed `Status` output for failures.
+- The bringup loop now uses the shared bounded CLI shell helper for cleaner prompt/output separation.
+- The `stress` command parser now accepts only `stress` or `stress <count>`, matching CLI help.
+- Public Doxygen comments now document all `SettingsSnapshot` fields and clarify that `BUSY` also represents latched `OFFLINE`.
+- Release documentation now includes `docs/releases/v1.1.0.md` and `docs/releases/v1.1.1.md`.
+
 ## [1.1.0] - 2026-05-14
 
 ### Added
@@ -59,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/MB85RC/releases/tag/v1.0.0

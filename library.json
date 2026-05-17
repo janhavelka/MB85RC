@@ -1,6 +1,6 @@
 {
   "name": "MB85RC",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Production-grade MB85RC256V FRAM I2C memory driver.",
   "keywords": [
     "mb85rc",

@@ -1,8 +1,10 @@
 /**
  * @file CommandHandler.h
- * @brief Simple serial command parser for interactive examples.
+ * @brief Legacy char-buffer command parser for interactive examples.
  *
  * NOT part of the library API. This is a helper for examples.
+ * New interactive sketches should prefer CliShell.h for bounded String-based
+ * line input with trimming, backspace handling, and overflow recovery.
  */
 
 #pragma once
@@ -70,7 +72,24 @@ inline bool parseInt(const char* cmd, const char* keyword, int* outValue) {
  * @return true if command starts with keyword.
  */
 inline bool match(const char* cmd, const char* keyword) {
-  return strncasecmp(cmd, keyword, strlen(keyword)) == 0;
+  if (cmd == nullptr || keyword == nullptr) {
+    return false;
+  }
+  while (*keyword != '\0') {
+    const char a = *cmd;
+    const char b = *keyword;
+    if (a == '\0') {
+      return false;
+    }
+    const char lowerA = (a >= 'A' && a <= 'Z') ? static_cast<char>(a - 'A' + 'a') : a;
+    const char lowerB = (b >= 'A' && b <= 'Z') ? static_cast<char>(b - 'A' + 'a') : b;
+    if (lowerA != lowerB) {
+      return false;
+    }
+    ++cmd;
+    ++keyword;
+  }
+  return true;
 }
 
 }  // namespace cmd
