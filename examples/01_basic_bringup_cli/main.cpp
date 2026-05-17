@@ -210,6 +210,17 @@ void printStatus(const MB85RC::Status& st) {
   }
 }
 
+void printCheckStatus(const char* name, const MB85RC::Status& st) {
+  Serial.printf("  [%s%s%s] %s\n",
+                LOG_COLOR_RESULT(st.ok()),
+                st.ok() ? "PASS" : "FAIL",
+                LOG_COLOR_RESET,
+                name);
+  if (!st.ok()) {
+    printStatus(st);
+  }
+}
+
 void printDriverHealth() {
   const uint32_t now = millis();
   const uint32_t totalOk = device.totalSuccess();
@@ -1402,18 +1413,10 @@ void runRandomBench(int count) {
                                 RANDOM_BENCH_ADDR,
                                 originalWindow,
                                 sizeof(originalWindow));
-  Serial.print("  Restore benchmark window:\n");
-  printStatus(st);
+  printCheckStatus("restore benchmark window", st);
 }
 
 void runTypedDemo() {
-  auto printNamedStatus = [](const char* name, const MB85RC::Status& status) {
-    Serial.print("  ");
-    Serial.print(name);
-    Serial.println(":");
-    printStatus(status);
-  };
-
   Serial.println("=== Typed Value Demo ===");
   Serial.println("  Storage format: explicit little-endian, fixed-width, no silent wrap.");
 
@@ -1425,20 +1428,20 @@ void runTypedDemo() {
   }
 
   uint16_t cursor = TYPED_DEMO_ADDR;
-  printNamedStatus("write uint8", typed_memory::writeUint8(device, cursor, 0x7EU));
+  printCheckStatus("write uint8", typed_memory::writeUint8(device, cursor, 0x7EU));
   cursor += 1U;
-  printNamedStatus("write uint16 LE", typed_memory::writeUint16Le(device, cursor, 0x1234U));
+  printCheckStatus("write uint16 LE", typed_memory::writeUint16Le(device, cursor, 0x1234U));
   cursor += 2U;
-  printNamedStatus("write int32 LE", typed_memory::writeInt32Le(device, cursor, -1234567));
+  printCheckStatus("write int32 LE", typed_memory::writeInt32Le(device, cursor, -1234567));
   cursor += 4U;
-  printNamedStatus("write uint64 LE",
+  printCheckStatus("write uint64 LE",
                    typed_memory::writeUint64Le(device, cursor, 0x1122334455667788ULL));
   cursor += 8U;
-  printNamedStatus("write float32 LE", typed_memory::writeFloat32Le(device, cursor, 1.25f));
+  printCheckStatus("write float32 LE", typed_memory::writeFloat32Le(device, cursor, 1.25f));
   cursor += 4U;
-  printNamedStatus("write float64 LE", typed_memory::writeFloat64Le(device, cursor, -42.5));
+  printCheckStatus("write float64 LE", typed_memory::writeFloat64Le(device, cursor, -42.5));
   cursor += 8U;
-  printNamedStatus("write bool", typed_memory::writeBool(device, cursor, true));
+  printCheckStatus("write bool", typed_memory::writeBool(device, cursor, true));
 
   uint8_t u8 = 0;
   uint16_t u16 = 0;
@@ -1501,7 +1504,7 @@ void runTypedDemo() {
                 LOG_COLOR_RESET);
 
   st = typed_memory::writeBytes(device, TYPED_DEMO_ADDR, original, sizeof(original));
-  printNamedStatus("restore typed demo region", st);
+  printCheckStatus("restore typed demo region", st);
 }
 
 void printHelp() {
