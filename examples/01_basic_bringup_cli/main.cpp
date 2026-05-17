@@ -10,6 +10,7 @@
 #include "examples/common/Log.h"
 #include "examples/common/BoardConfig.h"
 #include "examples/common/BusDiag.h"
+#include "examples/common/CliShell.h"
 #include "examples/common/I2cTransport.h"
 #include "examples/common/I2cScanner.h"
 #include "examples/common/TypedMemory.h"
@@ -185,12 +186,10 @@ void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, u
     return;
   }
   const float pct = (100.0f * static_cast<float>(completed)) / static_cast<float>(total);
-  Serial.printf("  Progress: %lu/%lu (%s%.0f%%%s, ok=%s%lu%s, fail=%s%lu%s)\n",
+  Serial.printf("  Progress: %lu/%lu (%.0f%%, ok=%s%lu%s, fail=%s%lu%s)\n",
                 static_cast<unsigned long>(completed),
                 static_cast<unsigned long>(total),
-                successRateColor(pct),
                 pct,
-                LOG_COLOR_RESET,
                 goodIfNonZeroColor(okCount),
                 static_cast<unsigned long>(okCount),
                 LOG_COLOR_RESET,
@@ -744,7 +743,7 @@ void finishStressStats() {
   if (durationMs > 0) {
     const float rate = 1000.0f * static_cast<float>(stressStats.attempts) /
                        static_cast<float>(durationMs);
-    Serial.printf("  Rate: %.2f ops/s\n", rate);
+    Serial.printf("  Rate: %.2f cycles/s\n", rate);
   }
 
   if (!stressStats.lastError.ok()) {
@@ -802,7 +801,7 @@ void runStress(int count) {
   const uint32_t failDelta = device.totalFailures() - failBefore;
 
   finishStressStats();
-  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+  Serial.printf("  Tracked I2C health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
                 goodIfNonZeroColor(successDelta),
                 static_cast<unsigned long>(successDelta),
                 LOG_COLOR_RESET,
@@ -928,7 +927,7 @@ void runStressMix(int count) {
                 LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(elapsed));
   if (elapsed > 0) {
-    Serial.printf("  Rate: %.2f ops/s\n", (1000.0f * static_cast<float>(count)) / elapsed);
+    Serial.printf("  Rate: %.2f commands/s\n", (1000.0f * static_cast<float>(count)) / elapsed);
   }
   for (int i = 0; i < opCount; ++i) {
     Serial.printf("  %-14s %sok=%lu%s %sfail=%lu%s\n",
@@ -942,7 +941,7 @@ void runStressMix(int count) {
   }
   const uint32_t successDelta = device.totalSuccess() - succBefore;
   const uint32_t failDelta = device.totalFailures() - failBefore;
-  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+  Serial.printf("  Tracked I2C health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
                 goodIfNonZeroColor(successDelta),
                 static_cast<unsigned long>(successDelta),
                 LOG_COLOR_RESET,
@@ -2112,17 +2111,10 @@ void setup() {
 void loop() {
   device.tick(millis());
 
-  static String inputBuffer;
-  while (Serial.available()) {
-    const char c = static_cast<char>(Serial.read());
-    if (c == '\n' || c == '\r') {
-      if (inputBuffer.length() > 0) {
-        processCommand(inputBuffer);
-        inputBuffer = "";
-        cli::printPrompt();
-      }
-    } else {
-      inputBuffer += c;
-    }
+  String line;
+  while (cli_shell::readLine(line)) {
+    Serial.println();
+    processCommand(line);
+    cli::printPrompt();
   }
 }
