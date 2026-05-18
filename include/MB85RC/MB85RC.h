@@ -292,7 +292,7 @@ private:
   Status _recordFailure(const Status& st);
   void _reassertOfflineLatch();
 
-  /// Get current time using injected callback or millis() fallback
+  /// Get current time using injected callback or active platform fallback
   uint32_t _nowMs() const;
   
   // =========================================================================

@@ -1,0 +1,10 @@
+version: "1.1.1"
+description: "Production-grade MB85RC256V FRAM I2C memory driver"
+license: "MIT"
+url: "https://github.com/janhavelka/MB85RC"
+repository: "https://github.com/janhavelka/MB85RC.git"
+targets:
+  - esp32s2
+  - esp32s3
+dependencies:
+  idf: ">=6.0.1"

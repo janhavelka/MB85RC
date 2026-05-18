@@ -11,15 +11,26 @@
 
 #pragma once
 
+#ifndef MB85RC_EXAMPLE_PLATFORM_IDF
+#define MB85RC_EXAMPLE_PLATFORM_IDF 0
+#endif
+
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+#include "examples/common/IdfArduinoCompat.h"
+#else
 #include <Arduino.h>
 #include <Wire.h>
+#endif
 
 #include "MB85RC/Status.h"
 
 namespace transport {
 
 inline bool interfaceReset(int sda, int scl) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || MB85RC_EXAMPLE_PLATFORM_IDF
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+  Wire.end();
+#endif
   // 9 SCL pulses + STOP is the standard bus recovery / interface-reset sequence.
   pinMode(scl, OUTPUT);
   pinMode(sda, INPUT_PULLUP);
@@ -37,6 +48,9 @@ inline bool interfaceReset(int sda, int scl) {
   delayMicroseconds(5);
   digitalWrite(sda, HIGH);
   delayMicroseconds(5);
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+  return Wire.begin(sda, scl);
+#endif
 #else
   (void)sda;
   (void)scl;
@@ -78,12 +92,14 @@ inline MB85RC::Status mapWireResult(uint8_t result, const char* context) {
  */
 inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
                                 uint32_t timeoutMs, void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "Wire instance is null");
   }
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+  return wire->writeStatus(addr, data, len, timeoutMs);
+#else
+  (void)timeoutMs;
   if (!data || len == 0) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid I2C write params");
   }
@@ -103,6 +119,7 @@ inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
 
   uint8_t result = wire->endTransmission(true);  // Send STOP
   return mapWireResult(result, "I2C write failed");
+#endif
 }
 
 /**
@@ -123,12 +140,14 @@ inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
 inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
                                     uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
                                     void* user) {
-  (void)timeoutMs;
-
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "Wire instance is null");
   }
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+  return wire->writeReadStatus(addr, tx, txLen, rx, rxLen, timeoutMs);
+#else
+  (void)timeoutMs;
   if ((txLen > 0 && tx == nullptr) || (rxLen > 0 && rx == nullptr)) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid I2C read params");
   }
@@ -168,6 +187,7 @@ inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLe
   }
 
   return MB85RC::Status::Ok();
+#endif
 }
 
 /**
@@ -180,8 +200,14 @@ inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLe
  * @return true on success
  */
 inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
+#if MB85RC_EXAMPLE_PLATFORM_IDF
+  if (!interfaceReset(sda, scl)) {
+    return false;
+  }
+#else
   interfaceReset(sda, scl);
   Wire.begin(sda, scl);
+#endif
   Wire.setClock(freq);
   Wire.setTimeOut(timeoutMs);
   return true;

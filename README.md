@@ -1,6 +1,6 @@
 # MB85RC Driver Library
 
-Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino and PlatformIO.
+Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
 Stable release: `v1.1.1`
 
@@ -30,6 +30,27 @@ lib_deps =
 ### Manual
 
 Copy `include/MB85RC/` and `src/` into your project.
+
+### ESP-IDF Component
+
+This repository also builds as a pure ESP-IDF component. Add the repo as an
+extra component or dependency, then include `MB85RC/MB85RC.h` and provide
+`Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
+I2C master bus.
+
+The full bring-up CLI is shared between Arduino and ESP-IDF:
+
+```bash
+cd examples/espidf_basic
+idf.py set-target esp32s3
+idf.py build
+```
+
+The ESP-IDF example uses `driver/i2c_master.h` through
+`examples/common/IdfArduinoCompat.h` so it exposes the same commands and serial
+output as `examples/01_basic_bringup_cli`, including Device ID reads,
+current-address reads, wrap-aware memory commands, typed demo, random benchmark,
+self-test, and stress diagnostics.
 
 ## Quick Start
 
@@ -69,7 +90,7 @@ void loop() {
 }
 ```
 
-The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()`.
+The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()` on Arduino/native-test builds and `esp_timer_get_time()` on ESP-IDF builds.
 
 ## Release 1.1.1 Highlights
 
@@ -167,6 +188,12 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - `randbench [N]` for random-access timing over a scratch window with compact restore status
   - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
 
+- `examples/espidf_basic/`
+  - Pure ESP-IDF build of the same bring-up CLI.
+  - Includes the Arduino example source with `MB85RC_EXAMPLE_PLATFORM_IDF=1`.
+  - Supplies a fixed-capacity `String`/serial/GPIO/Wire-compatible shim backed by ESP-IDF v6 `i2c_master_*` APIs.
+  - Explicitly supports current-address reads (`txLen == 0`) and Device ID reads through reserved address `0x7C`.
+
 ### CLI Inspection Examples
 
 ```text
@@ -220,6 +247,10 @@ python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 pio run -e esp32s3dev
 pio run -e esp32s2dev
+
+# Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
+cd examples/espidf_basic
+idf.py build
 doxygen Doxyfile
 ```
 
