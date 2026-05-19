@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Root ESP-IDF component now declares `esp_timer` as a private requirement because the fallback timer shim is an implementation detail, not a public-header dependency.
+
 ## [2.0.0] - 2026-05-19
 
 ### Added
