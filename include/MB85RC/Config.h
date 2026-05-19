@@ -8,6 +8,13 @@
 
 namespace MB85RC {
 
+/// @brief Runtime device variant selection for Device ID validation and memory bounds.
+enum class DeviceVariant : uint8_t {
+  AUTO = 0,       ///< Select a supported runtime variant from Device ID.
+  MB85RC256V,     ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
+  MB85RC64TA      ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
+};
+
 /// I2C write callback signature
 /// @param addr I2C device address (7-bit)
 /// @param data Pointer to data to write
@@ -50,6 +57,7 @@ struct Config {
   // === Device Settings ===
   uint8_t i2cAddress = 0x50;             ///< 0x50-0x57 depending on A2:A1:A0 pins
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
+  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V; ///< Expected runtime variant; default preserves legacy 256V behavior
 
   // === Health Tracking ===
   uint8_t offlineThreshold = 5;          ///< Consecutive failures before OFFLINE state

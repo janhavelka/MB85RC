@@ -1,17 +1,18 @@
 # MB85RC Driver Library
 
-Production-grade MB85RC256V FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
+Production-grade MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Stable release: `v1.1.1`
+Library version: `v2.0.0`
 
 ## Features
 
 - Injected I2C transport with no `Wire` dependency in library code
 - Health monitoring with `READY`, `DEGRADED`, and `OFFLINE` states
 - Deterministic managed-synchronous lifecycle: `begin()`, `tick()`, `end()`
-- Chunked read/write support with rollover at `0x7FFF -> 0x0000`
+- Runtime variant selection for `MB85RC256V` and `MB85RC64TA`
+- Chunked read/write support bounded by the active variant capacity
 - Current-address read support for the documented internal address-pointer flow, including multi-byte helper coverage
-- Device ID verification on `begin()` (`Manufacturer ID = 0x00A`, `Product ID = 0x510`)
+- Device ID verification on `begin()` (`Manufacturer ID = 0x00A`, variant-specific Product ID)
 - Raw Device ID access and verify/compare helpers for diagnostics
 - Runtime settings snapshot API for examples and diagnostics
 - Manual recovery that records transport failures and Device ID mismatches in health tracking
@@ -24,7 +25,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git#v1.1.1
+  https://github.com/janhavelka/MB85RC.git#v2.0.0
 ```
 
 ### Manual
@@ -49,7 +50,7 @@ idf.py build
 The ESP-IDF example uses `driver/i2c_master.h` through
 `examples/common/IdfArduinoCompat.h` so it exposes the same commands and serial
 output as `examples/01_basic_bringup_cli`, including Device ID reads,
-current-address reads, wrap-aware memory commands, typed demo, random benchmark,
+current-address reads, active-capacity-bounded memory commands, typed demo, random benchmark,
 self-test, and stress diagnostics.
 
 Validation status: command parity is structural through shared source. Native
@@ -75,6 +76,7 @@ void setup() {
   cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cUser = &Wire;
   cfg.i2cAddress = 0x50;
+  cfg.expectedVariant = MB85RC::DeviceVariant::AUTO; // or MB85RC64TA / MB85RC256V
 
   MB85RC::Status st = device.begin(cfg);
   if (!st.ok()) {
@@ -95,7 +97,17 @@ void loop() {
 }
 ```
 
+The default `expectedVariant` is `MB85RC256V` for compatibility with existing users. New integrations should set `DeviceVariant::AUTO` or an explicit expected variant so `begin()`, `probe()`, and `recover()` validate the actual Device ID and capacity.
+
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()` on Arduino/native-test builds and `esp_timer_get_time()` on ESP-IDF builds.
+
+## Release 2.0.0 Highlights
+
+- Runtime variant selection through `Config::expectedVariant` with `AUTO`, `MB85RC64TA`, and `MB85RC256V`.
+- `begin()`, `probe()`, and `recover()` validate the selected active Device ID instead of hard-coding the 256V product ID.
+- `capacityBytes()`, `maxAddress()`, `variantName()`, `variantInfo()`, and `deviceId()` expose the active runtime device.
+- `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
+- The shared Arduino/ESP-IDF CLI uses active-capacity bounds while keeping the same command surface in both frameworks.
 
 ## Release 1.1.1 Highlights
 
@@ -120,14 +132,24 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `void tick(uint32_t nowMs)` - reserved no-op for FRAM
 - `void end()` - shut down driver and clear runtime state
 
+### Variant Selection
+
+- `Config::expectedVariant` - `MB85RC256V` by default, or `AUTO` / `MB85RC64TA` for runtime selection.
+- `const cmd::VariantInfo* variantInfo() const` - active variant metadata after `begin()`.
+- `const char* variantName() const` - active variant name, or `unknown` before selection.
+- `DeviceId deviceId() const` - cached Device ID from the last successful `begin()` / `recover()` validation.
+- `uint32_t capacityBytes() const` - active runtime capacity.
+- `uint16_t maxAddress() const` - active highest valid memory address.
+- `static constexpr uint16_t memorySize()` - legacy MB85RC256V size helper retained for existing users.
+
 ### Memory Operations
 
 - `Status readByte(uint16_t addr, uint8_t& out)` - read one byte
-- `Status read(uint16_t addr, uint8_t* buf, size_t len)` - read a block with chunking and rollover
+- `Status read(uint16_t addr, uint8_t* buf, size_t len)` - read a contiguous block with chunking
 - `Status readCurrentAddress(uint8_t& out)` - read from the device's current internal address pointer
 - `Status readCurrentAddress(uint8_t* buf, size_t len)` - repeat documented current-address reads into a buffer
 - `Status writeByte(uint16_t addr, uint8_t value)` - write one byte
-- `Status write(uint16_t addr, const uint8_t* data, size_t len)` - write a block with chunking and rollover
+- `Status write(uint16_t addr, const uint8_t* data, size_t len)` - write a contiguous block with chunking
 - `Status fill(uint16_t addr, uint8_t value, size_t len)` - fill a region with a constant byte
 - `Status verify(uint16_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - compare FRAM contents against expected bytes
 
@@ -147,6 +169,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `bool isInitialized() const`
 - `bool isOnline() const`
 - `const Config& getConfig() const`
+- `uint32_t capacityBytes() const`
+- `uint16_t maxAddress() const`
 - `uint32_t lastOkMs() const`
 - `uint32_t lastErrorMs() const`
 - `Status lastError() const`
@@ -154,24 +178,20 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
 
-## MB85RC256V Overview
+## Supported Runtime Variants
 
-| Property | Value |
-|----------|-------|
-| Technology | FRAM (Ferroelectric RAM) |
-| Capacity | 32 KB (256 Kbit) |
-| Address range | `0x0000` - `0x7FFF` |
-| I2C address | `0x50` - `0x57` via A2/A1/A0 |
-| I2C speed | Up to 1 MHz |
-| Write endurance | `10^12` read/write cycles per byte |
-| Data retention | 10 years at 85 C |
-| Write latency | None; no write-cycle delay or ACK polling |
+| Variant | Product ID | Capacity | Address range | Config selector |
+|---------|------------|----------|---------------|-----------------|
+| `MB85RC64TA` | `0x358` | 8 KB (64 Kbit) | `0x0000` - `0x1FFF` | `DeviceVariant::MB85RC64TA` |
+| `MB85RC256V` | `0x510` | 32 KB (256 Kbit) | `0x0000` - `0x7FFF` | `DeviceVariant::MB85RC256V` |
+
+Both supported variants use two memory-address bytes and A2/A1/A0 address pins in the I2C slave address. Other family variants remain listed in `cmd::KNOWN_VARIANTS` for diagnostics, but memory operations reject them until the address model is implemented and tested.
 
 ## Notes
 
-- `read()`, `write()`, and `fill()` intentionally preserve the documented rollover from `0x7FFF` to `0x0000`.
+- `read()`, `write()`, `fill()`, and `verify()` reject ranges where `address + len > capacityBytes()`; they do not silently wrap bulk operations.
 - `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
-- The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior.
+- The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior and rejecting cross-capacity reads.
 - Argument validation errors reject null buffers, zero lengths, and out-of-range start addresses before touching the bus or health counters.
 - `recover()` invalidates current-address tracking and records both I2C failures and Device ID mismatches in driver health.
 - `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
@@ -184,7 +204,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 
 - `examples/01_basic_bringup_cli/`
   - `cfg` / `settings` for runtime/config snapshots
-  - `read` / `dump` / `hexdump` for wrap-aware hex+ASCII memory dumps
+  - `read` / `dump` / `hexdump` for active-capacity-bounded hex+ASCII memory dumps
   - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
@@ -241,7 +261,7 @@ typed_demo                # Demonstrate explicit typed value storage
 1. Threading model: single-threaded by default; not thread-safe.
 2. Timing model: `tick()` is bounded and currently a no-op; public I2C operations are blocking.
 3. Resource ownership: bus, pins, and timeout policy remain application-owned via `Config`.
-4. Memory behavior: no heap allocation in steady-state library operation.
+4. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
 5. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
 6. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
 
@@ -266,6 +286,7 @@ doxygen Doxyfile
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
 - `docs/IDF_PORT_IMPLEMENTATION.md` - ESP-IDF implementation and audit closure notes
 - `docs/releases/` - per-release validation summaries
+- `docs/MB85RC64TA-DS5v1-E.pdf` - MB85RC64TA datasheet used for 8 KB runtime support
 - `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - primary device datasheet used for verification
 - `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
 - `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review

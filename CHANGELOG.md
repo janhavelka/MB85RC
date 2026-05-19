@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-05-19
+
 ### Added
 
+- Runtime variant selection with `DeviceVariant::AUTO`, `DeviceVariant::MB85RC64TA`, and `DeviceVariant::MB85RC256V`.
+- `Config::expectedVariant` for explicit Device ID validation while keeping the legacy default at `MB85RC256V`.
+- First-class `MB85RC64TA` runtime support: Product ID `0x358`, 8 KB capacity, `0x0000..0x1FFF` bounds, and two-byte address encoding with high-byte mask `0x1F`.
+- Runtime diagnostics: `variantInfo()`, `variantName()`, `deviceId()`, `capacityBytes()`, `maxAddress()`, and expanded `SettingsSnapshot` fields.
+- Native tests for AUTO selection, explicit 64TA begin, variant mismatches, 64TA address encoding, active-capacity bounds, current-address bounds, and active-variant `probe()` / `recover()`.
 - ESP-IDF component metadata and a pure ESP-IDF `examples/espidf_basic` build of the full bring-up CLI.
 - `examples/common/IdfArduinoCompat.h` example shim that provides the small Arduino surface used by the CLI while routing I2C through ESP-IDF v6 `i2c_master_*` APIs.
 - ESP-IDF port notes in `docs/IDF_PORT.md`.
@@ -16,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `begin()`, `probe()`, and `recover()` now validate the selected active variant instead of hard-coding the MB85RC256V product ID.
+- `read()`, `write()`, `fill()`, `verify()`, `readCurrentAddress(uint8_t*, size_t)`, typed helpers, and CLI memory commands now reject ranges that cross the active variant capacity instead of silently relying on device rollover.
+- The shared Arduino/ESP-IDF CLI now initializes with `DeviceVariant::AUTO`, prints active variant/capacity diagnostics, and sizes full-chip/benchmark operations from the runtime capacity.
+- `library.json`, `idf_component.yml`, and README now describe the library as an MB85RC-family driver and include `MB85RC64TA`.
 - Core time fallback is now platform-aware: Arduino/native test builds use `millis()`, while ESP-IDF builds use `esp_timer_get_time()`.
 - Example helpers now gate Arduino headers behind `MB85RC_EXAMPLE_PLATFORM_IDF` so the same CLI source can compile for both frameworks.
 - `library.json` now declares both `arduino` and `espidf` framework support.
@@ -24,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tools/check_cli_contract.py` now validates the ESP-IDF wrapper macro, shared-source include, required CMake dependencies, full CLI command surface, Device ID reserved-address shim path, and core Device ID address construction.
 - ESP-IDF port docs now spell out the static wrapper contract checks and Doxygen validation coverage.
 - The ESP-IDF CLI parity is structural through shared source; pure IDF `idf.py` builds and hardware validation remain pending until an IDF toolchain and target hardware are available.
+
+### Fixed
+
+- Active-capacity range checks now compare `size_t` lengths without truncating to `uint32_t`, so oversized 64-bit host lengths are rejected before any buffer access.
 
 ## [1.1.1] - 2026-05-17
 
@@ -90,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/MB85RC/releases/tag/v1.0.0

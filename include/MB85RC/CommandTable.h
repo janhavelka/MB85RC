@@ -1,5 +1,5 @@
 /// @file CommandTable.h
-/// @brief Device constants and address definitions for MB85RC256V FRAM
+/// @brief Device constants and address definitions for MB85RC-family FRAM
 #pragma once
 
 #include <cstddef>
@@ -27,8 +27,14 @@ static constexpr uint8_t DEVICE_TYPE_CODE = 0xA0;
 /// Manufacturer ID (12-bit): Fujitsu / RAMXEED
 static constexpr uint16_t MANUFACTURER_ID = 0x00A;
 
+/// Product ID (12-bit): MB85RC64TA
+static constexpr uint16_t PRODUCT_ID_MB85RC64TA = 0x358;
+
 /// Product ID (12-bit): MB85RC256V
-static constexpr uint16_t PRODUCT_ID = 0x510;
+static constexpr uint16_t PRODUCT_ID_MB85RC256V = 0x510;
+
+/// Legacy product ID alias for MB85RC256V.
+static constexpr uint16_t PRODUCT_ID = PRODUCT_ID_MB85RC256V;
 
 /// Density code (upper nibble of Product ID)
 static constexpr uint8_t DENSITY_CODE = 0x05;
@@ -50,7 +56,7 @@ struct VariantInfo {
   bool hasDeviceId;              ///< True when the datasheet defines Device ID readback.
   AddressModel addressModel;     ///< Addressing model used by memory transactions.
   bool uses256vAccessFormat;     ///< True when the 256V two-byte linear access format applies.
-  bool supportedByDriver;        ///< True only for the MB85RC256V runtime driver.
+  bool supportedByDriver;        ///< True when runtime memory operations are implemented/tested.
   bool highSpeedMode;            ///< True when the variant documents I2C high-speed mode.
   bool sleepMode;                ///< True when the variant documents sleep mode.
 };
@@ -61,8 +67,8 @@ static constexpr VariantInfo KNOWN_VARIANTS[] = {
    AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, false, false, false},
   {"MB85RC16V", 2048UL, 0x000, 0x00, false,
    AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, false, false, false},
-  {"MB85RC64TA", 8192UL, 0x358, 0x03, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, false, true, true},
+  {"MB85RC64TA", 8192UL, PRODUCT_ID_MB85RC64TA, 0x03, true,
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true},
   {"MB85RC256V", 32768UL, PRODUCT_ID, DENSITY_CODE, true,
    AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, false, false},
   {"MB85RC512T", 65536UL, 0x658, 0x06, true,
@@ -86,6 +92,23 @@ inline const VariantInfo* findVariantByProductId(uint16_t productId) {
   return nullptr;
 }
 
+/// @brief Return the maximum address for a supported 16-bit-address variant.
+/// @param variant Variant metadata
+/// @return Highest valid byte address, or 0 when capacity cannot be addressed by this driver API
+inline uint16_t maxAddressForVariant(const VariantInfo& variant) {
+  if (variant.memoryBytes == 0UL || variant.memoryBytes > 65536UL) {
+    return 0U;
+  }
+  return static_cast<uint16_t>(variant.memoryBytes - 1UL);
+}
+
+/// @brief Return the high address byte mask for a two-byte address variant.
+/// @param variant Variant metadata
+/// @return Mask applied to the high memory-address byte
+inline uint8_t addressHighMaskForVariant(const VariantInfo& variant) {
+  return static_cast<uint8_t>((maxAddressForVariant(variant) >> 8) & 0xFFU);
+}
+
 // ============================================================================
 // Device ID Read Protocol
 // ============================================================================
@@ -103,13 +126,31 @@ static constexpr uint8_t DEVICE_ID_LEN = 3;
 // Memory Layout
 // ============================================================================
 
-/// Memory size in bytes (32,768 = 256 Kbit / 8)
+/// Memory size in bytes for MB85RC64TA (8,192 = 64 Kbit / 8)
+static constexpr uint16_t MEMORY_SIZE_MB85RC64TA = 8192;
+
+/// Maximum valid MB85RC64TA memory address (0x0000-0x1FFF)
+static constexpr uint16_t MAX_MEM_ADDRESS_MB85RC64TA = 0x1FFF;
+
+/// High address byte mask for MB85RC64TA
+static constexpr uint8_t ADDR_HIGH_MASK_MB85RC64TA = 0x1F;
+
+/// Memory size in bytes for MB85RC256V (32,768 = 256 Kbit / 8)
+static constexpr uint16_t MEMORY_SIZE_MB85RC256V = 32768;
+
+/// Maximum valid MB85RC256V memory address (15-bit: 0x0000-0x7FFF)
+static constexpr uint16_t MAX_MEM_ADDRESS_MB85RC256V = 0x7FFF;
+
+/// Address mask for the MB85RC256V high byte (MSB must be 0)
+static constexpr uint8_t ADDR_HIGH_MASK_MB85RC256V = 0x7F;
+
+/// Legacy memory size alias for MB85RC256V (32,768 = 256 Kbit / 8)
 static constexpr uint16_t MEMORY_SIZE = 32768;
 
-/// Maximum valid memory address (15-bit: 0x0000-0x7FFF)
+/// Legacy maximum valid memory address alias for MB85RC256V (0x0000-0x7FFF)
 static constexpr uint16_t MAX_MEM_ADDRESS = 0x7FFF;
 
-/// Address mask for the high byte (MSB must be 0)
+/// Legacy address mask alias for the MB85RC256V high byte
 static constexpr uint8_t ADDR_HIGH_MASK = 0x7F;
 
 /// Number of address bytes sent per transaction

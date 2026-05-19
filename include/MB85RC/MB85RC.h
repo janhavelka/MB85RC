@@ -1,5 +1,5 @@
 /// @file MB85RC.h
-/// @brief Main driver class for MB85RC256V FRAM
+/// @brief Main driver class for supported MB85RC-family FRAM variants
 #pragma once
 
 #include <cstddef>
@@ -22,8 +22,8 @@ enum class DriverState : uint8_t {
 /// @brief Device ID fields parsed from 3-byte read.
 struct DeviceId {
   uint16_t manufacturerId = 0; ///< 12-bit Manufacturer ID (expect 0x00A)
-  uint16_t productId = 0;      ///< 12-bit Product ID (expect 0x510)
-  uint8_t densityCode = 0;     ///< Density nibble from Product ID (expect 0x5)
+  uint16_t productId = 0;      ///< 12-bit Product ID
+  uint8_t densityCode = 0;     ///< Density nibble from Product ID
 };
 
 /// @brief Raw 3-byte Device ID payload as returned on the bus.
@@ -39,6 +39,15 @@ struct SettingsSnapshot {
   uint32_t i2cTimeoutMs = 0;      ///< Configured per-transaction I2C timeout.
   uint8_t offlineThreshold = 0;   ///< Consecutive failures required to enter OFFLINE.
   bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
+  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V; ///< Configured variant expectation.
+  DeviceVariant activeVariant = DeviceVariant::MB85RC256V; ///< Active runtime variant after begin().
+  bool variantKnown = false;      ///< True when begin() selected a supported variant.
+  const char* variantName = "unknown"; ///< Active runtime variant name, or "unknown".
+  uint16_t manufacturerId = 0;    ///< Cached Device ID manufacturer field.
+  uint16_t productId = 0;         ///< Cached Device ID product field.
+  uint8_t densityCode = 0;        ///< Cached Device ID density field.
+  uint32_t capacityBytes = 0;     ///< Active runtime memory capacity in bytes.
+  uint16_t maxAddress = 0;        ///< Highest valid runtime memory address.
   bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer.
   uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read.
 };
@@ -51,7 +60,7 @@ struct VerifyResult {
   uint8_t actual = 0;             ///< Actual byte read at mismatchOffset
 };
 
-/// @brief MB85RC256V FRAM driver class.
+/// @brief MB85RC-family FRAM driver class.
 class MB85RC {
 public:
   // =========================================================================
@@ -108,6 +117,21 @@ public:
   /// Get a copy of the active configuration.
   const Config& getConfig() const { return _config; }
 
+  /// Get the active runtime variant metadata, or nullptr before begin().
+  const cmd::VariantInfo* variantInfo() const { return _variant; }
+
+  /// Get the active runtime variant name.
+  const char* variantName() const { return (_variant != nullptr) ? _variant->name : "unknown"; }
+
+  /// Get cached Device ID fields from the last successful begin()/recover() validation.
+  DeviceId deviceId() const { return _deviceId; }
+
+  /// Get active runtime capacity in bytes.
+  uint32_t capacityBytes() const;
+
+  /// Get highest valid active runtime memory address.
+  uint16_t maxAddress() const;
+
   /// Get a snapshot of current configuration/runtime state (no I2C).
   Status getSettings(SettingsSnapshot& out) const;
 
@@ -145,14 +169,14 @@ public:
   // =========================================================================
   
   /// Read a single byte from the specified address.
-  /// @param address Memory address (0x0000-0x7FFF)
+  /// @param address Memory address within the active variant capacity.
   /// @param value Output byte
   /// @return Status::Ok() on success
   Status readByte(uint16_t address, uint8_t& value);
 
   /// Read multiple bytes starting at the specified address.
-  /// Address auto-increments and wraps at 0x7FFF -> 0x0000.
-  /// @param address Starting memory address (0x0000-0x7FFF)
+  /// The full range must fit before the active variant's end address.
+  /// @param address Starting memory address within the active variant capacity.
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success
@@ -164,23 +188,23 @@ public:
   
   /// Write a single byte to the specified address.
   /// FRAM writes are immediate - no write delay needed.
-  /// @param address Memory address (0x0000-0x7FFF)
+  /// @param address Memory address within the active variant capacity.
   /// @param value Byte to write
   /// @return Status::Ok() on success
   Status writeByte(uint16_t address, uint8_t value);
 
   /// Write multiple bytes starting at the specified address.
-  /// Address auto-increments and wraps at 0x7FFF -> 0x0000.
+  /// The full range must fit before the active variant's end address.
   /// No page boundary limitations (unlike EEPROM).
   /// FRAM writes are immediate - no write delay needed.
-  /// @param address Starting memory address (0x0000-0x7FFF)
+  /// @param address Starting memory address within the active variant capacity.
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
   /// @return Status::Ok() on success
   Status write(uint16_t address, const uint8_t* buf, size_t len);
 
   /// Fill a range of memory with a constant byte value.
-  /// @param address Starting memory address (0x0000-0x7FFF)
+  /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte
   /// @param len Number of bytes to fill
   /// @return Status::Ok() on success
@@ -215,14 +239,15 @@ public:
   Status readCurrentAddress(uint8_t* buf, size_t len);
 
   /// Compare FRAM contents against an expected buffer.
-  /// @param address Starting memory address (0x0000-0x7FFF)
+  /// @param address Starting memory address within the active variant capacity.
   /// @param expected Expected bytes
   /// @param len Number of bytes to compare
   /// @param out Comparison result
   /// @return Status::Ok() on successful comparison transaction(s)
   Status verify(uint16_t address, const uint8_t* expected, size_t len, VerifyResult& out);
 
-  /// Get the memory size in bytes (32768 for MB85RC256V).
+  /// Get the legacy MB85RC256V memory size in bytes.
+  /// Prefer capacityBytes() for runtime-selected variants.
   /// @return Memory size
   static constexpr uint16_t memorySize() { return cmd::MEMORY_SIZE; }
 
@@ -271,11 +296,26 @@ private:
   /// Read raw Device ID bytes using tracked path
   Status _readDeviceIdBytesTracked(DeviceIdRaw& raw);
 
-  /// Validate address is within range
-  static bool _isValidAddress(uint16_t address);
+  /// Validate address is within the active runtime capacity.
+  bool _isValidAddress(uint16_t address) const;
 
-  /// Wrap an address into the valid 15-bit FRAM address space.
-  static uint16_t _wrapAddress(uint16_t address, size_t offset);
+  /// Validate a contiguous address range against the active runtime capacity.
+  bool _fitsRange(uint16_t address, size_t len) const;
+
+  /// Wrap an address into the active runtime memory address space.
+  uint16_t _wrapAddress(uint16_t address, size_t offset) const;
+
+  /// Encode a runtime memory address for the active variant.
+  Status _encodeMemoryAddress(uint16_t address, uint8_t (&out)[cmd::ADDRESS_BYTES]) const;
+
+  /// Select and validate the active runtime variant from Device ID.
+  Status _selectVariant(DeviceVariant expected, const DeviceId& id);
+
+  /// Validate a Device ID against the active runtime variant.
+  Status _validateActiveDeviceId(const DeviceId& id) const;
+
+  /// Convert active variant metadata to public enum.
+  DeviceVariant _activeVariantEnum() const;
 
   /// Update the tracked current address after a successful memory transaction.
   void _setCurrentAddressAfterTransfer(uint16_t address, size_t len);
@@ -300,6 +340,8 @@ private:
   // =========================================================================
   
   Config _config;
+  const cmd::VariantInfo* _variant = nullptr;
+  DeviceId _deviceId;
   bool _initialized = false;
   DriverState _driverState = DriverState::UNINIT;
   bool _allowOfflineI2c = false;

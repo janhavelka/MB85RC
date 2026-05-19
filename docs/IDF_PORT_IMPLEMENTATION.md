@@ -7,14 +7,19 @@ Branch: `feature/mb85rc-idf-port`.
 
 - Kept `include/MB85RC/` and `src/MB85RC.cpp` as a framework-neutral driver
   core with application-owned I2C callbacks.
+- Added runtime-aware MB85RC64TA support on the same framework-neutral core:
+  Device ID product `0x358`, 8 KB capacity, `0x0000..0x1FFF` bounds, and
+  variant-specific address high-byte masking.
 - Added ESP-IDF component metadata and a native IDF entry point for the full
   bring-up CLI.
 - Added an example-only ESP-IDF compatibility layer so the Arduino and ESP-IDF
   examples share one CLI command implementation.
 - Preserved the full MB85RC example surface across both frameworks: scan,
-  diagnostics, Device ID reads, current-address reads, wrap-aware read/write,
+  diagnostics, Device ID reads, current-address reads, active-capacity read/write,
   fill, text, string, CRC, verify, settings, health, interface reset, self-test,
   read/write suite, random benchmark, typed demo, stress, and stress_mix flows.
+  Memory commands are now active-capacity-bounded so the same CLI is safe on
+  both MB85RC64TA and MB85RC256V.
 
 ## Files Added
 
@@ -53,6 +58,17 @@ Branch: `feature/mb85rc-idf-port`.
 - Arduino-ESP32 pitfall:
   - Do not infer native IDF mode from `ESP_PLATFORM`; Arduino-ESP32 defines it
     too. The shared CLI uses the explicit `MB85RC_EXAMPLE_PLATFORM_IDF` flag.
+- TunnelMonitor MB85RC64TA gap:
+  - `Config::expectedVariant` lets firmware request `MB85RC64TA` explicitly or
+    use `AUTO`.
+  - `begin()` selects and validates the active runtime variant from Device ID
+    instead of accepting only Product ID `0x510`.
+  - Runtime APIs expose `variantInfo()`, `variantName()`, `deviceId()`,
+    `capacityBytes()`, and `maxAddress()`.
+  - `readByte`, `read`, `writeByte`, `write`, `fill`, `verify`, and
+    `readCurrentAddress(uint8_t*, size_t)` all validate against active
+    capacity and reject cross-end operations.
+  - `probe()` and `recover()` validate the already selected active variant.
 
 ## Remaining Hardware Checks
 
@@ -60,13 +76,14 @@ Branch: `feature/mb85rc-idf-port`.
   `idf.py` on PATH during the implementation pass.
 - Run scan/probe and disconnected-device timeout checks on hardware through
   both Arduino and ESP-IDF entry points.
-- Verify Device ID, current-address read, wrap behavior, write protection,
+- Verify Device ID, current-address read, active-capacity bounds, write protection,
   interface reset, CRC, typed demo, benchmark, stress, and bus-recovery flows on
   the target board.
 
 ## Verification
 
-- `python -m platformio test -e native`: passed.
+- `python -m platformio test -e native`: passed, including MB85RC64TA runtime
+  selection, bounds, address encoding, probe, and recover coverage.
 - `python -m platformio run -e esp32s3dev`: passed.
 - `python -m platformio run -e esp32s2dev`: passed.
 - `python tools/check_cli_contract.py`: passed.

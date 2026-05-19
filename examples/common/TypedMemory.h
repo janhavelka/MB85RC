@@ -4,7 +4,7 @@
  *
  * These helpers sit above the raw byte-oriented driver API. They intentionally:
  * - encode multi-byte values in little-endian order
- * - reject values that would cross 0x7FFF -> 0x0000
+ * - reject values that would cross the active variant's end address
  * - avoid storing raw struct layouts with padding/ABI ambiguity
  *
  * NOT part of the public library API.
@@ -21,11 +21,16 @@
 
 namespace typed_memory {
 
-inline bool fitsContiguous(uint16_t address, size_t len) {
-  return len > 0U &&
-         address <= MB85RC::cmd::MAX_MEM_ADDRESS &&
-         (static_cast<uint32_t>(address) + static_cast<uint32_t>(len)) <=
-             static_cast<uint32_t>(MB85RC::cmd::MEMORY_SIZE);
+inline bool fitsContiguous(const MB85RC::MB85RC& device, uint16_t address, size_t len) {
+  if (len == 0U || address > device.maxAddress()) {
+    return false;
+  }
+  const uint32_t capacity = device.capacityBytes();
+  if (static_cast<uint32_t>(address) >= capacity) {
+    return false;
+  }
+  const size_t remaining = static_cast<size_t>(capacity - static_cast<uint32_t>(address));
+  return len <= remaining;
 }
 
 inline MB85RC::Status writeBytes(MB85RC::MB85RC& device,
@@ -35,9 +40,9 @@ inline MB85RC::Status writeBytes(MB85RC::MB85RC& device,
   if (data == nullptr || len == 0U) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Typed write buffer invalid");
   }
-  if (!fitsContiguous(address, len)) {
+  if (!fitsContiguous(device, address, len)) {
     return MB85RC::Status::Error(MB85RC::Err::ADDRESS_OUT_OF_RANGE,
-                                 "Typed value crosses end of memory",
+                                 "Typed value crosses active capacity",
                                  static_cast<int32_t>(address));
   }
   return device.write(address, data, len);
@@ -50,9 +55,9 @@ inline MB85RC::Status readBytes(MB85RC::MB85RC& device,
   if (data == nullptr || len == 0U) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Typed read buffer invalid");
   }
-  if (!fitsContiguous(address, len)) {
+  if (!fitsContiguous(device, address, len)) {
     return MB85RC::Status::Error(MB85RC::Err::ADDRESS_OUT_OF_RANGE,
-                                 "Typed value crosses end of memory",
+                                 "Typed value crosses active capacity",
                                  static_cast<int32_t>(address));
   }
   return device.read(address, data, len);

@@ -15,8 +15,8 @@ enum class Err : uint8_t {
   TIMEOUT,                   ///< Operation timed out
   INVALID_PARAM,             ///< Invalid parameter value
   DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
-  DEVICE_ID_MISMATCH,        ///< Device ID does not match expected MB85RC256V
-  ADDRESS_OUT_OF_RANGE,      ///< Memory address exceeds 0x7FFF
+  DEVICE_ID_MISMATCH,        ///< Device ID does not match expected/active variant
+  ADDRESS_OUT_OF_RANGE,      ///< Memory address/range exceeds active variant capacity
   WRITE_PROTECTED,           ///< Write rejected (WP pin may be high)
   BUSY,                      ///< Device is busy or driver is latched OFFLINE until recover()
   IN_PROGRESS,               ///< Operation queued / in progress

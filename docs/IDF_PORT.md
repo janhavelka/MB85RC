@@ -1,12 +1,16 @@
 # MB85RC ESP-IDF Port
 
-Scope: keep the MB85RC256V driver usable from both Arduino/PlatformIO and pure
-ESP-IDF while preserving the same bring-up example functionality.
+Scope: keep the supported MB85RC-family driver usable from both
+Arduino/PlatformIO and pure ESP-IDF while preserving the same bring-up example
+functionality.
 
 ## Result
 
 - Core driver remains framework-neutral for I2C ownership. All bus access still
   goes through `Config::i2cWrite` and `Config::i2cWriteRead`.
+- Runtime variant selection is framework-neutral. `DeviceVariant::AUTO`,
+  `MB85RC64TA`, and `MB85RC256V` use the same callback-only transport path in
+  both frameworks.
 - `src/MB85RC.cpp` no longer requires Arduino headers for ESP-IDF builds.
 - If `Config::nowMs` is not supplied, Arduino/native-test builds use
   `millis()` and ESP-IDF builds use `esp_timer_get_time() / 1000`.
@@ -25,7 +29,7 @@ This keeps these flows aligned across both frameworks:
 
 - scan and bus diagnostics
 - Device ID and raw Device ID commands
-- wrap-aware read, write, fill, text, strings, CRC, and verify commands
+- active-capacity-bounded read, write, fill, text, strings, CRC, and verify commands
 - current-address reads
 - settings and health views
 - interface reset
@@ -96,6 +100,13 @@ The IDF example targets ESP32-S2 and ESP32-S3 and requires ESP-IDF `>=6.0.1`.
 
 - Applications still own SDA/SCL pins, pull-ups, I2C clock, optional WP GPIO,
   and bus lifetime. The library does not create buses or devices.
+- Applications that need MB85RC64TA should set
+  `Config::expectedVariant = DeviceVariant::MB85RC64TA` or `AUTO`. The legacy
+  default remains `MB85RC256V` so existing 256V projects keep their old
+  validation behavior.
+- Bulk memory operations intentionally reject ranges that exceed
+  `capacityBytes()`; firmware should split or shorten requests instead of
+  expecting wraparound.
 - A real ESP-IDF application can either reuse the example adapter or provide a
   smaller project-specific adapter directly from its own `i2c_master_dev_handle_t`.
 - The example adapter already avoids normal device-handle addressing for the
