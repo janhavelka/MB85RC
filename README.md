@@ -2,7 +2,7 @@
 
 Production-grade MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Library version: `v3.0.0`
+Library version: `v2.0.0`
 
 ## Features
 
@@ -25,7 +25,7 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git#v3.0.0
+  https://github.com/janhavelka/MB85RC.git#v2.0.0
 ```
 
 ### Manual
@@ -101,22 +101,18 @@ The default `expectedVariant` is `MB85RC256V` for compatibility with existing us
 
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()` on Arduino/native-test builds and `esp_timer_get_time()` on ESP-IDF builds.
 
-## Release 3.0.0 Highlights
+## Release 2.0.0 Highlights
 
 - Runtime support now covers every locally documented variant: `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
+- Runtime variant selection through `Config::expectedVariant` with `AUTO` and explicit selectors.
+- `begin()`, `probe()`, and `recover()` validate the selected active Device ID where available instead of hard-coding the 256V product ID.
+- `capacityBytes()`, `maxAddress()`, `variantName()`, `variantInfo()`, and `deviceId()` expose the active runtime device.
 - Memory APIs and `maxAddress()` now use `uint32_t` addresses so the 128 KB `MB85RC1MT` range (`0x00000..0x1FFFF`) is not truncated.
 - Address encoding is centralized for one-byte small-density devices, two-byte address-pin devices, and `MB85RC1MT` A16-in-device-address transactions.
 - `MB85RC16V` is supported through explicit selection and memory-probe diagnostics because the part has no Device ID command.
-- The shared Arduino/ESP-IDF CLI and typed-memory helpers accept 32-bit addresses and preserve the same command surface for all supported variants.
-- Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
-
-## Release 2.0.0 Highlights
-
-- Runtime variant selection through `Config::expectedVariant` with `AUTO`, `MB85RC64TA`, and `MB85RC256V`.
-- `begin()`, `probe()`, and `recover()` validate the selected active Device ID instead of hard-coding the 256V product ID.
-- `capacityBytes()`, `maxAddress()`, `variantName()`, `variantInfo()`, and `deviceId()` expose the active runtime device.
 - `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
-- The shared Arduino/ESP-IDF CLI uses active-capacity bounds while keeping the same command surface in both frameworks.
+- The shared Arduino/ESP-IDF CLI accepts 32-bit addresses and preserves the same command surface in both frameworks.
+- Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
 
 ## Release 1.1.1 Highlights
 
