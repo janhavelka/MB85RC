@@ -49,10 +49,10 @@ static constexpr int MAX_STRESS_COUNT = 100000;
 static constexpr uint32_t STRESS_PROGRESS_UPDATES = 10U;
 static constexpr int DEFAULT_RANDBENCH_OPS = 4096;
 
-static constexpr uint16_t RW_SUITE_ADDR = 0x0400;
-static constexpr uint16_t RW_SUITE_FILL_ADDR = 0x0460;
-static constexpr uint16_t TYPED_DEMO_ADDR = 0x0600;
-static constexpr uint16_t RANDOM_BENCH_ADDR = 0x2000;
+static constexpr uint32_t RW_SUITE_ADDR = 0x0400;
+static constexpr uint32_t RW_SUITE_FILL_ADDR = 0x0460;
+static constexpr uint32_t TYPED_DEMO_ADDR = 0x0600;
+static constexpr uint32_t RANDOM_BENCH_ADDR = 0x2000;
 
 static constexpr size_t RW_SUITE_LEN = 64;
 static constexpr size_t RW_SUITE_FILL_LEN = 16;
@@ -142,6 +142,14 @@ const char* deviceVariantToStr(MB85RC::DeviceVariant variant) {
       return "MB85RC256V";
     case MB85RC::DeviceVariant::MB85RC64TA:
       return "MB85RC64TA";
+    case MB85RC::DeviceVariant::MB85RC04V:
+      return "MB85RC04V";
+    case MB85RC::DeviceVariant::MB85RC16V:
+      return "MB85RC16V";
+    case MB85RC::DeviceVariant::MB85RC512T:
+      return "MB85RC512T";
+    case MB85RC::DeviceVariant::MB85RC1MT:
+      return "MB85RC1MT";
     default:
       return "UNKNOWN";
   }
@@ -308,17 +316,17 @@ void printDriverHealth() {
   }
 }
 
-uint16_t memoryAddressAtOffset(uint16_t address, size_t offset);
+uint32_t memoryAddressAtOffset(uint32_t address, size_t offset);
 
-void printHexDump(uint16_t startAddr, const uint8_t* data, size_t len) {
+void printHexDump(uint32_t startAddr, const uint8_t* data, size_t len) {
   for (size_t offset = 0; offset < len;) {
-    const uint16_t lineAddr = memoryAddressAtOffset(startAddr, offset);
+    const uint32_t lineAddr = memoryAddressAtOffset(startAddr, offset);
     size_t lineLen = len - offset;
     if (lineLen > 16) {
       lineLen = 16;
     }
 
-    Serial.printf("  %04X: ", lineAddr);
+    Serial.printf("  %04lX: ", static_cast<unsigned long>(lineAddr));
     for (size_t i = 0; i < lineLen; ++i) {
       Serial.printf("%02X ", data[offset + i]);
     }
@@ -351,12 +359,12 @@ bool parseUnsignedToken(const String& token, unsigned long maxValue, unsigned lo
   return true;
 }
 
-bool parseAddress(const String& token, uint16_t& outAddr) {
+bool parseAddress(const String& token, uint32_t& outAddr) {
   unsigned long value = 0;
   if (!parseUnsignedToken(token, device.maxAddress(), value)) {
     return false;
   }
-  outAddr = static_cast<uint16_t>(value);
+  outAddr = static_cast<uint32_t>(value);
   return true;
 }
 
@@ -378,6 +386,15 @@ bool parseUint16(const String& token, uint16_t& outVal) {
   return true;
 }
 
+bool parseUint32(const String& token, uint32_t& outVal) {
+  unsigned long value = 0;
+  if (!parseUnsignedToken(token, 0xFFFFFFFFUL, value)) {
+    return false;
+  }
+  outVal = static_cast<uint32_t>(value);
+  return true;
+}
+
 bool parseCountArg(const String& token, int& outCount) {
   unsigned long value = 0;
   if (!parseUnsignedToken(token, static_cast<unsigned long>(MAX_STRESS_COUNT), value) ||
@@ -388,38 +405,37 @@ bool parseCountArg(const String& token, int& outCount) {
   return true;
 }
 
-uint16_t memoryAddressAtOffset(uint16_t address, size_t offset) {
-  return static_cast<uint16_t>(static_cast<uint32_t>(address) +
-                               static_cast<uint32_t>(offset));
+uint32_t memoryAddressAtOffset(uint32_t address, size_t offset) {
+  return address + static_cast<uint32_t>(offset);
 }
 
-bool rangeFitsActiveCapacity(uint16_t address, size_t len) {
+bool rangeFitsActiveCapacity(uint32_t address, size_t len) {
   if (len == 0U || address > device.maxAddress()) {
     return false;
   }
   const uint32_t capacity = device.capacityBytes();
-  if (static_cast<uint32_t>(address) >= capacity) {
+  if (address >= capacity) {
     return false;
   }
-  const size_t remaining = static_cast<size_t>(capacity - static_cast<uint32_t>(address));
+  const size_t remaining = static_cast<size_t>(capacity - address);
   return len <= remaining;
 }
 
-void printRangeError(uint16_t address, size_t len) {
-  Serial.printf("  Range 0x%04X + %lu exceeds active capacity (%lu bytes, max 0x%04X)\n",
-                address,
+void printRangeError(uint32_t address, size_t len) {
+  Serial.printf("  Range 0x%04lX + %lu exceeds active capacity (%lu bytes, max 0x%04lX)\n",
+                static_cast<unsigned long>(address),
                 static_cast<unsigned long>(len),
                 static_cast<unsigned long>(device.capacityBytes()),
-                device.maxAddress());
+                static_cast<unsigned long>(device.maxAddress()));
 }
 
-uint16_t randomBenchAddress() {
+uint32_t randomBenchAddress() {
   const uint32_t capacity = device.capacityBytes();
   if (capacity >= static_cast<uint32_t>(RANDOM_BENCH_ADDR) + RANDOM_BENCH_LEN) {
     return RANDOM_BENCH_ADDR;
   }
   if (capacity > RANDOM_BENCH_LEN) {
-    return static_cast<uint16_t>(capacity - RANDOM_BENCH_LEN);
+    return capacity - RANDOM_BENCH_LEN;
   }
   return 0U;
 }
@@ -480,9 +496,9 @@ void printEscapedByte(uint8_t value) {
 }
 
 bool parseAddressLengthArgs(const String& args,
-                            uint16_t& outAddr,
-                            uint16_t& outLen,
-                            uint16_t defaultLen) {
+                            uint32_t& outAddr,
+                            uint32_t& outLen,
+                            uint32_t defaultLen) {
   String trimmed = args;
   trimmed.trim();
   if (trimmed.length() == 0) {
@@ -501,7 +517,7 @@ bool parseAddressLengthArgs(const String& args,
     addrStr = trimmed.substring(0, split);
     String lenStr = trimmed.substring(split + 1);
     lenStr.trim();
-    if (!parseUint16(lenStr, outLen) || outLen == 0U) {
+    if (!parseUint32(lenStr, outLen) || outLen == 0U) {
       return false;
     }
   }
@@ -513,19 +529,20 @@ bool parseAddressLengthArgs(const String& args,
 }
 
 template <typename Visitor>
-bool visitMemoryRange(uint16_t address, uint16_t len, Visitor visitor) {
+bool visitMemoryRange(uint32_t address, uint32_t len, Visitor visitor) {
   if (!rangeFitsActiveCapacity(address, len)) {
     printRangeError(address, len);
     return false;
   }
 
   static uint8_t readBuf[256];
-  uint16_t remaining = len;
-  uint16_t offset = 0;
+  uint32_t remaining = len;
+  uint32_t offset = 0;
 
   while (remaining > 0) {
-    const uint16_t chunk = (remaining > sizeof(readBuf)) ? sizeof(readBuf) : remaining;
-    const uint16_t chunkAddr = memoryAddressAtOffset(address, offset);
+    const size_t chunk = (remaining > sizeof(readBuf)) ? sizeof(readBuf)
+                                                       : static_cast<size_t>(remaining);
+    const uint32_t chunkAddr = memoryAddressAtOffset(address, offset);
     MB85RC::Status st = device.read(chunkAddr, readBuf, chunk);
     if (!st.ok()) {
       printStatus(st);
@@ -533,8 +550,8 @@ bool visitMemoryRange(uint16_t address, uint16_t len, Visitor visitor) {
     }
 
     visitor(chunkAddr, readBuf, chunk);
-    offset = static_cast<uint16_t>(offset + chunk);
-    remaining = static_cast<uint16_t>(remaining - chunk);
+    offset += static_cast<uint32_t>(chunk);
+    remaining -= static_cast<uint32_t>(chunk);
   }
 
   return true;
@@ -573,33 +590,33 @@ void printSettings() {
                 snap.manufacturerId,
                 snap.productId,
                 snap.densityCode);
-  Serial.printf("  Capacity: %lu bytes, max address 0x%04X\n",
+  Serial.printf("  Capacity: %lu bytes, max address 0x%04lX\n",
                 static_cast<unsigned long>(snap.capacityBytes),
-                snap.maxAddress);
+                static_cast<unsigned long>(snap.maxAddress));
   Serial.println("  Cross-end bulk operations: rejected");
   if (snap.currentAddressKnown) {
-    Serial.printf("  Current address: 0x%04X\n", snap.currentAddress);
+    Serial.printf("  Current address: 0x%04lX\n", static_cast<unsigned long>(snap.currentAddress));
   } else {
     Serial.println("  Current address: unknown (needs successful memory read/write first)");
   }
 }
 
-void readRangeForDump(uint16_t address, uint16_t len) {
-  visitMemoryRange(address, len, [](uint16_t chunkAddr, const uint8_t* data, uint16_t chunkLen) {
+void readRangeForDump(uint32_t address, uint32_t len) {
+  visitMemoryRange(address, len, [](uint32_t chunkAddr, const uint8_t* data, size_t chunkLen) {
     printHexDump(chunkAddr, data, chunkLen);
   });
 }
 
-void printTextRange(uint16_t address, uint16_t len) {
-  visitMemoryRange(address, len, [](uint16_t chunkAddr, const uint8_t* data, uint16_t chunkLen) {
+void printTextRange(uint32_t address, uint32_t len) {
+  visitMemoryRange(address, len, [](uint32_t chunkAddr, const uint8_t* data, size_t chunkLen) {
     for (size_t offset = 0; offset < chunkLen;) {
-      const uint16_t lineAddr = memoryAddressAtOffset(chunkAddr, offset);
+      const uint32_t lineAddr = memoryAddressAtOffset(chunkAddr, offset);
       size_t lineLen = chunkLen - offset;
       if (lineLen > 32U) {
         lineLen = 32U;
       }
 
-      Serial.printf("  %04X: \"", lineAddr);
+      Serial.printf("  %04lX: \"", static_cast<unsigned long>(lineAddr));
       for (size_t i = 0; i < lineLen; ++i) {
         printEscapedByte(data[offset + i]);
       }
@@ -623,26 +640,26 @@ uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
   return crc;
 }
 
-void printRangeCrc32(uint16_t address, uint16_t len) {
+void printRangeCrc32(uint32_t address, uint32_t len) {
   uint32_t crc = 0xFFFFFFFFUL;
   if (!visitMemoryRange(address, len,
-                        [&crc](uint16_t, const uint8_t* data, uint16_t chunkLen) {
+                        [&crc](uint32_t, const uint8_t* data, size_t chunkLen) {
                           crc = crc32Update(crc, data, chunkLen);
                         })) {
     return;
   }
 
   crc ^= 0xFFFFFFFFUL;
-  Serial.printf("CRC32[0x%04X + %u] = 0x%08lX\n",
-                address,
-                static_cast<unsigned>(len),
+  Serial.printf("CRC32[0x%04lX + %lu] = 0x%08lX\n",
+                static_cast<unsigned long>(address),
+                static_cast<unsigned long>(len),
                 static_cast<unsigned long>(crc));
 }
 
 struct StringScanState {
   uint16_t minLen = 4;
-  uint16_t currentLen = 0;
-  uint16_t startAddr = 0;
+  uint32_t currentLen = 0;
+  uint32_t startAddr = 0;
   uint32_t matches = 0;
   uint8_t previewLen = 0;
   bool active = false;
@@ -656,7 +673,9 @@ void flushStringScan(StringScanState& state) {
   }
 
   if (state.currentLen >= state.minLen) {
-    Serial.printf("  %04X len=%u \"", state.startAddr, state.currentLen);
+    Serial.printf("  %04lX len=%lu \"",
+                  static_cast<unsigned long>(state.startAddr),
+                  static_cast<unsigned long>(state.currentLen));
     for (uint8_t i = 0; i < state.previewLen; ++i) {
       printEscapedByte(static_cast<uint8_t>(state.preview[i]));
     }
@@ -674,15 +693,15 @@ void flushStringScan(StringScanState& state) {
   state.truncated = false;
 }
 
-void scanPrintableStrings(uint16_t address, uint16_t len, uint16_t minLen) {
+void scanPrintableStrings(uint32_t address, uint32_t len, uint16_t minLen) {
   StringScanState state;
   state.minLen = minLen;
 
   if (!visitMemoryRange(address, len,
-                        [&state](uint16_t chunkAddr, const uint8_t* data, uint16_t chunkLen) {
-                          for (uint16_t i = 0; i < chunkLen; ++i) {
+                        [&state](uint32_t chunkAddr, const uint8_t* data, size_t chunkLen) {
+                          for (size_t i = 0; i < chunkLen; ++i) {
                             const uint8_t value = data[i];
-                            const uint16_t byteAddr = memoryAddressAtOffset(chunkAddr, i);
+                            const uint32_t byteAddr = memoryAddressAtOffset(chunkAddr, i);
                             if (isPrintableAscii(value)) {
                               if (!state.active) {
                                 state.active = true;
@@ -693,7 +712,7 @@ void scanPrintableStrings(uint16_t address, uint16_t len, uint16_t minLen) {
                                 state.truncated = false;
                               }
 
-                              state.currentLen = static_cast<uint16_t>(state.currentLen + 1U);
+                              state.currentLen++;
                               if (state.previewLen + 1U < sizeof(state.preview)) {
                                 state.preview[state.previewLen++] = static_cast<char>(value);
                                 state.preview[state.previewLen] = '\0';
@@ -726,7 +745,7 @@ void printCurrentAddressRead() {
   }
 
   const bool hadCurrentAddress = snap.currentAddressKnown;
-  const uint16_t currentAddr = snap.currentAddress;
+  const uint32_t currentAddr = snap.currentAddress;
   uint8_t value = 0;
   st = device.readCurrentAddress(value);
   if (!st.ok()) {
@@ -735,13 +754,15 @@ void printCurrentAddressRead() {
   }
 
   if (hadCurrentAddress) {
-    Serial.printf("Current[0x%04X] = 0x%02X\n", currentAddr, value);
+    Serial.printf("Current[0x%04lX] = 0x%02X\n",
+                  static_cast<unsigned long>(currentAddr),
+                  value);
   } else {
     Serial.printf("Current = 0x%02X\n", value);
   }
 }
 
-void printCurrentAddressReadRange(uint16_t len) {
+void printCurrentAddressReadRange(uint32_t len) {
   MB85RC::SettingsSnapshot snap;
   MB85RC::Status st = device.getSettings(snap);
   if (!st.ok()) {
@@ -754,15 +775,16 @@ void printCurrentAddressReadRange(uint16_t len) {
   }
 
   static uint8_t readBuf[256];
-  uint16_t remaining = len;
-  uint16_t startAddr = snap.currentAddress;
+  uint32_t remaining = len;
+  uint32_t startAddr = snap.currentAddress;
   if (!rangeFitsActiveCapacity(startAddr, len)) {
     printRangeError(startAddr, len);
     return;
   }
 
   while (remaining > 0) {
-    const uint16_t chunk = (remaining > sizeof(readBuf)) ? sizeof(readBuf) : remaining;
+    const size_t chunk = (remaining > sizeof(readBuf)) ? sizeof(readBuf)
+                                                       : static_cast<size_t>(remaining);
     st = device.readCurrentAddress(readBuf, chunk);
     if (!st.ok()) {
       printStatus(st);
@@ -770,7 +792,7 @@ void printCurrentAddressReadRange(uint16_t len) {
     }
     printHexDump(startAddr, readBuf, chunk);
     startAddr = memoryAddressAtOffset(startAddr, chunk);
-    remaining = static_cast<uint16_t>(remaining - chunk);
+    remaining -= static_cast<uint32_t>(chunk);
   }
 }
 
@@ -838,7 +860,7 @@ void runStress(int count) {
 
   for (int i = 0; i < count; ++i) {
     stressStats.attempts++;
-    const uint16_t addr = static_cast<uint16_t>(static_cast<uint32_t>(i) % capacity);
+    const uint32_t addr = static_cast<uint32_t>(i) % capacity;
     const uint8_t pattern = static_cast<uint8_t>(i & 0xFF);
 
     MB85RC::Status st = device.writeByte(addr, pattern);
@@ -923,13 +945,13 @@ void runStressMix(int count) {
 
     switch (op) {
       case 0: {
-        const uint16_t addr = static_cast<uint16_t>(static_cast<uint32_t>(i) % capacity);
+        const uint32_t addr = static_cast<uint32_t>(i) % capacity;
         st = device.writeByte(addr, static_cast<uint8_t>(i & 0xFF));
         break;
       }
       case 1: {
         uint8_t val = 0;
-        st = device.readByte(static_cast<uint16_t>(static_cast<uint32_t>(i) % capacity), val);
+        st = device.readByte(static_cast<uint32_t>(i) % capacity, val);
         break;
       }
       case 2: {
@@ -948,9 +970,14 @@ void runStressMix(int count) {
       }
       case 5: {
         MB85RC::DeviceId id;
-        st = device.readDeviceId(id);
-        if (st.ok() && id.manufacturerId != MB85RC::cmd::MANUFACTURER_ID) {
-          st = MB85RC::Status::Error(MB85RC::Err::DEVICE_ID_MISMATCH, "unexpected manufacturer");
+        const MB85RC::cmd::VariantInfo* info = device.variantInfo();
+        if (info != nullptr && !info->hasDeviceId) {
+          st = MB85RC::Status::Ok();
+        } else {
+          st = device.readDeviceId(id);
+          if (st.ok() && id.manufacturerId != MB85RC::cmd::MANUFACTURER_ID) {
+            st = MB85RC::Status::Error(MB85RC::Err::DEVICE_ID_MISMATCH, "unexpected manufacturer");
+          }
         }
         break;
       }
@@ -1070,9 +1097,9 @@ void runSelfTest() {
   const uint32_t succBefore = device.totalSuccess();
   const uint32_t failBefore = device.totalFailures();
   const uint8_t consBefore = device.consecutiveFailures();
-  const uint16_t maxAddr = device.maxAddress();
+  const uint32_t maxAddr = device.maxAddress();
   const uint32_t capacity = device.capacityBytes();
-  const uint16_t invalidAddr = static_cast<uint16_t>(maxAddr + 1U);
+  const uint32_t invalidAddr = maxAddr + 1U;
   const MB85RC::cmd::VariantInfo* activeVariant = device.variantInfo();
 
   // Probe (no health tracking)
@@ -1093,18 +1120,23 @@ void runSelfTest() {
   reportCheck("probe no-health-side-effects", probeNoTrack, "");
 
   // Device ID
-  MB85RC::DeviceId id;
-  st = device.readDeviceId(id);
-  reportCheck("readDeviceId", st.ok(), st.ok() ? "" : errToStr(st.code));
-  reportCheck("manufacturer ID = 0x00A",
-              st.ok() && id.manufacturerId == MB85RC::cmd::MANUFACTURER_ID, "");
-  reportCheck("product ID matches active variant",
-              st.ok() && activeVariant != nullptr && id.productId == activeVariant->productId, "");
-  reportCheck("density code matches active variant",
-              st.ok() && activeVariant != nullptr && id.densityCode == activeVariant->densityCode, "");
-  MB85RC::DeviceIdRaw rawId;
-  st = device.readDeviceIdRaw(rawId);
-  reportCheck("readDeviceIdRaw", st.ok(), st.ok() ? "" : errToStr(st.code));
+  if (activeVariant != nullptr && !activeVariant->hasDeviceId) {
+    reportSkip("readDeviceId", "active variant has no Device ID command");
+    reportSkip("readDeviceIdRaw", "active variant has no Device ID command");
+  } else {
+    MB85RC::DeviceId id;
+    st = device.readDeviceId(id);
+    reportCheck("readDeviceId", st.ok(), st.ok() ? "" : errToStr(st.code));
+    reportCheck("manufacturer ID = 0x00A",
+                st.ok() && id.manufacturerId == MB85RC::cmd::MANUFACTURER_ID, "");
+    reportCheck("product ID matches active variant",
+                st.ok() && activeVariant != nullptr && id.productId == activeVariant->productId, "");
+    reportCheck("density code matches active variant",
+                st.ok() && activeVariant != nullptr && id.densityCode == activeVariant->densityCode, "");
+    MB85RC::DeviceIdRaw rawId;
+    st = device.readDeviceIdRaw(rawId);
+    reportCheck("readDeviceIdRaw", st.ok(), st.ok() ? "" : errToStr(st.code));
+  }
 
   // Write/Read test at address 0x0000
   // Save original value first
@@ -1312,8 +1344,7 @@ void runReadWriteSuite() {
   bool haveScratch = false;
   bool haveFill = false;
   bool haveTail = false;
-  const uint16_t tailAddr = static_cast<uint16_t>(device.maxAddress() -
-                                                  (sizeof(originalTail) - 1U));
+  const uint32_t tailAddr = device.maxAddress() - (sizeof(originalTail) - 1U);
 
   MB85RC::Status st = typed_memory::readBytes(device,
                                               RW_SUITE_ADDR,
@@ -1404,13 +1435,13 @@ void runReadWriteSuite() {
 
 void runRandomBench(int count) {
   Serial.println("=== Random Access Benchmark ===");
-  const uint16_t benchAddr = randomBenchAddress();
+  const uint32_t benchAddr = randomBenchAddress();
   if (!rangeFitsActiveCapacity(benchAddr, RANDOM_BENCH_LEN)) {
     printRangeError(benchAddr, RANDOM_BENCH_LEN);
     return;
   }
-  Serial.printf("  Window: 0x%04X + %u\n",
-                benchAddr,
+  Serial.printf("  Window: 0x%04lX + %u\n",
+                static_cast<unsigned long>(benchAddr),
                 static_cast<unsigned>(RANDOM_BENCH_LEN));
 
   uint8_t originalWindow[RANDOM_BENCH_LEN] = {};
@@ -1434,7 +1465,7 @@ void runRandomBench(int count) {
   for (int i = 0; i < count; ++i) {
     const size_t index = static_cast<size_t>(nextRandom(seed) % RANDOM_BENCH_LEN);
     const uint8_t value = static_cast<uint8_t>(nextRandom(seed) & 0xFFU);
-    st = device.writeByte(static_cast<uint16_t>(benchAddr + index), value);
+    st = device.writeByte(benchAddr + static_cast<uint32_t>(index), value);
     if (!st.ok()) {
       break;
     }
@@ -1457,7 +1488,7 @@ void runRandomBench(int count) {
   for (int i = 0; i < count; ++i) {
     const size_t index = static_cast<size_t>(nextRandom(seed) % RANDOM_BENCH_LEN);
     uint8_t value = 0;
-    st = device.readByte(static_cast<uint16_t>(benchAddr + index), value);
+    st = device.readByte(benchAddr + static_cast<uint32_t>(index), value);
     if (!st.ok()) {
       break;
     }
@@ -1515,7 +1546,7 @@ void runTypedDemo() {
     return;
   }
 
-  uint16_t cursor = TYPED_DEMO_ADDR;
+  uint32_t cursor = TYPED_DEMO_ADDR;
   printCheckStatus("write uint8", typed_memory::writeUint8(device, cursor, 0x7EU));
   cursor += 1U;
   printCheckStatus("write uint16 LE", typed_memory::writeUint16Le(device, cursor, 0x1234U));
@@ -1585,7 +1616,7 @@ void runTypedDemo() {
   Serial.printf("  double  = %.6f\n", f64);
   Serial.printf("  bool    = %s\n", flag ? "true" : "false");
 
-  const uint16_t crossAddr = static_cast<uint16_t>(device.maxAddress() - 1U);
+  const uint32_t crossAddr = device.maxAddress() - 1U;
   st = typed_memory::writeUint32Le(device, crossAddr, 0xCAFEBABEU);
   Serial.printf("  Cross-boundary guard: %s%s%s\n",
                 LOG_COLOR_RESULT(st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE),
@@ -1711,9 +1742,9 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd == "size") {
-    Serial.printf("Active capacity: %lu bytes (max address 0x%04X, variant %s)\n",
+    Serial.printf("Active capacity: %lu bytes (max address 0x%04lX, variant %s)\n",
                   static_cast<unsigned long>(device.capacityBytes()),
-                  device.maxAddress(),
+                  static_cast<unsigned long>(device.maxAddress()),
                   device.variantName());
     Serial.printf("Legacy MB85RC256V memorySize(): %u bytes\n",
                   MB85RC::MB85RC::memorySize());
@@ -1727,8 +1758,8 @@ void processCommand(const String& cmdLine) {
 
   if (cmd.startsWith("current ") || cmd.startsWith("cur ")) {
     const String lenStr = cmd.startsWith("current ") ? cmd.substring(8) : cmd.substring(4);
-    uint16_t len = 0;
-    if (!parseUint16(lenStr, len) || len == 0) {
+    uint32_t len = 0;
+    if (!parseUint32(lenStr, len) || len == 0) {
       LOGW("Invalid length");
       return;
     }
@@ -1743,8 +1774,8 @@ void processCommand(const String& cmdLine) {
 
   if (cmd.startsWith("read ") || cmd.startsWith("dump ") || cmd.startsWith("hexdump ")) {
     String args = cmd.startsWith("hexdump ") ? cmd.substring(8) : cmd.substring(5);
-    uint16_t addr = 0;
-    uint16_t len = 0;
+    uint32_t addr = 0;
+    uint32_t len = 0;
     if (!parseAddressLengthArgs(args, addr, len, 1U)) {
       LOGW("Usage: read / dump / hexdump <addr> [len]");
       return;
@@ -1760,8 +1791,8 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd.startsWith("text ")) {
-    uint16_t addr = 0;
-    uint16_t len = 0;
+    uint32_t addr = 0;
+    uint32_t len = 0;
     if (!parseAddressLengthArgs(cmd.substring(5), addr, len, 64U)) {
       LOGW("Usage: text <addr> [len]");
       return;
@@ -1773,7 +1804,7 @@ void processCommand(const String& cmdLine) {
 
   if (cmd == "strings") {
     Serial.printf("Scanning printable strings across full chip (minLen=%u)...\n", 4U);
-    scanPrintableStrings(0x0000, static_cast<uint16_t>(device.capacityBytes()), 4U);
+    scanPrintableStrings(0x0000, device.capacityBytes(), 4U);
     return;
   }
 
@@ -1795,14 +1826,15 @@ void processCommand(const String& cmdLine) {
     const String lenStr = (s2 < 0) ? rest : rest.substring(0, s2);
     const String minStr = (s2 < 0) ? String() : rest.substring(s2 + 1);
 
-    uint16_t addr = 0;
-    uint16_t len = 0;
+    uint32_t addr = 0;
+    uint32_t len = 0;
     uint16_t minLen = 4;
     if (!parseAddress(addrStr, addr)) {
-      LOGW("Address out of range (max 0x%04X)", device.maxAddress());
+      LOGW("Address out of range (max 0x%04lX)",
+           static_cast<unsigned long>(device.maxAddress()));
       return;
     }
-    if (!parseUint16(lenStr, len) || len == 0U) {
+    if (!parseUint32(lenStr, len) || len == 0U) {
       LOGW("Invalid length");
       return;
     }
@@ -1817,9 +1849,9 @@ void processCommand(const String& cmdLine) {
       return;
     }
 
-    Serial.printf("Scanning printable strings at 0x%04X len=%u minLen=%u...\n",
-                  addr,
-                  static_cast<unsigned>(len),
+    Serial.printf("Scanning printable strings at 0x%04lX len=%lu minLen=%u...\n",
+                  static_cast<unsigned long>(addr),
+                  static_cast<unsigned long>(len),
                   static_cast<unsigned>(minLen));
     scanPrintableStrings(addr, len, minLen);
     return;
@@ -1831,8 +1863,8 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd.startsWith("crc ")) {
-    uint16_t addr = 0;
-    uint16_t len = 0;
+    uint32_t addr = 0;
+    uint32_t len = 0;
     if (!parseAddressLengthArgs(cmd.substring(4), addr, len, 0U)) {
       LOGW("Usage: crc <addr> <len>");
       return;
@@ -1861,9 +1893,10 @@ void processCommand(const String& cmdLine) {
     String dataStr = args.substring(firstSpace + 1);
     dataStr.trim();
 
-    uint16_t addr = 0;
+    uint32_t addr = 0;
     if (!parseAddress(addrStr, addr)) {
-      LOGW("Address out of range (max 0x%04X)", device.maxAddress());
+      LOGW("Address out of range (max 0x%04lX)",
+           static_cast<unsigned long>(device.maxAddress()));
       return;
     }
 
@@ -1911,14 +1944,14 @@ void processCommand(const String& cmdLine) {
     }
 
     if (result.match) {
-      Serial.printf("Verified %u byte(s) at 0x%04X\n",
+      Serial.printf("Verified %u byte(s) at 0x%04lX\n",
                     static_cast<unsigned>(count),
-                    addr);
+                    static_cast<unsigned long>(addr));
     } else {
-      const uint16_t mismatchAddr = memoryAddressAtOffset(addr, result.mismatchOffset);
-      Serial.printf("Verify mismatch at +0x%04lX (addr 0x%04X): expected 0x%02X, actual 0x%02X\n",
+      const uint32_t mismatchAddr = memoryAddressAtOffset(addr, result.mismatchOffset);
+      Serial.printf("Verify mismatch at +0x%04lX (addr 0x%04lX): expected 0x%02X, actual 0x%02X\n",
                     static_cast<unsigned long>(result.mismatchOffset),
-                    mismatchAddr,
+                    static_cast<unsigned long>(mismatchAddr),
                     result.expected,
                     result.actual);
     }
@@ -1939,9 +1972,10 @@ void processCommand(const String& cmdLine) {
     String dataStr = args.substring(firstSpace + 1);
     dataStr.trim();
 
-    uint16_t addr;
+    uint32_t addr = 0;
     if (!parseAddress(addrStr, addr)) {
-      LOGW("Address out of range (max 0x%04X)", device.maxAddress());
+      LOGW("Address out of range (max 0x%04lX)",
+           static_cast<unsigned long>(device.maxAddress()));
       return;
     }
 
@@ -1984,9 +2018,9 @@ void processCommand(const String& cmdLine) {
     if (!st.ok()) {
       printStatus(st);
     } else {
-      Serial.printf("Wrote %u byte(s) at 0x%04X\n",
+      Serial.printf("Wrote %u byte(s) at 0x%04lX\n",
                     static_cast<unsigned>(count),
-                    addr);
+                    static_cast<unsigned long>(addr));
     }
     return;
   }
@@ -2014,9 +2048,10 @@ void processCommand(const String& cmdLine) {
     String lenStr = rest.substring(s2 + 1);
     lenStr.trim();
 
-    uint16_t addr;
+    uint32_t addr = 0;
     if (!parseAddress(addrStr, addr)) {
-      LOGW("Address out of range (max 0x%04X)", device.maxAddress());
+      LOGW("Address out of range (max 0x%04lX)",
+           static_cast<unsigned long>(device.maxAddress()));
       return;
     }
     uint8_t value;
@@ -2024,8 +2059,8 @@ void processCommand(const String& cmdLine) {
       LOGW("Invalid fill value");
       return;
     }
-    uint16_t len;
-    if (!parseUint16(lenStr, len) || len == 0) {
+    uint32_t len = 0;
+    if (!parseUint32(lenStr, len) || len == 0) {
       LOGW("Invalid length");
       return;
     }
@@ -2038,9 +2073,9 @@ void processCommand(const String& cmdLine) {
     if (!st.ok()) {
       printStatus(st);
     } else {
-      Serial.printf("Filled %u byte(s) at 0x%04X with 0x%02X\n",
-                    static_cast<unsigned>(len),
-                    addr,
+      Serial.printf("Filled %lu byte(s) at 0x%04lX with 0x%02X\n",
+                    static_cast<unsigned long>(len),
+                    static_cast<unsigned long>(addr),
                     value);
     }
     return;

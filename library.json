@@ -1,11 +1,15 @@
 {
   "name": "MB85RC",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Production-grade MB85RC-family FRAM I2C memory driver.",
   "keywords": [
     "mb85rc",
+    "mb85rc04v",
+    "mb85rc16v",
     "mb85rc256v",
     "mb85rc64ta",
+    "mb85rc512t",
+    "mb85rc1mt",
     "fram",
     "feram",
     "memory",

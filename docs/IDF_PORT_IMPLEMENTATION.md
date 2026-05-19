@@ -7,9 +7,9 @@ Branch: `feature/mb85rc-idf-port`.
 
 - Kept `include/MB85RC/` and `src/MB85RC.cpp` as a framework-neutral driver
   core with application-owned I2C callbacks.
-- Added runtime-aware MB85RC64TA support on the same framework-neutral core:
-  Device ID product `0x358`, 8 KB capacity, `0x0000..0x1FFF` bounds, and
-  variant-specific address high-byte masking.
+- Added runtime-aware support for all locally documented MB85RC variants on the
+  same framework-neutral core: `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`,
+  `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
 - Added ESP-IDF component metadata and a native IDF entry point for the full
   bring-up CLI.
 - Added an example-only ESP-IDF compatibility layer so the Arduino and ESP-IDF
@@ -19,7 +19,7 @@ Branch: `feature/mb85rc-idf-port`.
   fill, text, string, CRC, verify, settings, health, interface reset, self-test,
   read/write suite, random benchmark, typed demo, stress, and stress_mix flows.
   Memory commands are now active-capacity-bounded so the same CLI is safe on
-  both MB85RC64TA and MB85RC256V.
+  every supported MB85RC variant.
 
 ## Files Added
 
@@ -69,6 +69,16 @@ Branch: `feature/mb85rc-idf-port`.
     `readCurrentAddress(uint8_t*, size_t)` all validate against active
     capacity and reject cross-end operations.
   - `probe()` and `recover()` validate the already selected active variant.
+- Full-family support follow-up:
+  - `Config::expectedVariant` now has explicit selectors for `MB85RC04V`,
+    `MB85RC16V`, `MB85RC512T`, and `MB85RC1MT`.
+  - Public memory APIs and `maxAddress()` now use `uint32_t` addresses so
+    `MB85RC1MT` can expose its full `0x00000..0x1FFFF` range.
+  - Address encoding is centralized for one-byte small-density variants,
+    two-byte address-pin variants, and `MB85RC1MT` A16-in-device-address
+    transactions.
+  - `MB85RC16V` uses explicit selection plus memory-probe diagnostics because
+    it has no Device ID command and cannot be discovered by `AUTO`.
 
 ## Remaining Hardware Checks
 
@@ -82,8 +92,8 @@ Branch: `feature/mb85rc-idf-port`.
 
 ## Verification
 
-- `python -m platformio test -e native`: passed, including MB85RC64TA runtime
-  selection, bounds, address encoding, probe, and recover coverage.
+- `python -m platformio test -e native`: passed, including full-family runtime
+  selection, bounds, address encoding, probe, recover, and no-Device-ID coverage.
 - `python -m platformio run -e esp32s3dev`: passed.
 - `python -m platformio run -e esp32s2dev`: passed.
 - `python tools/check_cli_contract.py`: passed.

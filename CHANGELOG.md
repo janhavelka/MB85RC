@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-05-19
+
+### Added
+
+- Runtime support for the remaining locally documented variants: `MB85RC04V`, `MB85RC16V`, `MB85RC512T`, and `MB85RC1MT`.
+- `DeviceVariant` selectors for `MB85RC04V`, `MB85RC16V`, `MB85RC512T`, and `MB85RC1MT`.
+- Variant-specific memory address encoding for one-byte address models, two-byte address-pin models, and `MB85RC1MT` A16-in-device-address transactions.
+- Native tests for every explicit runtime variant, Device ID AUTO selection where supported, 04V/16V/512T/1MT address encoding, 1MT 32-bit current-address tracking, and no-Device-ID 16V diagnostics.
+
+### Changed
+
+- Breaking API change: memory addresses and `maxAddress()` are now `uint32_t` instead of `uint16_t` so `MB85RC1MT` can expose its full `0x00000..0x1FFFF` range.
+- The shared Arduino/ESP-IDF CLI and example typed-memory helpers now accept 32-bit addresses and lengths for full-chip operations on all supported variants.
+- `probe()` and `recover()` now use a memory-read presence check for `MB85RC16V`, because that part has no Device ID command.
+- `readDeviceId()` and `readDeviceIdRaw()` now return `INVALID_PARAM` when the active explicit variant has no Device ID command.
+- README, IDF port notes, release metadata, and Doxygen version metadata now describe the all-variant runtime contract.
+
 ## [2.0.0] - 2026-05-19
 
 ### Added
@@ -105,7 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0

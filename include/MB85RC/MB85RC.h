@@ -47,9 +47,9 @@ struct SettingsSnapshot {
   uint16_t productId = 0;         ///< Cached Device ID product field.
   uint8_t densityCode = 0;        ///< Cached Device ID density field.
   uint32_t capacityBytes = 0;     ///< Active runtime memory capacity in bytes.
-  uint16_t maxAddress = 0;        ///< Highest valid runtime memory address.
+  uint32_t maxAddress = 0;        ///< Highest valid runtime memory address.
   bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer.
-  uint16_t currentAddress = 0;    ///< Next byte address for Current Address Read.
+  uint32_t currentAddress = 0;    ///< Next byte address for Current Address Read.
 };
 
 /// @brief Result of comparing expected bytes with FRAM contents.
@@ -68,7 +68,8 @@ public:
   // =========================================================================
   
   /// Initialize the driver with configuration.
-  /// Verifies device presence by reading Device ID.
+  /// Verifies device presence by Device ID when available, or by a safe
+  /// memory-read probe for explicit no-Device-ID variants.
   /// @param config Configuration including transport callbacks
   /// @return Status::Ok() on success, error otherwise
   Status begin(const Config& config);
@@ -90,8 +91,9 @@ public:
   Status probe();
   
   /// Attempt to recover from DEGRADED/OFFLINE state.
-  /// Uses a tracked Device ID read; transport failures and ID mismatches update
-  /// health counters while clearing current-address tracking.
+  /// Uses a tracked Device ID read when available, or a tracked memory-read
+  /// probe for explicit no-Device-ID variants. Transport failures and ID
+  /// mismatches update health counters while clearing current-address tracking.
   /// @return Status::Ok() if device now responsive, error otherwise
   Status recover();
   
@@ -130,7 +132,7 @@ public:
   uint32_t capacityBytes() const;
 
   /// Get highest valid active runtime memory address.
-  uint16_t maxAddress() const;
+  uint32_t maxAddress() const;
 
   /// Get a snapshot of current configuration/runtime state (no I2C).
   Status getSettings(SettingsSnapshot& out) const;
@@ -172,7 +174,7 @@ public:
   /// @param address Memory address within the active variant capacity.
   /// @param value Output byte
   /// @return Status::Ok() on success
-  Status readByte(uint16_t address, uint8_t& value);
+  Status readByte(uint32_t address, uint8_t& value);
 
   /// Read multiple bytes starting at the specified address.
   /// The full range must fit before the active variant's end address.
@@ -180,7 +182,7 @@ public:
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success
-  Status read(uint16_t address, uint8_t* buf, size_t len);
+  Status read(uint32_t address, uint8_t* buf, size_t len);
   
   // =========================================================================
   // Memory Write API
@@ -191,7 +193,7 @@ public:
   /// @param address Memory address within the active variant capacity.
   /// @param value Byte to write
   /// @return Status::Ok() on success
-  Status writeByte(uint16_t address, uint8_t value);
+  Status writeByte(uint32_t address, uint8_t value);
 
   /// Write multiple bytes starting at the specified address.
   /// The full range must fit before the active variant's end address.
@@ -201,14 +203,14 @@ public:
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
   /// @return Status::Ok() on success
-  Status write(uint16_t address, const uint8_t* buf, size_t len);
+  Status write(uint32_t address, const uint8_t* buf, size_t len);
 
   /// Fill a range of memory with a constant byte value.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte
   /// @param len Number of bytes to fill
   /// @return Status::Ok() on success
-  Status fill(uint16_t address, uint8_t value, size_t len);
+  Status fill(uint32_t address, uint8_t value, size_t len);
   
   // =========================================================================
   // Device Information
@@ -216,11 +218,13 @@ public:
   
   /// Read the 3-byte Device ID from the device.
   /// Uses the reserved I2C addresses 0xF8/0xF9.
+  /// Returns INVALID_PARAM when the active variant has no Device ID command.
   /// @param id Output Device ID fields
   /// @return Status::Ok() on success
   Status readDeviceId(DeviceId& id);
 
   /// Read the raw 3-byte Device ID payload from the device.
+  /// Returns INVALID_PARAM when the active variant has no Device ID command.
   /// @param raw Output raw Device ID bytes as transmitted on the bus
   /// @return Status::Ok() on success
   Status readDeviceIdRaw(DeviceIdRaw& raw);
@@ -244,7 +248,7 @@ public:
   /// @param len Number of bytes to compare
   /// @param out Comparison result
   /// @return Status::Ok() on successful comparison transaction(s)
-  Status verify(uint16_t address, const uint8_t* expected, size_t len, VerifyResult& out);
+  Status verify(uint32_t address, const uint8_t* expected, size_t len, VerifyResult& out);
 
   /// Get the legacy MB85RC256V memory size in bytes.
   /// Prefer capacityBytes() for runtime-selected variants.
@@ -273,16 +277,29 @@ private:
   
   /// Tracked I2C write (updates health)
   Status _i2cWriteTracked(const uint8_t* buf, size_t len);
+
+  /// Tracked I2C write to an explicit address (updates health)
+  Status _i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len);
   
   // =========================================================================
   // Internal Helpers
   // =========================================================================
   
+  /// Encoded memory-address transaction header for the active variant.
+  struct EncodedMemoryAddress {
+    uint8_t i2cAddress = cmd::DEFAULT_ADDRESS;
+    uint8_t bytes[cmd::ADDRESS_BYTES] = {};
+    size_t len = 0;
+  };
+
   /// Read from memory using tracked path
-  Status _readMemory(uint16_t address, uint8_t* buf, size_t len);
+  Status _readMemory(uint32_t address, uint8_t* buf, size_t len);
+
+  /// Read from memory using raw path (no health tracking)
+  Status _readMemoryRaw(uint32_t address, uint8_t* buf, size_t len);
 
   /// Write to memory using tracked path
-  Status _writeMemory(uint16_t address, const uint8_t* buf, size_t len);
+  Status _writeMemory(uint32_t address, const uint8_t* buf, size_t len);
 
   /// Read Device ID using raw path (for begin/probe)
   Status _readDeviceIdRaw(DeviceId& id);
@@ -297,16 +314,16 @@ private:
   Status _readDeviceIdBytesTracked(DeviceIdRaw& raw);
 
   /// Validate address is within the active runtime capacity.
-  bool _isValidAddress(uint16_t address) const;
+  bool _isValidAddress(uint32_t address) const;
 
   /// Validate a contiguous address range against the active runtime capacity.
-  bool _fitsRange(uint16_t address, size_t len) const;
+  bool _fitsRange(uint32_t address, size_t len) const;
 
   /// Wrap an address into the active runtime memory address space.
-  uint16_t _wrapAddress(uint16_t address, size_t offset) const;
+  uint32_t _wrapAddress(uint32_t address, size_t offset) const;
 
   /// Encode a runtime memory address for the active variant.
-  Status _encodeMemoryAddress(uint16_t address, uint8_t (&out)[cmd::ADDRESS_BYTES]) const;
+  Status _encodeMemoryAddress(uint32_t address, EncodedMemoryAddress& out) const;
 
   /// Select and validate the active runtime variant from Device ID.
   Status _selectVariant(DeviceVariant expected, const DeviceId& id);
@@ -318,7 +335,7 @@ private:
   DeviceVariant _activeVariantEnum() const;
 
   /// Update the tracked current address after a successful memory transaction.
-  void _setCurrentAddressAfterTransfer(uint16_t address, size_t len);
+  void _setCurrentAddressAfterTransfer(uint32_t address, size_t len);
   
   // =========================================================================
   // Health Management
@@ -354,7 +371,7 @@ private:
   uint32_t _totalFailures = 0;
   uint32_t _totalSuccess = 0;
   bool _currentAddressKnown = false;
-  uint16_t _currentAddress = 0;
+  uint32_t _currentAddress = 0;
 };
 
 }  // namespace MB85RC

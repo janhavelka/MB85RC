@@ -44,22 +44,54 @@ void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
 }
 
 const cmd::VariantInfo* variantForExpected(DeviceVariant expected) {
+  const char* name = nullptr;
   switch (expected) {
+    case DeviceVariant::MB85RC04V:
+      name = "MB85RC04V";
+      break;
+    case DeviceVariant::MB85RC16V:
+      name = "MB85RC16V";
+      break;
     case DeviceVariant::MB85RC64TA:
-      return cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC64TA);
+      name = "MB85RC64TA";
+      break;
     case DeviceVariant::MB85RC256V:
-      return cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC256V);
+      name = "MB85RC256V";
+      break;
+    case DeviceVariant::MB85RC512T:
+      name = "MB85RC512T";
+      break;
+    case DeviceVariant::MB85RC1MT:
+      name = "MB85RC1MT";
+      break;
     case DeviceVariant::AUTO:
     default:
       return nullptr;
   }
+
+  for (size_t i = 0; i < cmd::VARIANT_COUNT; ++i) {
+    if (std::strcmp(cmd::KNOWN_VARIANTS[i].name, name) == 0) {
+      return &cmd::KNOWN_VARIANTS[i];
+    }
+  }
+  return nullptr;
 }
 
 bool isSupportedRuntimeVariant(const cmd::VariantInfo& variant) {
-  return variant.supportedByDriver &&
-         variant.addressModel == cmd::AddressModel::TWO_BYTE_ADDRESS_PINS &&
-         variant.memoryBytes > 0UL &&
-         variant.memoryBytes <= 65536UL;
+  if (!variant.supportedByDriver || variant.memoryBytes == 0UL ||
+      variant.memoryBytes > cmd::MEMORY_SIZE_MB85RC1MT) {
+    return false;
+  }
+
+  switch (variant.addressModel) {
+    case cmd::AddressModel::TWO_BYTE_ADDRESS_PINS:
+    case cmd::AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+    case cmd::AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+    case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      return true;
+    default:
+      return false;
+  }
 }
 
 int32_t deviceIdDetail(const DeviceId& id) {
@@ -138,6 +170,10 @@ Status MB85RC::begin(const Config& config) {
       variantForExpected(config.expectedVariant) == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
   }
+  const cmd::VariantInfo* explicitVariant = variantForExpected(config.expectedVariant);
+  if (explicitVariant != nullptr && !isSupportedRuntimeVariant(*explicitVariant)) {
+    return Status::Error(Err::INVALID_CONFIG, "Expected variant not supported by driver");
+  }
 
   _config = config;
   if (_config.offlineThreshold == 0) {
@@ -145,15 +181,30 @@ Status MB85RC::begin(const Config& config) {
   }
 
   // Verify device identity via Device ID read (uses raw path — not yet initialized)
-  DeviceId id;
-  Status st = _readDeviceIdRaw(id);
-  if (!st.ok()) {
-    return resetAfterFailedBegin(
-        Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
-  }
-  st = _selectVariant(_config.expectedVariant, id);
-  if (!st.ok()) {
-    return resetAfterFailedBegin(st);
+  Status st = Status::Ok();
+  if (explicitVariant != nullptr && !explicitVariant->hasDeviceId) {
+    _variant = explicitVariant;
+    _deviceId = DeviceId{};
+
+    uint8_t scratch = 0;
+    st = _readMemoryRaw(0, &scratch, 1);
+    if (!st.ok()) {
+      return resetAfterFailedBegin(
+          Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    }
+    _currentAddressKnown = false;
+    _currentAddress = 0;
+  } else {
+    DeviceId id;
+    st = _readDeviceIdRaw(id);
+    if (!st.ok()) {
+      return resetAfterFailedBegin(
+          Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+    }
+    st = _selectVariant(_config.expectedVariant, id);
+    if (!st.ok()) {
+      return resetAfterFailedBegin(st);
+    }
   }
 
   _initialized = true;
@@ -211,7 +262,7 @@ uint32_t MB85RC::capacityBytes() const {
                                : static_cast<uint32_t>(cmd::MEMORY_SIZE_MB85RC256V);
 }
 
-uint16_t MB85RC::maxAddress() const {
+uint32_t MB85RC::maxAddress() const {
   return (_variant != nullptr) ? cmd::maxAddressForVariant(*_variant)
                                : cmd::MAX_MEM_ADDRESS_MB85RC256V;
 }
@@ -223,6 +274,14 @@ uint16_t MB85RC::maxAddress() const {
 Status MB85RC::probe() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_variant != nullptr && !_variant->hasDeviceId) {
+    uint8_t scratch = 0;
+    Status st = _readMemoryRaw(0, &scratch, 1);
+    if (!st.ok()) {
+      return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    }
+    return Status::Ok();
   }
 
   DeviceId id;
@@ -241,6 +300,14 @@ Status MB85RC::recover() {
   const bool startedOffline = (_driverState == DriverState::OFFLINE);
   ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
   Status result = [&]() -> Status {
+    if (_variant != nullptr && !_variant->hasDeviceId) {
+      uint8_t scratch = 0;
+      Status st = _readMemory(0, &scratch, 1);
+      _currentAddressKnown = false;
+      _currentAddress = 0;
+      return st;
+    }
+
     // Use tracked path so failures update health counters.
     DeviceId id;
     Status st = _readDeviceIdTracked(id);
@@ -271,7 +338,7 @@ Status MB85RC::recover() {
 // Memory Read API
 // ===========================================================================
 
-Status MB85RC::readByte(uint16_t address, uint8_t& value) {
+Status MB85RC::readByte(uint32_t address, uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
@@ -282,7 +349,7 @@ Status MB85RC::readByte(uint16_t address, uint8_t& value) {
   return _readMemory(address, &value, 1);
 }
 
-Status MB85RC::read(uint16_t address, uint8_t* buf, size_t len) {
+Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
@@ -301,7 +368,7 @@ Status MB85RC::read(uint16_t address, uint8_t* buf, size_t len) {
       chunk = cmd::MAX_READ_CHUNK;
     }
 
-    uint16_t addr = static_cast<uint16_t>(address + offset);
+    uint32_t addr = address + static_cast<uint32_t>(offset);
 
     Status st = _readMemory(addr, buf + offset, chunk);
     if (!st.ok()) {
@@ -317,7 +384,7 @@ Status MB85RC::read(uint16_t address, uint8_t* buf, size_t len) {
 // Memory Write API
 // ===========================================================================
 
-Status MB85RC::writeByte(uint16_t address, uint8_t value) {
+Status MB85RC::writeByte(uint32_t address, uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
@@ -328,7 +395,7 @@ Status MB85RC::writeByte(uint16_t address, uint8_t value) {
   return _writeMemory(address, &value, 1);
 }
 
-Status MB85RC::write(uint16_t address, const uint8_t* buf, size_t len) {
+Status MB85RC::write(uint32_t address, const uint8_t* buf, size_t len) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
@@ -347,7 +414,7 @@ Status MB85RC::write(uint16_t address, const uint8_t* buf, size_t len) {
       chunk = cmd::MAX_WRITE_CHUNK;
     }
 
-    uint16_t addr = static_cast<uint16_t>(address + offset);
+    uint32_t addr = address + static_cast<uint32_t>(offset);
 
     Status st = _writeMemory(addr, buf + offset, chunk);
     if (!st.ok()) {
@@ -359,7 +426,7 @@ Status MB85RC::write(uint16_t address, const uint8_t* buf, size_t len) {
   return Status::Ok();
 }
 
-Status MB85RC::fill(uint16_t address, uint8_t value, size_t len) {
+Status MB85RC::fill(uint32_t address, uint8_t value, size_t len) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
@@ -381,7 +448,7 @@ Status MB85RC::fill(uint16_t address, uint8_t value, size_t len) {
       toWrite = FILL_CHUNK_SIZE;
     }
 
-    uint16_t addr = static_cast<uint16_t>(address + offset);
+    uint32_t addr = address + static_cast<uint32_t>(offset);
 
     Status st = _writeMemory(addr, chunk, toWrite);
     if (!st.ok()) {
@@ -402,6 +469,9 @@ Status MB85RC::readDeviceId(DeviceId& id) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  if (_variant != nullptr && !_variant->hasDeviceId) {
+    return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
+  }
 
   return _readDeviceIdTracked(id);
 }
@@ -409,6 +479,9 @@ Status MB85RC::readDeviceId(DeviceId& id) {
 Status MB85RC::readDeviceIdRaw(DeviceIdRaw& raw) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_variant != nullptr && !_variant->hasDeviceId) {
+    return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
   }
 
   return _readDeviceIdBytesTracked(raw);
@@ -436,7 +509,12 @@ Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   }
 
   for (size_t offset = 0; offset < len; ++offset) {
-    Status st = _i2cWriteReadTrackedAddr(_config.i2cAddress, nullptr, 0, &buf[offset], 1);
+    EncodedMemoryAddress enc;
+    Status st = _encodeMemoryAddress(_currentAddress, enc);
+    if (!st.ok()) {
+      return st;
+    }
+    st = _i2cWriteReadTrackedAddr(enc.i2cAddress, nullptr, 0, &buf[offset], 1);
     if (!st.ok()) {
       if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
         _currentAddressKnown = false;
@@ -450,7 +528,7 @@ Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   return Status::Ok();
 }
 
-Status MB85RC::verify(uint16_t address, const uint8_t* expected, size_t len, VerifyResult& out) {
+Status MB85RC::verify(uint32_t address, const uint8_t* expected, size_t len, VerifyResult& out) {
   out.match = false;
   out.mismatchOffset = 0;
   out.expected = 0;
@@ -474,7 +552,7 @@ Status MB85RC::verify(uint16_t address, const uint8_t* expected, size_t len, Ver
       chunk = sizeof(readBuf);
     }
 
-    const uint16_t chunkAddr = static_cast<uint16_t>(address + offset);
+    const uint32_t chunkAddr = address + static_cast<uint32_t>(offset);
     Status st = _readMemory(chunkAddr, readBuf, chunk);
     if (!st.ok()) {
       return st;
@@ -548,6 +626,10 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
 }
 
 Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
+  return _i2cWriteTrackedAddr(_config.i2cAddress, buf, len);
+}
+
+Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len) {
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
     return Status::Error(Err::BUSY, "Driver is offline; call recover()");
   }
@@ -556,7 +638,7 @@ Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
 
-  Status st = _i2cWriteRaw(_config.i2cAddress, buf, len);
+  Status st = _i2cWriteRaw(addr, buf, len);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
@@ -567,7 +649,7 @@ Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
 // Internal Helpers
 // ===========================================================================
 
-Status MB85RC::_readMemory(uint16_t address, uint8_t* buf, size_t len) {
+Status MB85RC::_readMemory(uint32_t address, uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
   }
@@ -577,13 +659,13 @@ Status MB85RC::_readMemory(uint16_t address, uint8_t* buf, size_t len) {
 
   // Random Read: [S] [addr W] [addrHi] [addrLo] [Sr] [addr R] [data...] [NACK] [P]
   // The transport write-read callback handles the repeated start internally.
-  uint8_t addrBuf[cmd::ADDRESS_BYTES];
-  Status st = _encodeMemoryAddress(address, addrBuf);
+  EncodedMemoryAddress enc;
+  Status st = _encodeMemoryAddress(address, enc);
   if (!st.ok()) {
     return st;
   }
 
-  st = _i2cWriteReadTracked(addrBuf, cmd::ADDRESS_BYTES, buf, len);
+  st = _i2cWriteReadTrackedAddr(enc.i2cAddress, enc.bytes, enc.len, buf, len);
   if (st.ok()) {
     _setCurrentAddressAfterTransfer(address, len);
   } else if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
@@ -592,7 +674,24 @@ Status MB85RC::_readMemory(uint16_t address, uint8_t* buf, size_t len) {
   return st;
 }
 
-Status MB85RC::_writeMemory(uint16_t address, const uint8_t* buf, size_t len) {
+Status MB85RC::_readMemoryRaw(uint32_t address, uint8_t* buf, size_t len) {
+  if (buf == nullptr || len == 0) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
+  }
+  if (len > cmd::MAX_READ_CHUNK) {
+    return Status::Error(Err::INVALID_PARAM, "Read chunk too large");
+  }
+
+  EncodedMemoryAddress enc;
+  Status st = _encodeMemoryAddress(address, enc);
+  if (!st.ok()) {
+    return st;
+  }
+
+  return _i2cWriteReadRaw(enc.i2cAddress, enc.bytes, enc.len, buf, len);
+}
+
+Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len) {
   // Byte/Sequential Write: [S] [addr W] [addrHi] [addrLo] [data...] [P]
   // No write delay needed - FRAM writes immediately.
   if (buf == nullptr || len == 0) {
@@ -603,17 +702,18 @@ Status MB85RC::_writeMemory(uint16_t address, const uint8_t* buf, size_t len) {
   }
 
   uint8_t payload[MAX_WRITE_BUF];
-  uint8_t addrBuf[cmd::ADDRESS_BYTES];
-  Status st = _encodeMemoryAddress(address, addrBuf);
+  EncodedMemoryAddress enc;
+  Status st = _encodeMemoryAddress(address, enc);
   if (!st.ok()) {
     return st;
   }
 
-  payload[0] = addrBuf[0];
-  payload[1] = addrBuf[1];
-  std::memcpy(&payload[cmd::ADDRESS_BYTES], buf, len);
+  for (size_t i = 0; i < enc.len; ++i) {
+    payload[i] = enc.bytes[i];
+  }
+  std::memcpy(&payload[enc.len], buf, len);
 
-  st = _i2cWriteTracked(payload, cmd::ADDRESS_BYTES + len);
+  st = _i2cWriteTrackedAddr(enc.i2cAddress, payload, enc.len + len);
   if (st.ok()) {
     _setCurrentAddressAfterTransfer(address, len);
   } else if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
@@ -676,42 +776,75 @@ Status MB85RC::_readDeviceIdBytesTracked(DeviceIdRaw& raw) {
   return Status::Ok();
 }
 
-bool MB85RC::_isValidAddress(uint16_t address) const {
+bool MB85RC::_isValidAddress(uint32_t address) const {
   return address <= maxAddress();
 }
 
-bool MB85RC::_fitsRange(uint16_t address, size_t len) const {
+bool MB85RC::_fitsRange(uint32_t address, size_t len) const {
   if (len == 0U || !_isValidAddress(address)) {
     return false;
   }
   const uint32_t capacity = capacityBytes();
-  if (static_cast<uint32_t>(address) >= capacity) {
+  if (address >= capacity) {
     return false;
   }
-  const size_t remaining = static_cast<size_t>(capacity - static_cast<uint32_t>(address));
+  const size_t remaining = static_cast<size_t>(capacity - address);
   return len <= remaining;
 }
 
-uint16_t MB85RC::_wrapAddress(uint16_t address, size_t offset) const {
+uint32_t MB85RC::_wrapAddress(uint32_t address, size_t offset) const {
   const uint32_t capacity = capacityBytes();
   if (capacity == 0UL) {
     return 0U;
   }
-  return static_cast<uint16_t>((static_cast<uint32_t>(address) +
-                                static_cast<uint32_t>(offset)) % capacity);
+  return (address + static_cast<uint32_t>(offset)) % capacity;
 }
 
-Status MB85RC::_encodeMemoryAddress(uint16_t address,
-                                    uint8_t (&out)[cmd::ADDRESS_BYTES]) const {
+Status MB85RC::_encodeMemoryAddress(uint32_t address, EncodedMemoryAddress& out) const {
   if (_variant == nullptr || !isSupportedRuntimeVariant(*_variant)) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported active variant");
   }
   if (!_isValidAddress(address)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity", address);
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity",
+                         static_cast<int32_t>(address));
   }
 
-  out[0] = static_cast<uint8_t>((address >> 8) & cmd::addressHighMaskForVariant(*_variant));
-  out[1] = static_cast<uint8_t>(address & 0xFFU);
+  out = EncodedMemoryAddress{};
+  out.i2cAddress = _config.i2cAddress;
+
+  switch (_variant->addressModel) {
+    case cmd::AddressModel::TWO_BYTE_ADDRESS_PINS:
+      out.len = 2;
+      out.bytes[0] = static_cast<uint8_t>((address >> 8) &
+                                          cmd::addressHighMaskForVariant(*_variant));
+      out.bytes[1] = static_cast<uint8_t>(address & 0xFFU);
+      break;
+
+    case cmd::AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+      out.i2cAddress = static_cast<uint8_t>((_config.i2cAddress & 0xFEU) |
+                                            ((address >> 16) & 0x01U));
+      out.len = 2;
+      out.bytes[0] = static_cast<uint8_t>((address >> 8) & 0xFFU);
+      out.bytes[1] = static_cast<uint8_t>(address & 0xFFU);
+      break;
+
+    case cmd::AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+      out.i2cAddress = static_cast<uint8_t>((_config.i2cAddress & 0xF8U) |
+                                            ((address >> 8) & 0x07U));
+      out.len = 1;
+      out.bytes[0] = static_cast<uint8_t>(address & 0xFFU);
+      break;
+
+    case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      out.i2cAddress = static_cast<uint8_t>((_config.i2cAddress & 0xFEU) |
+                                            ((address >> 8) & 0x01U));
+      out.len = 1;
+      out.bytes[0] = static_cast<uint8_t>(address & 0xFFU);
+      break;
+
+    default:
+      return Status::Error(Err::INVALID_CONFIG, "Unsupported active address model");
+  }
   return Status::Ok();
 }
 
@@ -733,6 +866,9 @@ Status MB85RC::_selectVariant(DeviceVariant expected, const DeviceId& id) {
     if (selected == nullptr) {
       return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
     }
+    if (!selected->hasDeviceId) {
+      return Status::Error(Err::INVALID_CONFIG, "Expected variant has no Device ID");
+    }
     if (id.productId != selected->productId) {
       return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID product mismatch",
                            deviceIdDetail(id));
@@ -753,6 +889,9 @@ Status MB85RC::_validateActiveDeviceId(const DeviceId& id) const {
   if (_variant == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Active variant not selected");
   }
+  if (!_variant->hasDeviceId) {
+    return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
+  }
   if (id.manufacturerId != cmd::MANUFACTURER_ID) {
     return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID manufacturer mismatch",
                          deviceIdDetail(id));
@@ -768,16 +907,28 @@ DeviceVariant MB85RC::_activeVariantEnum() const {
   if (_variant == nullptr) {
     return _config.expectedVariant;
   }
-  if (_variant->productId == cmd::PRODUCT_ID_MB85RC64TA) {
+  if (std::strcmp(_variant->name, "MB85RC04V") == 0) {
+    return DeviceVariant::MB85RC04V;
+  }
+  if (std::strcmp(_variant->name, "MB85RC16V") == 0) {
+    return DeviceVariant::MB85RC16V;
+  }
+  if (std::strcmp(_variant->name, "MB85RC64TA") == 0) {
     return DeviceVariant::MB85RC64TA;
   }
-  if (_variant->productId == cmd::PRODUCT_ID_MB85RC256V) {
+  if (std::strcmp(_variant->name, "MB85RC256V") == 0) {
     return DeviceVariant::MB85RC256V;
+  }
+  if (std::strcmp(_variant->name, "MB85RC512T") == 0) {
+    return DeviceVariant::MB85RC512T;
+  }
+  if (std::strcmp(_variant->name, "MB85RC1MT") == 0) {
+    return DeviceVariant::MB85RC1MT;
   }
   return DeviceVariant::AUTO;
 }
 
-void MB85RC::_setCurrentAddressAfterTransfer(uint16_t address, size_t len) {
+void MB85RC::_setCurrentAddressAfterTransfer(uint32_t address, size_t len) {
   if (len == 0) {
     return;
   }

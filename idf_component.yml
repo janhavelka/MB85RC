@@ -1,4 +1,4 @@
-version: "2.0.0"
+version: "3.0.0"
 description: "Production-grade MB85RC-family FRAM I2C memory driver"
 license: "MIT"
 url: "https://github.com/janhavelka/MB85RC"

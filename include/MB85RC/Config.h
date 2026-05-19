@@ -12,7 +12,11 @@ namespace MB85RC {
 enum class DeviceVariant : uint8_t {
   AUTO = 0,       ///< Select a supported runtime variant from Device ID.
   MB85RC256V,     ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
-  MB85RC64TA      ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
+  MB85RC64TA,     ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
+  MB85RC04V,      ///< Expect MB85RC04V, 512 bytes, Product ID 0x010.
+  MB85RC16V,      ///< Expect MB85RC16V, 2 KiB, no Device ID command.
+  MB85RC512T,     ///< Expect MB85RC512T, 64 KiB, Product ID 0x658.
+  MB85RC1MT       ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
 };
 
 /// I2C write callback signature
@@ -57,7 +61,9 @@ struct Config {
   // === Device Settings ===
   uint8_t i2cAddress = 0x50;             ///< 0x50-0x57 depending on A2:A1:A0 pins
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
-  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V; ///< Expected runtime variant; default preserves legacy 256V behavior
+  /// Expected runtime variant. The default preserves legacy 256V behavior.
+  /// Use AUTO for Device-ID-capable variants; select MB85RC16V explicitly.
+  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V;
 
   // === Health Tracking ===
   uint8_t offlineThreshold = 5;          ///< Consecutive failures before OFFLINE state

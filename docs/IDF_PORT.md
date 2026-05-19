@@ -9,8 +9,10 @@ functionality.
 - Core driver remains framework-neutral for I2C ownership. All bus access still
   goes through `Config::i2cWrite` and `Config::i2cWriteRead`.
 - Runtime variant selection is framework-neutral. `DeviceVariant::AUTO`,
-  `MB85RC64TA`, and `MB85RC256V` use the same callback-only transport path in
-  both frameworks.
+  `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`
+  use the same callback-only transport path in both frameworks. `MB85RC16V`
+  is also supported when selected explicitly because it has no Device ID
+  command for AUTO discovery.
 - `src/MB85RC.cpp` no longer requires Arduino headers for ESP-IDF builds.
 - If `Config::nowMs` is not supplied, Arduino/native-test builds use
   `millis()` and ESP-IDF builds use `esp_timer_get_time() / 1000`.
@@ -100,10 +102,12 @@ The IDF example targets ESP32-S2 and ESP32-S3 and requires ESP-IDF `>=6.0.1`.
 
 - Applications still own SDA/SCL pins, pull-ups, I2C clock, optional WP GPIO,
   and bus lifetime. The library does not create buses or devices.
-- Applications that need MB85RC64TA should set
-  `Config::expectedVariant = DeviceVariant::MB85RC64TA` or `AUTO`. The legacy
-  default remains `MB85RC256V` so existing 256V projects keep their old
-  validation behavior.
+- Applications should set `Config::expectedVariant = DeviceVariant::AUTO` for
+  Device-ID-capable parts, or set an explicit selector (`MB85RC04V`,
+  `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT`) when the
+  board BOM is fixed. The legacy default remains `MB85RC256V` so existing 256V
+  projects keep their old validation behavior. `MB85RC16V` must be explicit
+  because it has no Device ID command.
 - Bulk memory operations intentionally reject ranges that exceed
   `capacityBytes()`; firmware should split or shorten requests instead of
   expecting wraparound.
