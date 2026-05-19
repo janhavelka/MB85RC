@@ -8,29 +8,6 @@
 #include <cstring>
 #include <limits>
 
-#if defined(ARDUINO)
-#define MB85RC_HAS_ARDUINO_TIME 1
-#elif !defined(ESP_PLATFORM) && defined(__has_include)
-#if __has_include(<Arduino.h>)
-#define MB85RC_HAS_ARDUINO_TIME 1
-#endif
-#endif
-
-#ifndef MB85RC_HAS_ARDUINO_TIME
-#define MB85RC_HAS_ARDUINO_TIME 0
-#endif
-
-#if MB85RC_HAS_ARDUINO_TIME
-#include <Arduino.h>
-#elif defined(ESP_PLATFORM)
-#include <esp_timer.h>
-#define MB85RC_HAS_IDF_TIME 1
-#endif
-
-#ifndef MB85RC_HAS_IDF_TIME
-#define MB85RC_HAS_IDF_TIME 0
-#endif
-
 namespace MB85RC {
 namespace {
 
@@ -1020,13 +997,7 @@ uint32_t MB85RC::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
   }
-#if MB85RC_HAS_ARDUINO_TIME
-  return millis();
-#elif MB85RC_HAS_IDF_TIME
-  return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
-#else
   return 0U;
-#endif
 }
 
 }  // namespace MB85RC

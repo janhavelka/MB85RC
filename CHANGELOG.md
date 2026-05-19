@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- Root ESP-IDF component now declares `esp_timer` as a private requirement because the fallback timer shim is an implementation detail, not a public-header dependency.
+- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples/application glue.
+- ESP-IDF example is now a native IDF CLI using `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
 
 ## [2.0.0] - 2026-05-19
 
@@ -20,8 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Variant-specific memory address encoding for one-byte address models, two-byte address-pin models, and `MB85RC1MT` A16-in-device-address transactions.
 - Runtime diagnostics: `variantInfo()`, `variantName()`, `deviceId()`, `capacityBytes()`, `maxAddress()`, and expanded `SettingsSnapshot` fields.
 - Native tests for every explicit runtime variant, Device ID AUTO selection where supported, variant mismatches, address encoding, active-capacity bounds, current-address bounds, active-variant `probe()` / `recover()`, and no-Device-ID 16V diagnostics.
-- ESP-IDF component metadata and a pure ESP-IDF `examples/espidf_basic` build of the full bring-up CLI.
-- `examples/common/IdfArduinoCompat.h` example shim that provides the small Arduino surface used by the CLI while routing I2C through ESP-IDF v6 `i2c_master_*` APIs.
+- ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build of the full bring-up CLI command contract.
 - ESP-IDF port notes in `docs/IDF_PORT.md`.
 - ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
 
@@ -30,18 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Breaking API change: memory addresses and `maxAddress()` are now `uint32_t` instead of `uint16_t` so `MB85RC1MT` can expose its full `0x00000..0x1FFFF` range.
 - `begin()`, `probe()`, and `recover()` now validate the selected active variant instead of hard-coding the MB85RC256V product ID.
 - `read()`, `write()`, `fill()`, `verify()`, `readCurrentAddress(uint8_t*, size_t)`, typed helpers, and CLI memory commands now reject ranges that cross the active variant capacity instead of silently relying on device rollover.
-- The shared Arduino/ESP-IDF CLI now initializes with `DeviceVariant::AUTO`, prints active variant/capacity diagnostics, accepts 32-bit addresses, and sizes full-chip/benchmark operations from the runtime capacity.
+- Arduino and native ESP-IDF CLIs now initialize with `DeviceVariant::AUTO`, print active variant/capacity diagnostics, accept 32-bit addresses, and size full-chip/benchmark operations from the runtime capacity.
 - `probe()` and `recover()` now use a memory-read presence check for `MB85RC16V`, because that part has no Device ID command.
 - `readDeviceId()` and `readDeviceIdRaw()` now return `INVALID_PARAM` when the active explicit variant has no Device ID command.
 - `library.json`, `idf_component.yml`, and README now describe the library as an MB85RC-family driver and include all supported runtime variants.
-- Core time fallback is now platform-aware: Arduino/native test builds use `millis()`, while ESP-IDF builds use `esp_timer_get_time()`.
-- Example helpers now gate Arduino headers behind `MB85RC_EXAMPLE_PLATFORM_IDF` so the same CLI source can compile for both frameworks.
 - `library.json` now declares both `arduino` and `espidf` framework support.
-- Doxygen input now covers the ESP-IDF port notes, implementation notes, shared CLI source, native IDF entry point, and example-only IDF shims.
+- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino CLI source, and native IDF entry point.
 - The ESP-IDF example adapter now performs Device ID transactions on reserved address `0x7C` through ESP-IDF defined I2C operations with manual address bytes instead of relying on normal device-handle addressing for a reserved address.
-- `tools/check_cli_contract.py` now validates the ESP-IDF wrapper macro, shared-source include, required CMake dependencies, full CLI command surface, Device ID reserved-address shim path, and core Device ID address construction.
-- ESP-IDF port docs now spell out the static wrapper contract checks and Doxygen validation coverage.
-- The ESP-IDF CLI parity is structural through shared source; pure IDF `idf.py` builds and hardware validation remain pending until an IDF toolchain and target hardware are available.
+- `tools/check_idf_example_contract.py` now validates the native ESP-IDF boundary, command surface, required CMake dependencies, and core Device ID address construction.
+- ESP-IDF CLI parity is checked through repo-local command contracts; hardware validation remains pending until target hardware is available.
 
 ### Fixed
 

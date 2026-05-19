@@ -2,15 +2,7 @@
 /// @brief Basic bringup example for supported MB85RC-family FRAM variants
 /// @note This is an EXAMPLE, not part of the library
 
-#ifndef MB85RC_EXAMPLE_PLATFORM_IDF
-#define MB85RC_EXAMPLE_PLATFORM_IDF 0
-#endif
-
-#if MB85RC_EXAMPLE_PLATFORM_IDF
-#include "examples/common/IdfArduinoCompat.h"
-#else
 #include <Arduino.h>
-#endif
 #include <cstdlib>
 #include <cstring>
 

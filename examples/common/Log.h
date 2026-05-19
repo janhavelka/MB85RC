@@ -8,15 +8,7 @@
 
 #pragma once
 
-#ifndef MB85RC_EXAMPLE_PLATFORM_IDF
-#define MB85RC_EXAMPLE_PLATFORM_IDF 0
-#endif
-
-#if MB85RC_EXAMPLE_PLATFORM_IDF
-#include "examples/common/IdfArduinoCompat.h"
-#else
 #include <Arduino.h>
-#endif
 
 #include "examples/common/BuildConfig.h"
 
@@ -49,7 +41,7 @@ inline const char* log_bool_str(bool value) { return value ? "yes" : "no"; }
 inline void log_begin(unsigned long baud = 115200) {
   LOG_SERIAL.begin(baud);
   // Give USB CDC time to initialize on ESP32-S3
-  #if !MB85RC_EXAMPLE_PLATFORM_IDF && defined(CONFIG_IDF_TARGET_ESP32S3) && ARDUINO_USB_CDC_ON_BOOT
+  #if defined(CONFIG_IDF_TARGET_ESP32S3) && ARDUINO_USB_CDC_ON_BOOT
   delay(100);
   #endif
 }

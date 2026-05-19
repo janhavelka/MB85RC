@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import runpy
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -71,7 +72,6 @@ DEVICE_ID_CORE_TOKENS = [
     "_config.i2cAddress << 1",
 ]
 
-IDF_EXAMPLE_MACRO = "MB85RC_EXAMPLE_PLATFORM_IDF"
 IDF_REQUIRED_COMPONENTS = [
     "MB85RC",
     "esp_driver_i2c",
@@ -158,12 +158,6 @@ def main() -> int:
         require_help(text, cmd)
 
     idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
-    if f"#define {IDF_EXAMPLE_MACRO} 1" not in idf_text:
-        fail(f"{IDF_EXAMPLE_MACRO}=1 missing from ESP-IDF entry point")
-    if '#include "examples/common/IdfArduinoCompat.h"' not in idf_text:
-        fail("ESP-IDF entry point must include IdfArduinoCompat.h")
-    if '#include "examples/01_basic_bringup_cli/main.cpp"' not in idf_text:
-        fail("ESP-IDF entry point must include the Arduino CLI source")
     if 'extern "C" void app_main(void)' not in idf_text:
         fail("ESP-IDF entry point must define app_main()")
 
@@ -172,11 +166,8 @@ def main() -> int:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"ESP-IDF CMake file missing required component '{component}'")
 
-    compat_text = (common_dir / "IdfArduinoCompat.h").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    for token in DEVICE_ID_IDF_TOKENS:
-        require_literal(compat_text, token, "ESP-IDF Device ID manual-address path")
+    idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
+    idf_contract["main"]()
 
     core_text = (ROOT / "src" / "MB85RC.cpp").read_text(
         encoding="utf-8", errors="replace"

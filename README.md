@@ -39,7 +39,8 @@ extra component or dependency, then include `MB85RC/MB85RC.h` and provide
 `Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
 I2C master bus.
 
-The full bring-up CLI is shared between Arduino and ESP-IDF:
+The ESP-IDF bring-up CLI is implemented as a native IDF example with the same
+command contract as the Arduino CLI:
 
 ```bash
 cd examples/espidf_basic
@@ -47,16 +48,14 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-The ESP-IDF example uses `driver/i2c_master.h` through
-`examples/common/IdfArduinoCompat.h` so it exposes the same commands and serial
-output as `examples/01_basic_bringup_cli`, including Device ID reads,
-current-address reads, active-capacity-bounded memory commands, typed demo, random benchmark,
-self-test, and stress diagnostics.
+The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
+`vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
+sources or compatibility facades. The command contract covers Device ID reads,
+current-address reads, active-capacity-bounded memory commands, typed demo,
+random benchmark, self-test, and stress diagnostics.
 
-Validation status: command parity is structural through shared source. Native
-tests and Arduino ESP32-S2/S3 example builds passed during this port pass; pure
-ESP-IDF `idf.py` builds and hardware smoke tests are still pending until an IDF
-toolchain and target devices are available.
+Validation status: command parity is checked by repo-local contract scripts.
+Hardware smoke tests are still pending until target devices are available.
 
 ## Quick Start
 
@@ -99,7 +98,7 @@ void loop() {
 
 The default `expectedVariant` is `MB85RC256V` for compatibility with existing users. New integrations should set `DeviceVariant::AUTO` or an explicit expected variant so `begin()`, `probe()`, and `recover()` validate the actual Device ID and capacity. `MB85RC16V` has no Device ID command, so select it explicitly with `DeviceVariant::MB85RC16V`; `AUTO` cannot discover it.
 
-The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. If `Config::nowMs` is not provided, the driver falls back to `millis()` on Arduino/native-test builds and `esp_timer_get_time()` on ESP-IDF builds.
+The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. Applications that need meaningful health timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
 ## Release 2.0.0 Highlights
 
@@ -111,7 +110,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - Address encoding is centralized for one-byte small-density devices, two-byte address-pin devices, and `MB85RC1MT` A16-in-device-address transactions.
 - `MB85RC16V` is supported through explicit selection and memory-probe diagnostics because the part has no Device ID command.
 - `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
-- The shared Arduino/ESP-IDF CLI accepts 32-bit addresses and preserves the same command surface in both frameworks.
+- Arduino and native ESP-IDF CLIs use separate implementations with a shared command contract, accept 32-bit addresses, and preserve the same command surface in both frameworks.
 - Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
 
 ## Release 1.1.1 Highlights
@@ -223,11 +222,10 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
 
 - `examples/espidf_basic/`
-  - Pure ESP-IDF build of the same bring-up CLI.
-  - Includes the Arduino example source with `MB85RC_EXAMPLE_PLATFORM_IDF=1`.
-  - Supplies a fixed-capacity `String`/serial/GPIO/Wire-compatible shim backed by ESP-IDF v6 `i2c_master_*` APIs.
-  - Explicitly supports current-address reads (`txLen == 0`) and Device ID reads through reserved address `0x7C` using ESP-IDF defined I2C operations with manual address bytes.
-  - `tools/check_cli_contract.py` checks the full CLI command surface, IDF entry point, CMake dependency surface, Device ID reserved-address shim invariants, and core Device ID address construction so future wrapper edits cannot silently drop parity.
+  - Native ESP-IDF build of the bring-up CLI command contract.
+  - Uses `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
+  - Preserves current-address, Device ID, raw ID, active-capacity, stress, self-test, benchmark, and typed-demo command coverage.
+  - `tools/check_idf_example_contract.py` rejects Arduino compatibility facades and checks the native IDF command surface.
 
 ### CLI Inspection Examples
 
@@ -302,8 +300,8 @@ doxygen Doxyfile
 - `docs/MB85RC1MT-DS5v1-E.pdf` - 1MT A16-in-device-address transaction reference
 - `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
 - `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
-- `Doxyfile` - indexes public headers, the ESP-IDF port notes, the shared Arduino
-  CLI source, the native IDF entry point, and example-only framework shims
+- `Doxyfile` - indexes public headers, the ESP-IDF port notes, the Arduino CLI,
+  and the native IDF entry point
 
 ## License
 
