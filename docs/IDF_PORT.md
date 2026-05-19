@@ -50,7 +50,9 @@ The adapter preserves MB85RC-specific transport behavior:
 
 - normal memory reads use `i2c_master_transmit_receive()`
 - current-address reads use `i2c_master_receive()` when `txLen == 0`
-- Device ID reads use reserved 7-bit address `0x7C`
+- Device ID reads use reserved 7-bit address `0x7C` through ESP-IDF defined
+  I2C operations with manual address bytes and a handle configured with
+  `I2C_DEVICE_ADDRESS_NOT_USED`
 - write-only fallback through `writeReadStatus(..., rxLen == 0, ...)` uses
   `i2c_master_transmit()`
 - interface reset stays in example glue and never moves into the driver
@@ -96,9 +98,9 @@ The IDF example targets ESP32-S2 and ESP32-S3 and requires ESP-IDF `>=6.0.1`.
   and bus lifetime. The library does not create buses or devices.
 - A real ESP-IDF application can either reuse the example adapter or provide a
   smaller project-specific adapter directly from its own `i2c_master_dev_handle_t`.
-- If ESP-IDF rejects reserved address `0x7C` through device handles on a target
-  or IDF revision, implement the Device ID transaction in the application
-  adapter with defined I2C operations and keep the core callback API unchanged.
+- The example adapter already avoids normal device-handle addressing for the
+  reserved Device ID address. Hardware validation still has to prove the target
+  FRAM ACKs the defined-operation sequence under the selected IDF version.
 - The CLI shim is intentionally narrow. If the Arduino example starts using more
   of Arduino `String`, `Print`, or `TwoWire`, extend the shim in the same commit
   as the example change.

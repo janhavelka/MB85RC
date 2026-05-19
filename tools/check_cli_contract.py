@@ -29,6 +29,16 @@ MANDATORY_PATTERNS = {
     "dump command": r'cmd\.startsWith\("read "\) \|\| cmd\.startsWith\("dump "\)',
 }
 
+IDF_EXAMPLE_MACRO = "MB85RC_EXAMPLE_PLATFORM_IDF"
+IDF_REQUIRED_COMPONENTS = [
+    "MB85RC",
+    "esp_driver_i2c",
+    "esp_driver_gpio",
+    "esp_timer",
+    "freertos",
+    "vfs",
+]
+
 
 def fail(msg: str) -> None:
     print(f"CLI contract FAILED: {msg}")
@@ -48,9 +58,13 @@ def ensure_missing(path: pathlib.Path, label: str) -> None:
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
+    idf_main = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
+    idf_cmake = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
 
     ensure_exists(common_dir, "common example directory")
     ensure_exists(bringup_main, "bringup CLI example")
+    ensure_exists(idf_main, "ESP-IDF bringup entry point")
+    ensure_exists(idf_cmake, "ESP-IDF bringup CMake file")
 
     ensure_missing(ROOT / "examples" / "00_smoke_boot", "deprecated example 00_smoke_boot")
     ensure_missing(
@@ -70,6 +84,21 @@ def main() -> int:
     for label, pattern in MANDATORY_PATTERNS.items():
         if re.search(pattern, text) is None:
             fail(f"missing {label}")
+
+    idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
+    if f"#define {IDF_EXAMPLE_MACRO} 1" not in idf_text:
+        fail(f"{IDF_EXAMPLE_MACRO}=1 missing from ESP-IDF entry point")
+    if '#include "examples/common/IdfArduinoCompat.h"' not in idf_text:
+        fail("ESP-IDF entry point must include IdfArduinoCompat.h")
+    if '#include "examples/01_basic_bringup_cli/main.cpp"' not in idf_text:
+        fail("ESP-IDF entry point must include the Arduino CLI source")
+    if 'extern "C" void app_main(void)' not in idf_text:
+        fail("ESP-IDF entry point must define app_main()")
+
+    cmake_text = idf_cmake.read_text(encoding="utf-8", errors="replace")
+    for component in IDF_REQUIRED_COMPONENTS:
+        if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
+            fail(f"ESP-IDF CMake file missing required component '{component}'")
 
     print("CLI contract PASSED")
     return 0

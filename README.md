@@ -52,6 +52,11 @@ output as `examples/01_basic_bringup_cli`, including Device ID reads,
 current-address reads, wrap-aware memory commands, typed demo, random benchmark,
 self-test, and stress diagnostics.
 
+Validation status: command parity is structural through shared source. Native
+tests and Arduino ESP32-S2/S3 example builds passed during this port pass; pure
+ESP-IDF `idf.py` builds and hardware smoke tests are still pending until an IDF
+toolchain and target devices are available.
+
 ## Quick Start
 
 ```cpp
@@ -192,7 +197,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - Pure ESP-IDF build of the same bring-up CLI.
   - Includes the Arduino example source with `MB85RC_EXAMPLE_PLATFORM_IDF=1`.
   - Supplies a fixed-capacity `String`/serial/GPIO/Wire-compatible shim backed by ESP-IDF v6 `i2c_master_*` APIs.
-  - Explicitly supports current-address reads (`txLen == 0`) and Device ID reads through reserved address `0x7C`.
+  - Explicitly supports current-address reads (`txLen == 0`) and Device ID reads through reserved address `0x7C` using ESP-IDF defined I2C operations with manual address bytes.
+  - `tools/check_cli_contract.py` checks the IDF entry point and CMake dependency surface so future wrapper edits cannot silently drop parity.
 
 ### CLI Inspection Examples
 
@@ -258,10 +264,13 @@ doxygen Doxyfile
 
 - `CHANGELOG.md` - release history and GitHub release note source
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
+- `docs/IDF_PORT_IMPLEMENTATION.md` - ESP-IDF implementation and audit closure notes
 - `docs/releases/` - per-release validation summaries
 - `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - primary device datasheet used for verification
 - `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
 - `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
+- `Doxyfile` - indexes public headers, the ESP-IDF port notes, the shared Arduino
+  CLI source, the native IDF entry point, and example-only framework shims
 
 ## License
 

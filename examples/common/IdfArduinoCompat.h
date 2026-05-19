@@ -511,6 +511,25 @@ class TwoWire {
       _dev = nullptr;
       _devAddr = 0xFFU;
     }
+    if (_manualAddrDev != nullptr) {
+      (void)i2c_master_bus_rm_device(_manualAddrDev);
+      _manualAddrDev = nullptr;
+    }
+  }
+
+  esp_err_t ensureManualAddressDevice() {
+    if (!_started || _bus == nullptr) {
+      return ESP_ERR_INVALID_STATE;
+    }
+    if (_manualAddrDev != nullptr) {
+      return ESP_OK;
+    }
+
+    i2c_device_config_t devConfig = {};
+    devConfig.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    devConfig.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+    devConfig.scl_speed_hz = _freqHz;
+    return i2c_master_bus_add_device(_bus, &devConfig, &_manualAddrDev);
   }
 
   esp_err_t ensureDevice(uint8_t addr) {
@@ -560,6 +579,10 @@ class TwoWire {
 
   esp_err_t transmitReceive(uint8_t addr, const uint8_t* tx, size_t txLen,
                             uint8_t* rx, size_t rxLen, uint32_t timeoutMs) {
+    if (addr == 0x7CU) {
+      return transmitReceiveWithManualAddress(addr, tx, txLen, rx, rxLen,
+                                              timeoutMs);
+    }
     esp_err_t err = ensureDevice(addr);
     if (err != ESP_OK) {
       return err;
@@ -568,8 +591,57 @@ class TwoWire {
                                        timeoutArg(timeoutMs));
   }
 
+  esp_err_t transmitReceiveWithManualAddress(uint8_t addr, const uint8_t* tx,
+                                             size_t txLen, uint8_t* rx,
+                                             size_t rxLen,
+                                             uint32_t timeoutMs) {
+    if ((txLen > 0U && tx == nullptr) || rx == nullptr || rxLen == 0U) {
+      return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = ensureManualAddressDevice();
+    if (err != ESP_OK) {
+      return err;
+    }
+
+    uint8_t writeAddress = static_cast<uint8_t>(addr << 1);
+    uint8_t readAddress = static_cast<uint8_t>((addr << 1) | 0x01U);
+    i2c_operation_job_t ops[7] = {};
+    size_t opCount = 0U;
+
+    ops[opCount++].command = I2C_MASTER_CMD_START;
+    ops[opCount].command = I2C_MASTER_CMD_WRITE;
+    ops[opCount].write.ack_check = true;
+    ops[opCount].write.data = &writeAddress;
+    ops[opCount++].write.total_bytes = 1U;
+    if (txLen > 0U) {
+      ops[opCount].command = I2C_MASTER_CMD_WRITE;
+      ops[opCount].write.ack_check = true;
+      ops[opCount].write.data = const_cast<uint8_t*>(tx);
+      ops[opCount++].write.total_bytes = txLen;
+    }
+    ops[opCount++].command = I2C_MASTER_CMD_START;
+    ops[opCount].command = I2C_MASTER_CMD_WRITE;
+    ops[opCount].write.ack_check = true;
+    ops[opCount].write.data = &readAddress;
+    ops[opCount++].write.total_bytes = 1U;
+    if (rxLen > 1U) {
+      ops[opCount].command = I2C_MASTER_CMD_READ;
+      ops[opCount].read.ack_value = I2C_ACK_VAL;
+      ops[opCount].read.data = rx;
+      ops[opCount++].read.total_bytes = rxLen - 1U;
+    }
+    ops[opCount].command = I2C_MASTER_CMD_READ;
+    ops[opCount].read.ack_value = I2C_NACK_VAL;
+    ops[opCount].read.data = rx + (rxLen - 1U);
+    ops[opCount++].read.total_bytes = 1U;
+    ops[opCount++].command = I2C_MASTER_CMD_STOP;
+    return i2c_master_execute_defined_operations(_manualAddrDev, ops, opCount,
+                                                 timeoutArg(timeoutMs));
+  }
+
   i2c_master_bus_handle_t _bus = nullptr;
   i2c_master_dev_handle_t _dev = nullptr;
+  i2c_master_dev_handle_t _manualAddrDev = nullptr;
   uint8_t _devAddr = 0xFFU;
   bool _started = false;
   uint32_t _freqHz = 400000U;
