@@ -198,7 +198,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - Includes the Arduino example source with `MB85RC_EXAMPLE_PLATFORM_IDF=1`.
   - Supplies a fixed-capacity `String`/serial/GPIO/Wire-compatible shim backed by ESP-IDF v6 `i2c_master_*` APIs.
   - Explicitly supports current-address reads (`txLen == 0`) and Device ID reads through reserved address `0x7C` using ESP-IDF defined I2C operations with manual address bytes.
-  - `tools/check_cli_contract.py` checks the IDF entry point and CMake dependency surface so future wrapper edits cannot silently drop parity.
+  - `tools/check_cli_contract.py` checks the full CLI command surface, IDF entry point, CMake dependency surface, Device ID reserved-address shim invariants, and core Device ID address construction so future wrapper edits cannot silently drop parity.
 
 ### CLI Inspection Examples
 

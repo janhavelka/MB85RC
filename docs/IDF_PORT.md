@@ -115,6 +115,12 @@ Completed locally:
 - `python tools/check_cli_contract.py`
 - `python tools/check_core_timing_guard.py`
 - `python scripts/generate_version.py check`
+- `doxygen Doxyfile`
+
+`tools/check_cli_contract.py` verifies both the Arduino CLI command surface and
+the ESP-IDF wrapper contract: platform macro, `IdfArduinoCompat.h`, shared
+source include, `app_main()`, required IDF CMake dependencies, Device ID
+reserved-address shim invariants, and core Device ID address construction.
 
 Pending in this shell:
 

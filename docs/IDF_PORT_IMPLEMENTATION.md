@@ -47,6 +47,9 @@ Branch: `feature/mb85rc-idf-port`.
     `i2c_master_execute_defined_operations()` with manual address bytes through
     `I2C_DEVICE_ADDRESS_NOT_USED`, avoiding normal device-handle addressing for
     the reserved address.
+  - `tools/check_cli_contract.py` statically guards the memory/Device ID/demo
+    CLI command surface, the reserved-address IDF shim tokens, and the core
+    Device ID address-byte construction.
 - Arduino-ESP32 pitfall:
   - Do not infer native IDF mode from `ESP_PLATFORM`; Arduino-ESP32 defines it
     too. The shared CLI uses the explicit `MB85RC_EXAMPLE_PLATFORM_IDF` flag.
@@ -69,4 +72,5 @@ Branch: `feature/mb85rc-idf-port`.
 - `python tools/check_cli_contract.py`: passed.
 - `python tools/check_core_timing_guard.py`: passed.
 - `python scripts/generate_version.py check`: passed.
+- `doxygen Doxyfile`: completed.
 - `git diff --check`: passed during the implementation pass.

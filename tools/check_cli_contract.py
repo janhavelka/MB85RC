@@ -22,12 +22,54 @@ REQUIRED_COMMON = [
     "HealthDiag.h",
 ]
 
-MANDATORY_COMMANDS = ["help", "scan", "probe", "recover", "drv", "read", "verbose", "stress"]
-MANDATORY_PATTERNS = {
-    "cfg/settings command": r'cmd == "cfg" \|\| cmd == "settings"',
-    "current command": r'cmd == "current" \|\| cmd == "cur"',
-    "dump command": r'cmd\.startsWith\("read "\) \|\| cmd\.startsWith\("dump "\)',
-}
+MANDATORY_COMMANDS = [
+    "help",
+    "?",
+    "version",
+    "ver",
+    "scan",
+    "cfg",
+    "settings",
+    "read",
+    "dump",
+    "hexdump",
+    "text",
+    "strings",
+    "crc",
+    "verify",
+    "write",
+    "fill",
+    "current",
+    "cur",
+    "id",
+    "idraw",
+    "variants",
+    "size",
+    "drv",
+    "iface_reset",
+    "probe",
+    "recover",
+    "verbose",
+    "stress",
+    "stress_mix",
+    "selftest",
+    "rw_suite",
+    "randbench",
+    "typed_demo",
+]
+DEVICE_ID_IDF_TOKENS = [
+    "addr == 0x7CU",
+    "transmitReceiveWithManualAddress",
+    "I2C_DEVICE_ADDRESS_NOT_USED",
+    "writeAddress = static_cast<uint8_t>(addr << 1)",
+    "readAddress = static_cast<uint8_t>((addr << 1) | 0x01U)",
+    "I2C_NACK_VAL",
+    "i2c_master_execute_defined_operations",
+]
+DEVICE_ID_CORE_TOKENS = [
+    "cmd::DEVICE_ID_ADDR_W >> 1",
+    "_config.i2cAddress << 1",
+]
 
 IDF_EXAMPLE_MACRO = "MB85RC_EXAMPLE_PLATFORM_IDF"
 IDF_REQUIRED_COMPONENTS = [
@@ -55,6 +97,39 @@ def ensure_missing(path: pathlib.Path, label: str) -> None:
         fail(f"forbidden {label} still present: {path.as_posix()}")
 
 
+def require_token(text: str, token: str, label: str) -> None:
+    if token == "?":
+        if '"?"' not in text:
+            fail(f"{label} '{token}' missing")
+        return
+    if re.search(rf"\b{re.escape(token)}\b", text) is None:
+        fail(f"{label} '{token}' missing")
+
+
+def require_literal(text: str, token: str, label: str) -> None:
+    if token not in text:
+        fail(f"{label} missing token '{token}'")
+
+
+def require_dispatch(text: str, token: str) -> None:
+    quoted = re.escape(f'"{token}"')
+    starts_with_arg = rf'"{re.escape(token)}(?:\s|")'
+    patterns = [
+        rf"cmd\s*==\s*{quoted}",
+        rf"cmd\.startsWith\(\s*{starts_with_arg}",
+    ]
+    if not any(re.search(pattern, text) for pattern in patterns):
+        fail(f"mandatory command '{token}' missing from processCommand() dispatch")
+
+
+def require_help(text: str, token: str) -> None:
+    if token == "?":
+        return
+    pattern = rf"printHelpItem\s*\(\s*\"[^\"]*\b{re.escape(token)}\b"
+    if re.search(pattern, text) is None:
+        fail(f"mandatory command '{token}' missing from help text")
+
+
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
@@ -78,12 +153,9 @@ def main() -> int:
     text = bringup_main.read_text(encoding="utf-8", errors="replace")
 
     for cmd in MANDATORY_COMMANDS:
-        if re.search(rf"\b{re.escape(cmd)}\b", text) is None:
-            fail(f"mandatory command '{cmd}' missing in {bringup_main.as_posix()}")
-
-    for label, pattern in MANDATORY_PATTERNS.items():
-        if re.search(pattern, text) is None:
-            fail(f"missing {label}")
+        require_token(text, cmd, "mandatory command")
+        require_dispatch(text, cmd)
+        require_help(text, cmd)
 
     idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
     if f"#define {IDF_EXAMPLE_MACRO} 1" not in idf_text:
@@ -99,6 +171,18 @@ def main() -> int:
     for component in IDF_REQUIRED_COMPONENTS:
         if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
             fail(f"ESP-IDF CMake file missing required component '{component}'")
+
+    compat_text = (common_dir / "IdfArduinoCompat.h").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    for token in DEVICE_ID_IDF_TOKENS:
+        require_literal(compat_text, token, "ESP-IDF Device ID manual-address path")
+
+    core_text = (ROOT / "src" / "MB85RC.cpp").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    for token in DEVICE_ID_CORE_TOKENS:
+        require_literal(core_text, token, "core Device ID address construction")
 
     print("CLI contract PASSED")
     return 0
