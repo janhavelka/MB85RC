@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The bringup loop now uses the shared bounded CLI shell helper for cleaner prompt/output separation.
 - The `stress` command parser now accepts only `stress` or `stress <count>`, matching CLI help.
 - Public Doxygen comments now document all `SettingsSnapshot` fields and clarify that `BUSY` also represents latched `OFFLINE`.
-- Release documentation now includes `docs/releases/v1.1.0.md` and `docs/releases/v1.1.1.md`.
+- Changelog now carries release history directly without separate release-note files.
 
 ## [1.1.0] - 2026-05-14
 

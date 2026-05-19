@@ -294,7 +294,6 @@ doxygen Doxyfile
 - `CHANGELOG.md` - release history and GitHub release note source
 - `docs/IDF_PORT.md` - ESP-IDF portability notes
 - `docs/IDF_PORT_IMPLEMENTATION.md` - ESP-IDF implementation and audit closure notes
-- `docs/releases/` - per-release validation summaries
 - `docs/MB85RC04V-DS5v1-E.pdf` - 04V one-byte address/A8 transaction reference
 - `docs/MB85RC16V-DS11v0-E.pdf` - 16V no-Device-ID and A10:A8 transaction reference
 - `docs/MB85RC64TA-DS5v1-E.pdf` - 64TA 8 KB runtime support reference
