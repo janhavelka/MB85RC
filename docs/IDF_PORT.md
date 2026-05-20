@@ -1,42 +1,15 @@
-# MB85RC ESP-IDF Portability Status
+# ESP-IDF Port
 
-Last audited: 2026-04-07
+The core library is framework-neutral. Public headers and `src/` do not include Arduino or ESP-IDF framework headers, and all hardware access is supplied through `Config` callbacks.
 
-## Current Reality
-- Primary runtime remains PlatformIO + Arduino.
-- Core transport is callback-based (`Config.i2cWrite`, `Config.i2cWriteRead`).
-- Optional timing hook is available (`Config.nowMs`, `Config.timeUser`).
-- Core memory and recovery logic uses `_nowMs()` wrapper.
-- Arduino timing is used only as fallback in one place:
-  - `MB85RC::_nowMs()` -> `millis()` when `Config.nowMs == nullptr`
+The ESP-IDF example in `examples/espidf_basic` is a native IDF application:
 
-## ESP-IDF Adapter Requirements
-To run under pure ESP-IDF, provide:
-1. I2C write callback.
-2. I2C write-read callback.
-3. Optional `nowMs(user)` callback.
+- entry point is `app_main()`
+- I2C uses `driver/i2c_master.h`
+- timestamps use an injected `Config::nowMs` callback backed by `esp_timer_get_time()`
+- delays use `vTaskDelay()`
+- command input uses fixed C buffers and `fgets()`
 
-## Minimal Adapter Pattern
-```cpp
-static uint32_t idfNowMs(void*) {
-  return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
-}
+MB85RC runtime variant support remains in the core driver and the IDF CLI exposes the same variant, size, device-id, raw/current-read, stress, selftest, and memory-boundary workflows as the Arduino command contract.
 
-MB85RC::Config cfg{};
-cfg.i2cWrite = myI2cWrite;
-cfg.i2cWriteRead = myI2cWriteRead;
-cfg.nowMs = idfNowMs;
-```
-
-## Porting Notes
-- Keep `tick(nowMs)` driven by application scheduler/task.
-- Callback timeout arguments must be honored to preserve recovery semantics.
-- Health timestamps (`lastOkMs`, `lastErrorMs`) are sourced from `_nowMs()`.
-- FRAM has no write delay, so tick() is a no-op - portability is straightforward.
-
-## Verification Checklist
-- `python tools/check_core_timing_guard.py` passes.
-- `pio test -e native` passes.
-- Example builds pass (`pio run -e esp32s3dev`, `pio run -e esp32s2dev`).
-- Doxygen docs regenerate cleanly with `doxygen Doxyfile`.
-- No new direct Arduino timing calls outside wrapper fallback.
+The IDF example must not include Arduino sources or use Arduino compatibility facades. `tools/check_idf_example_contract.py` enforces the native-IDF boundary and command coverage.

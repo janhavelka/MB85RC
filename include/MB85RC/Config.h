@@ -8,6 +8,22 @@
 
 namespace MB85RC {
 
+/// @brief Runtime device variant selection for Device ID validation and memory bounds.
+///
+/// `AUTO` selects a supported runtime variant from Device ID readback. It can
+/// only identify variants that implement the Device ID command. `MB85RC16V`
+/// has no Device ID command in the local datasheet set, so applications must
+/// select it explicitly when using that part.
+enum class DeviceVariant : uint8_t {
+  AUTO = 0,       ///< Select a supported runtime variant from Device ID.
+  MB85RC256V,     ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
+  MB85RC64TA,     ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
+  MB85RC04V,      ///< Expect MB85RC04V, 512 bytes, Product ID 0x010.
+  MB85RC16V,      ///< Expect MB85RC16V, 2 KiB, no Device ID command.
+  MB85RC512T,     ///< Expect MB85RC512T, 64 KiB, Product ID 0x658.
+  MB85RC1MT       ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
+};
+
 /// I2C write callback signature
 /// @param addr I2C device address (7-bit)
 /// @param data Pointer to data to write
@@ -44,12 +60,19 @@ struct Config {
   void* i2cUser = nullptr;               ///< User context for callbacks
 
   // === Timing Hooks (optional) ===
-  NowMsFn nowMs = nullptr;               ///< Monotonic millisecond source
+  NowMsFn nowMs = nullptr;               ///< Optional monotonic millisecond source for health timestamps
   void* timeUser = nullptr;              ///< User context for timing hook
 
   // === Device Settings ===
   uint8_t i2cAddress = 0x50;             ///< 0x50-0x57 depending on A2:A1:A0 pins
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
+  /// Expected runtime variant.
+  ///
+  /// The default preserves the pre-2.0 MB85RC256V behavior for existing
+  /// applications. New integrations should select `AUTO` for Device-ID-capable
+  /// variants, or an explicit part number when a fixed BOM is expected.
+  /// Select `MB85RC16V` explicitly because that variant has no Device ID command.
+  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V;
 
   // === Health Tracking ===
   uint8_t offlineThreshold = 5;          ///< Consecutive failures before OFFLINE state

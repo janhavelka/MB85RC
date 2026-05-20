@@ -1,16 +1,23 @@
 {
   "name": "MB85RC",
-  "version": "1.1.1",
-  "description": "Production-grade MB85RC256V FRAM I2C memory driver.",
+  "version": "2.0.0",
+  "description": "Production-grade MB85RC-family FRAM I2C memory driver.",
   "keywords": [
     "mb85rc",
+    "mb85rc04v",
+    "mb85rc16v",
     "mb85rc256v",
+    "mb85rc64ta",
+    "mb85rc512t",
+    "mb85rc1mt",
     "fram",
     "feram",
     "memory",
     "i2c",
     "esp32",
     "arduino",
+    "espidf",
+    "esp-idf",
     "platformio"
   ],
   "authors": [
@@ -33,7 +40,8 @@
   "license": "MIT",
   "homepage": "https://www.thymos.cz",
   "frameworks": [
-    "arduino"
+    "arduino",
+    "espidf"
   ],
   "platforms": [
     "espressif32"

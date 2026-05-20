@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-05-20
+
+### Added
+
+- Runtime variant selection with `DeviceVariant::AUTO` and explicit selectors for `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
+- `Config::expectedVariant` for explicit Device ID validation while keeping the legacy default at `MB85RC256V`.
+- First-class runtime support for every locally documented variant, including `MB85RC64TA` Product ID `0x358`, 8 KB capacity, and `MB85RC1MT` 128 KB addressing.
+- Variant-specific memory address encoding for one-byte address models, two-byte address-pin models, and `MB85RC1MT` A16-in-device-address transactions.
+- Runtime diagnostics: `variantInfo()`, `variantName()`, `deviceId()`, `capacityBytes()`, `maxAddress()`, and expanded `SettingsSnapshot` fields.
+- Native tests for every explicit runtime variant, Device ID AUTO selection where supported, variant mismatches, address encoding, active-capacity bounds, current-address bounds, active-variant `probe()` / `recover()`, and no-Device-ID 16V diagnostics.
+- ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build of the full bring-up CLI command contract.
+- ESP-IDF port notes in `docs/IDF_PORT.md`.
+- ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
+
+### Changed
+
+- Breaking API change: memory addresses and `maxAddress()` are now `uint32_t` instead of `uint16_t` so `MB85RC1MT` can expose its full `0x00000..0x1FFFF` range.
+- `begin()`, `probe()`, and `recover()` now validate the selected active variant instead of hard-coding the MB85RC256V product ID.
+- `read()`, `write()`, `fill()`, `verify()`, `readCurrentAddress(uint8_t*, size_t)`, typed helpers, and CLI memory commands now reject ranges that cross the active variant capacity instead of silently relying on device rollover.
+- Arduino and native ESP-IDF CLIs now initialize with `DeviceVariant::AUTO`, print active variant/capacity diagnostics, accept 32-bit addresses, and size full-chip/benchmark operations from the runtime capacity.
+- `probe()` and `recover()` now use a memory-read presence check for `MB85RC16V`, because that part has no Device ID command.
+- `readDeviceId()` and `readDeviceIdRaw()` now return `INVALID_PARAM` when the active explicit variant has no Device ID command.
+- `library.json`, `idf_component.yml`, and README now describe the library as an MB85RC-family driver and include all supported runtime variants.
+- `library.json` now declares both `arduino` and `espidf` framework support.
+- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino CLI source, and native IDF entry point.
+- The ESP-IDF example adapter now performs Device ID transactions on reserved address `0x7C` through ESP-IDF defined I2C operations with manual address bytes instead of relying on normal device-handle addressing for a reserved address.
+- `tools/check_idf_example_contract.py` now validates the native ESP-IDF boundary, command surface, required CMake dependencies, and core Device ID address construction.
+- ESP-IDF CLI parity is checked through repo-local command contracts; hardware validation remains pending until target hardware is available.
+- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples/application glue.
+- ESP-IDF example is now a native IDF CLI using `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
+- Public Doxygen comments now clarify runtime variant selection, active-capacity accessors, and legacy compatibility helpers.
+
+### Fixed
+
+- Active-capacity range checks now compare `size_t` lengths without truncating to `uint32_t`, so oversized 64-bit host lengths are rejected before any buffer access.
+
 ## [1.1.1] - 2026-05-17
 
 ### Changed
@@ -18,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The bringup loop now uses the shared bounded CLI shell helper for cleaner prompt/output separation.
 - The `stress` command parser now accepts only `stress` or `stress <count>`, matching CLI help.
 - Public Doxygen comments now document all `SettingsSnapshot` fields and clarify that `BUSY` also represents latched `OFFLINE`.
-- Release documentation now includes `docs/releases/v1.1.0.md` and `docs/releases/v1.1.1.md`.
+- Changelog now carries release history directly without separate release-note files.
 
 ## [1.1.0] - 2026-05-14
 
@@ -72,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/janhavelka/MB85RC/releases/tag/v1.0.0
