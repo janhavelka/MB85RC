@@ -9,6 +9,11 @@
 namespace MB85RC {
 
 /// @brief Runtime device variant selection for Device ID validation and memory bounds.
+///
+/// `AUTO` selects a supported runtime variant from Device ID readback. It can
+/// only identify variants that implement the Device ID command. `MB85RC16V`
+/// has no Device ID command in the local datasheet set, so applications must
+/// select it explicitly when using that part.
 enum class DeviceVariant : uint8_t {
   AUTO = 0,       ///< Select a supported runtime variant from Device ID.
   MB85RC256V,     ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
@@ -61,8 +66,12 @@ struct Config {
   // === Device Settings ===
   uint8_t i2cAddress = 0x50;             ///< 0x50-0x57 depending on A2:A1:A0 pins
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
-  /// Expected runtime variant. The default preserves legacy 256V behavior.
-  /// Use AUTO for Device-ID-capable variants; select MB85RC16V explicitly.
+  /// Expected runtime variant.
+  ///
+  /// The default preserves the pre-2.0 MB85RC256V behavior for existing
+  /// applications. New integrations should select `AUTO` for Device-ID-capable
+  /// variants, or an explicit part number when a fixed BOM is expected.
+  /// Select `MB85RC16V` explicitly because that variant has no Device ID command.
   DeviceVariant expectedVariant = DeviceVariant::MB85RC256V;
 
   // === Health Tracking ===

@@ -7,11 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples/application glue.
-- ESP-IDF example is now a native IDF CLI using `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
-
-## [2.0.0] - 2026-05-19
+## [2.0.0] - 2026-05-20
 
 ### Added
 
@@ -39,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The ESP-IDF example adapter now performs Device ID transactions on reserved address `0x7C` through ESP-IDF defined I2C operations with manual address bytes instead of relying on normal device-handle addressing for a reserved address.
 - `tools/check_idf_example_contract.py` now validates the native ESP-IDF boundary, command surface, required CMake dependencies, and core Device ID address construction.
 - ESP-IDF CLI parity is checked through repo-local command contracts; hardware validation remains pending until target hardware is available.
+- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples/application glue.
+- ESP-IDF example is now a native IDF CLI using `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
+- Public Doxygen comments now clarify runtime variant selection, active-capacity accessors, and legacy compatibility helpers.
 
 ### Fixed
 

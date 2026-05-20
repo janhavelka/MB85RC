@@ -111,6 +111,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `MB85RC16V` is supported through explicit selection and memory-probe diagnostics because the part has no Device ID command.
 - `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
 - Arduino and native ESP-IDF CLIs use separate implementations with a shared command contract, accept 32-bit addresses, and preserve the same command surface in both frameworks.
+- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples and application glue.
+- ESP-IDF CLI remains a native `app_main` example using `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
 - Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
 
 ## Release 1.1.1 Highlights
@@ -188,7 +190,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 |---------|------------|----------|---------------|-----------------|
 | `MB85RC04V` | `0x010` | 512 B (4 Kbit) | `0x0000` - `0x01FF` | `DeviceVariant::MB85RC04V` / `AUTO` |
 | `MB85RC16V` | n/a | 2 KB (16 Kbit) | `0x0000` - `0x07FF` | `DeviceVariant::MB85RC16V` only |
-| `MB85RC64TA` | `0x358` | 8 KB (64 Kbit) | `0x0000` - `0x1FFF` | `DeviceVariant::MB85RC64TA` |
+| `MB85RC64TA` | `0x358` | 8 KB (64 Kbit) | `0x0000` - `0x1FFF` | `DeviceVariant::MB85RC64TA` / `AUTO` |
 | `MB85RC256V` | `0x510` | 32 KB (256 Kbit) | `0x0000` - `0x7FFF` | `DeviceVariant::MB85RC256V` |
 | `MB85RC512T` | `0x658` | 64 KB (512 Kbit) | `0x0000` - `0xFFFF` | `DeviceVariant::MB85RC512T` / `AUTO` |
 | `MB85RC1MT` | `0x758` | 128 KB (1 Mbit) | `0x00000` - `0x1FFFF` | `DeviceVariant::MB85RC1MT` / `AUTO` |
@@ -275,11 +277,13 @@ typed_demo                # Demonstrate explicit typed value storage
 ## Validation
 
 ```bash
-pio test -e native
+python -m platformio test -e native
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
-pio run -e esp32s3dev
-pio run -e esp32s2dev
+python tools/check_idf_example_contract.py
+python scripts/generate_version.py check
+python -m platformio run -e esp32s3dev
+python -m platformio run -e esp32s2dev
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
 cd examples/espidf_basic

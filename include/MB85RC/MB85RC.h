@@ -20,6 +20,9 @@ enum class DriverState : uint8_t {
 };
 
 /// @brief Device ID fields parsed from 3-byte read.
+///
+/// Variants without a Device ID command leave these fields at zero in cached
+/// snapshots and return `Err::INVALID_PARAM` from explicit Device ID read APIs.
 struct DeviceId {
   uint16_t manufacturerId = 0; ///< 12-bit Manufacturer ID (expect 0x00A)
   uint16_t productId = 0;      ///< 12-bit Product ID
@@ -32,6 +35,11 @@ struct DeviceIdRaw {
 };
 
 /// @brief Snapshot of current driver settings/state without performing I2C.
+///
+/// The snapshot is cache-only and never performs bus traffic. Use it from
+/// diagnostics, status views, and examples when an application needs to display
+/// the selected runtime variant and active capacity without disturbing health
+/// counters.
 struct SettingsSnapshot {
   bool initialized = false;       ///< True after begin() succeeds and before end()
   DriverState state = DriverState::UNINIT; ///< Current lifecycle/health state.
@@ -101,43 +109,56 @@ public:
   // Driver State
   // =========================================================================
   
-  /// Get current driver state
+  /// Get current driver state.
+  /// @return Current lifecycle/health state.
   DriverState state() const { return _driverState; }
 
   /// Alias for state() for cross-driver diagnostics.
+  /// @return Current lifecycle/health state.
   DriverState driverState() const { return state(); }
 
   /// Check if begin() has completed successfully.
+  /// @return true after begin() succeeds and before end() is called.
   bool isInitialized() const { return _initialized; }
   
   /// Check if driver is ready for operations
+  /// @return true in READY or DEGRADED; false in UNINIT or OFFLINE.
   bool isOnline() const {
     return _driverState == DriverState::READY ||
            _driverState == DriverState::DEGRADED;
   }
 
   /// Get a copy of the active configuration.
+  /// @return Reference to the cached configuration supplied to begin().
   const Config& getConfig() const { return _config; }
 
   /// Get the active runtime variant metadata, or nullptr before begin().
+  /// @return Active variant metadata, or nullptr when not selected.
   const cmd::VariantInfo* variantInfo() const { return _variant; }
 
   /// Get the active runtime variant name.
+  /// @return Active variant name, or "unknown" when not selected.
   const char* variantName() const { return (_variant != nullptr) ? _variant->name : "unknown"; }
 
   /// Get cached Device ID fields from the last successful begin()/recover() validation.
+  /// @return Cached Device ID fields; zeros for explicit no-Device-ID variants.
   DeviceId deviceId() const { return _deviceId; }
 
   /// Get active runtime capacity in bytes.
+  /// @return Active capacity in bytes, or the legacy MB85RC256V size before selection.
   uint32_t capacityBytes() const;
 
   /// Get highest valid active runtime memory address.
+  /// @return Highest valid byte address for the active runtime variant.
   uint32_t maxAddress() const;
 
   /// Get a snapshot of current configuration/runtime state (no I2C).
+  /// @param out Output snapshot populated from cached state.
+  /// @return Status::Ok() after writing the snapshot.
   Status getSettings(SettingsSnapshot& out) const;
 
   /// Get a snapshot of current configuration/runtime state (no I2C).
+  /// @return Snapshot populated from cached state.
   SettingsSnapshot getSettings() const {
     SettingsSnapshot out;
     (void)getSettings(out);
@@ -148,22 +169,28 @@ public:
   // Health Tracking
   // =========================================================================
   
-  /// Timestamp of last successful I2C operation
+  /// Timestamp of last successful I2C operation.
+  /// @return Millisecond timestamp from Config::nowMs, or 0 when no hook is supplied.
   uint32_t lastOkMs() const { return _lastOkMs; }
   
-  /// Timestamp of last failed I2C operation
+  /// Timestamp of last failed I2C operation.
+  /// @return Millisecond timestamp from Config::nowMs, or 0 when no hook is supplied.
   uint32_t lastErrorMs() const { return _lastErrorMs; }
   
-  /// Most recent error status
+  /// Most recent error status.
+  /// @return Last tracked error status.
   Status lastError() const { return _lastError; }
   
-  /// Consecutive failures since last success
+  /// Consecutive failures since last success.
+  /// @return Failure count used to enter OFFLINE.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
   
-  /// Total failure count (lifetime)
+  /// Total failure count (lifetime).
+  /// @return Lifetime tracked failure count.
   uint32_t totalFailures() const { return _totalFailures; }
   
-  /// Total success count (lifetime)
+  /// Total success count (lifetime).
+  /// @return Lifetime tracked success count.
   uint32_t totalSuccess() const { return _totalSuccess; }
   
   // =========================================================================
@@ -252,6 +279,7 @@ public:
 
   /// Get the legacy MB85RC256V memory size in bytes.
   /// Prefer capacityBytes() for runtime-selected variants.
+  /// @deprecated Use capacityBytes() after begin() for runtime-selected variants.
   /// @return Memory size
   static constexpr uint16_t memorySize() { return cmd::MEMORY_SIZE; }
 
@@ -349,7 +377,7 @@ private:
   Status _recordFailure(const Status& st);
   void _reassertOfflineLatch();
 
-  /// Get current time using injected callback or active platform fallback
+  /// Get current time using the injected callback, or 0 when no callback exists.
   uint32_t _nowMs() const;
   
   // =========================================================================

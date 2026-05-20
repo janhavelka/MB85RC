@@ -664,7 +664,7 @@ void test_end_transitions_to_uninit() {
   TEST_ASSERT_EQUAL_UINT8(0u, dev.consecutiveFailures());
 }
 
-void test_now_ms_fallback_uses_millis_when_callback_missing() {
+void test_now_ms_missing_callback_keeps_health_timestamps_zero() {
   FakeBus bus;
   MB85RC::MB85RC dev;
   Config cfg = makeConfig(bus);
@@ -675,7 +675,11 @@ void test_now_ms_fallback_uses_millis_when_callback_missing() {
   setMillis(4321);
   Status st = dev.recover();
   TEST_ASSERT_TRUE(st.ok());
-  TEST_ASSERT_EQUAL_UINT32(4321u, dev.lastOkMs());
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.hasNowMsHook);
 }
 
 void test_get_settings_returns_runtime_snapshot() {
@@ -1943,7 +1947,7 @@ int main() {
   RUN_TEST(test_begin_detects_device_id_mismatch);
   RUN_TEST(test_failed_begin_clears_stale_runtime_snapshot);
   RUN_TEST(test_end_transitions_to_uninit);
-  RUN_TEST(test_now_ms_fallback_uses_millis_when_callback_missing);
+  RUN_TEST(test_now_ms_missing_callback_keeps_health_timestamps_zero);
   RUN_TEST(test_get_settings_returns_runtime_snapshot);
 
   // Probe

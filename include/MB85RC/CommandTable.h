@@ -57,6 +57,10 @@ enum class AddressModel : uint8_t {
 };
 
 /// @brief Static metadata for a known MB85RC family variant.
+///
+/// The driver uses this table to validate Device ID responses, derive active
+/// memory capacity, and encode runtime memory addresses. Entries with
+/// `hasDeviceId == false` cannot be selected by `DeviceVariant::AUTO`.
 struct VariantInfo {
   const char* name;              ///< Marketing part number.
   uint32_t memoryBytes;          ///< Total memory capacity in bytes.
@@ -71,6 +75,11 @@ struct VariantInfo {
 };
 
 /// @brief Known MB85RC-family variants referenced by local datasheets.
+///
+/// Only entries marked `supportedByDriver` are accepted for runtime memory
+/// access. Optional High Speed and Sleep capability flags are descriptive; the
+/// reusable driver intentionally leaves those bus-level sequences to the
+/// application-owned transport.
 static constexpr VariantInfo KNOWN_VARIANTS[] = {
   {"MB85RC04V", 512UL, PRODUCT_ID_MB85RC04V, 0x00, true,
    AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true, false, false},

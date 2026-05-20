@@ -9,4 +9,4 @@ The native ESP-IDF example owns only example-local resources:
 - `vTaskDelay()` for the CLI loop
 - fixed command buffers for console input
 
-The Arduino example and ESP-IDF example share a command contract, not implementation source. Device ID and memory accesses continue to use the core driver’s runtime variant metadata and range validation.
+The Arduino example and ESP-IDF example share a command contract, not implementation source. Device ID and memory accesses continue to use the core driver's runtime variant metadata and range validation.
