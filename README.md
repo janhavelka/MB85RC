@@ -227,6 +227,9 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
   - Native ESP-IDF build of the bring-up CLI command contract.
   - Uses `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
   - Preserves current-address, Device ID, raw ID, active-capacity, stress, self-test, benchmark, and typed-demo command coverage.
+  - Requires explicit `!` confirmation forms before changing FRAM contents:
+    `write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`, `stress_mix!`,
+    `randbench!`, and `typed_demo!`.
   - `tools/check_idf_example_contract.py` rejects Arduino compatibility facades and checks the native IDF command surface.
 
 ### CLI Inspection Examples
@@ -240,9 +243,9 @@ crc 0x0000 1024           # CRC32 over a region for quick verification
 verify 0x0020 55 55 55 55 # Compare live FRAM bytes against expected values
 idraw                     # Show the raw 3-byte Device ID payload
 current 16                # Read 16 bytes from the current internal address
-rw_suite                  # Run a deterministic read/write/fill/verify suite
-randbench 4096            # Time 4096 random writes + 4096 random reads
-typed_demo                # Demonstrate explicit typed value storage
+rw_suite!                 # Confirmed deterministic read/write/fill/verify suite
+randbench! 4096           # Confirmed random writes + random reads timing
+typed_demo!               # Confirmed explicit typed value storage demo
 ```
 
 ### Example Helpers

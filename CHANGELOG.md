@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- ESP-IDF CLI destructive FRAM workflows now require explicit `!` confirmation
+  forms (`write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`,
+  `stress_mix!`, `randbench!`, and `typed_demo!`) and unconfirmed forms print
+  the exact confirmed command required.
+- ESP-IDF CLI parity was expanded with native fixed-buffer handlers for
+  `text`, `strings`, `crc`, `verify`, `variants`, and current-address bulk
+  reads instead of advertising them through a generic placeholder message.
+- ESP-IDF port docs now document the confirmation policy and pending hardware
+  validation status.
+
 ## [2.0.0] - 2026-05-20
 
 ### Added

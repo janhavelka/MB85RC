@@ -17,6 +17,7 @@ FORBIDDEN_TOKENS = [
     "Serial",
     "TwoWire",
     "examples/01_basic_bringup_cli/main.cpp",
+    "Command is present in the native IDF contract",
 ]
 
 REQUIRED_NATIVE_TOKENS = [
@@ -26,6 +27,17 @@ REQUIRED_NATIVE_TOKENS = [
     "vTaskDelay",
     "fgets",
     "i2c_new_master_bus",
+]
+
+REQUIRED_CONFIRMATION_TOKENS = [
+    "write!",
+    "fill!",
+    "stress!",
+    "stress_mix!",
+    "rw_suite!",
+    "randbench!",
+    "typed_demo!",
+    "Confirmation required because this command changes FRAM contents.",
 ]
 
 
@@ -49,6 +61,9 @@ def main() -> int:
     for token in REQUIRED_NATIVE_TOKENS:
         if token not in text:
             fail(f"native ESP-IDF token missing: {token}")
+    for token in REQUIRED_CONFIRMATION_TOKENS:
+        if token not in text:
+            fail(f"confirmation/handler token missing: {token}")
     for cmd in commands:
         if cmd == "?":
             if '"?"' not in text and " / ?" not in text and " | ?" not in text:

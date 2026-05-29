@@ -26,6 +26,10 @@ static constexpr gpio_num_t I2C_SCL = GPIO_NUM_9;
 static constexpr uint32_t I2C_FREQ_HZ = 400000U;
 static constexpr uint32_t I2C_TIMEOUT_MS = 50U;
 static constexpr size_t LINE_LEN = 192U;
+static constexpr size_t CLI_DATA_MAX = 64U;
+static constexpr uint32_t DEFAULT_STRESS_COUNT = 10U;
+static constexpr uint32_t MAX_STRESS_COUNT = 1000U;
+static constexpr uint32_t RW_SUITE_ADDR = 0x0010U;
 
 struct NativeBus {
   i2c_master_bus_handle_t bus = nullptr;
@@ -183,6 +187,65 @@ bool parseU32(const char* text, uint32_t* out, const char** tail = nullptr) {
   return *end == '\0';
 }
 
+uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<uint32_t>(data[i]);
+    for (uint8_t bit = 0; bit < 8U; ++bit) {
+      crc = ((crc & 1U) != 0U) ? ((crc >> 1U) ^ 0xEDB88320UL) : (crc >> 1U);
+    }
+  }
+  return crc;
+}
+
+bool parseByteList(const char* text, uint8_t* out, size_t maxLen, size_t* outLen) {
+  if (out == nullptr || outLen == nullptr) {
+    return false;
+  }
+  *outLen = 0;
+  const char* cursor = text;
+  while (cursor != nullptr && *cursor != '\0') {
+    uint32_t value = 0;
+    const char* tail = nullptr;
+    if (!parseU32(cursor, &value, &tail) || value > 0xFFU || *outLen >= maxLen) {
+      return false;
+    }
+    out[(*outLen)++] = static_cast<uint8_t>(value);
+    cursor = tail;
+  }
+  return *outLen > 0U;
+}
+
+bool rangeFits(uint32_t addr, uint32_t len) {
+  const uint32_t capacity = gFram.capacityBytes();
+  return len > 0U && capacity > 0U && addr < capacity && len <= (capacity - addr);
+}
+
+void printConfirmationRequired(const char* command, const char* effect, const char* confirmedForm) {
+  printf("%s\n", effect);
+  puts("Confirmation required because this command changes FRAM contents.");
+  printf("Use exactly: %s\n", confirmedForm);
+  printf("Requested command: %s\n", command);
+}
+
+void formatWriteConfirmation(uint32_t addr, const uint8_t* data, size_t dataLen,
+                             char* out, size_t outLen) {
+  if (out == nullptr || outLen == 0U) {
+    return;
+  }
+  int written = snprintf(out, outLen, "write! 0x%lX", static_cast<unsigned long>(addr));
+  size_t used = (written > 0) ? static_cast<size_t>(written) : 0U;
+  for (size_t i = 0; i < dataLen && used < outLen; ++i) {
+    written = snprintf(out + used, outLen - used, " 0x%02X", static_cast<unsigned>(data[i]));
+    if (written <= 0) {
+      break;
+    }
+    used += static_cast<size_t>(written);
+  }
+  if (used >= outLen) {
+    out[outLen - 1U] = '\0';
+  }
+}
+
 void beginDriver() {
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
@@ -197,10 +260,12 @@ void printHelp() {
   puts("  help / ? | version / ver | scan | cfg / settings");
   puts("  read / dump / hexdump <addr> [len] | text <addr> [len]");
   puts("  strings [addr len [minLen]] | crc <addr> <len> | verify <addr> <byte> [byte...]");
-  puts("  write <addr> <byte> [byte...] | fill <addr> <value> <len>");
+  puts("  write <addr> <byte> [byte...] | write! <addr> <byte> [byte...]");
+  puts("  fill <addr> <value> <len> | fill! <addr> <value> <len>");
   puts("  current / cur [len] | id | idraw | variants | size");
   puts("  drv | iface_reset | probe | recover | verbose [0|1]");
-  puts("  stress [N] | stress_mix [N] | selftest | rw_suite | randbench [N] | typed_demo");
+  puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
+  puts("  stress_mix [N] | randbench [N] | typed_demo");
 }
 
 void scanBus() {
@@ -224,6 +289,13 @@ void printDrv() {
 }
 
 void dumpMemory(uint32_t addr, uint32_t len) {
+  if (!rangeFits(addr, len)) {
+    printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
+           static_cast<unsigned long>(addr),
+           static_cast<unsigned long>(len),
+           static_cast<unsigned long>(gFram.capacityBytes()));
+    return;
+  }
   uint8_t buf[16];
   uint32_t done = 0;
   while (done < len) {
@@ -240,6 +312,338 @@ void dumpMemory(uint32_t addr, uint32_t len) {
     putchar('\n');
     done += static_cast<uint32_t>(chunk);
   }
+}
+
+void textMemory(uint32_t addr, uint32_t len) {
+  if (!rangeFits(addr, len)) {
+    printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
+           static_cast<unsigned long>(addr),
+           static_cast<unsigned long>(len),
+           static_cast<unsigned long>(gFram.capacityBytes()));
+    return;
+  }
+  uint8_t buf[16];
+  uint32_t done = 0;
+  while (done < len) {
+    const size_t chunk = (len - done) > sizeof(buf) ? sizeof(buf) : static_cast<size_t>(len - done);
+    MB85RC::Status st = gFram.read(addr + done, buf, chunk);
+    if (!st.ok()) {
+      printStatus("text", st);
+      return;
+    }
+    for (size_t i = 0; i < chunk; ++i) {
+      const uint8_t b = buf[i];
+      if (b >= 0x20U && b <= 0x7EU) {
+        putchar(static_cast<int>(b));
+      } else {
+        printf("\\x%02X", b);
+      }
+    }
+    done += static_cast<uint32_t>(chunk);
+  }
+  putchar('\n');
+}
+
+void stringsMemory(uint32_t addr, uint32_t len, uint32_t minLen) {
+  if (!rangeFits(addr, len)) {
+    printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
+           static_cast<unsigned long>(addr),
+           static_cast<unsigned long>(len),
+           static_cast<unsigned long>(gFram.capacityBytes()));
+    return;
+  }
+  uint8_t buf[16];
+  char preview[49] = {};
+  uint32_t runStart = 0;
+  uint32_t runLen = 0;
+  size_t previewLen = 0;
+  uint32_t matches = 0;
+  const uint32_t end = addr + len;
+  for (uint32_t cursor = addr; cursor < end;) {
+    const size_t chunk =
+        (end - cursor) > sizeof(buf) ? sizeof(buf) : static_cast<size_t>(end - cursor);
+    MB85RC::Status st = gFram.read(cursor, buf, chunk);
+    if (!st.ok()) {
+      printStatus("strings", st);
+      return;
+    }
+    for (size_t i = 0; i < chunk; ++i) {
+      const uint8_t b = buf[i];
+      const bool printable = (b >= 0x20U && b <= 0x7EU);
+      if (printable) {
+        if (runLen == 0U) {
+          runStart = cursor + static_cast<uint32_t>(i);
+          previewLen = 0;
+          preview[0] = '\0';
+        }
+        if (previewLen < sizeof(preview) - 1U) {
+          preview[previewLen++] = static_cast<char>(b);
+          preview[previewLen] = '\0';
+        }
+        ++runLen;
+      } else {
+        if (runLen >= minLen) {
+          printf("0x%06lX len=%lu \"%s%s\"\n",
+                 static_cast<unsigned long>(runStart),
+                 static_cast<unsigned long>(runLen),
+                 preview,
+                 (runLen > previewLen) ? "..." : "");
+          ++matches;
+        }
+        runLen = 0;
+      }
+    }
+    cursor += static_cast<uint32_t>(chunk);
+  }
+  if (runLen >= minLen) {
+    printf("0x%06lX len=%lu \"%s%s\"\n",
+           static_cast<unsigned long>(runStart),
+           static_cast<unsigned long>(runLen),
+           preview,
+           (runLen > previewLen) ? "..." : "");
+    ++matches;
+  }
+  printf("strings_matches=%lu\n", static_cast<unsigned long>(matches));
+}
+
+void crcMemory(uint32_t addr, uint32_t len) {
+  if (!rangeFits(addr, len)) {
+    printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
+           static_cast<unsigned long>(addr),
+           static_cast<unsigned long>(len),
+           static_cast<unsigned long>(gFram.capacityBytes()));
+    return;
+  }
+  uint8_t buf[32];
+  uint32_t crc = 0xFFFFFFFFUL;
+  uint32_t done = 0;
+  while (done < len) {
+    const size_t chunk = (len - done) > sizeof(buf) ? sizeof(buf) : static_cast<size_t>(len - done);
+    MB85RC::Status st = gFram.read(addr + done, buf, chunk);
+    if (!st.ok()) {
+      printStatus("crc", st);
+      return;
+    }
+    crc = crc32Update(crc, buf, chunk);
+    done += static_cast<uint32_t>(chunk);
+  }
+  crc ^= 0xFFFFFFFFUL;
+  printf("crc32=0x%08lX addr=0x%06lX len=%lu\n",
+         static_cast<unsigned long>(crc),
+         static_cast<unsigned long>(addr),
+         static_cast<unsigned long>(len));
+}
+
+void verifyMemory(uint32_t addr, const uint8_t* expected, size_t len) {
+  if (!rangeFits(addr, static_cast<uint32_t>(len))) {
+    printf("Range outside active capacity: addr=0x%06lX len=%u capacity=%lu\n",
+           static_cast<unsigned long>(addr),
+           static_cast<unsigned>(len),
+           static_cast<unsigned long>(gFram.capacityBytes()));
+    return;
+  }
+  MB85RC::VerifyResult result;
+  MB85RC::Status st = gFram.verify(addr, expected, len, result);
+  printStatus("verify", st);
+  if (st.ok()) {
+    printf("verify: %s", result.match ? "MATCH" : "MISMATCH");
+    if (!result.match) {
+      printf(" offset=%lu expected=0x%02X actual=0x%02X",
+             static_cast<unsigned long>(result.mismatchOffset),
+             result.expected,
+             result.actual);
+    }
+    putchar('\n');
+  }
+}
+
+void printVariants() {
+  for (size_t i = 0; i < MB85RC::cmd::VARIANT_COUNT; ++i) {
+    const MB85RC::cmd::VariantInfo& v = MB85RC::cmd::KNOWN_VARIANTS[i];
+    printf("%s bytes=%lu device_id=%s supported=%s\n",
+           v.name,
+           static_cast<unsigned long>(v.memoryBytes),
+           v.hasDeviceId ? "yes" : "no",
+           v.supportedByDriver ? "yes" : "no");
+  }
+}
+
+void runSelfTest() {
+  uint8_t original = 0;
+  MB85RC::Status st = gFram.readByte(0, original);
+  printStatus("selftest read original", st);
+  if (!st.ok()) {
+    return;
+  }
+  st = gFram.writeByte(0, 0xA5U);
+  printStatus("selftest write", st);
+  uint8_t readBack = 0;
+  if (st.ok()) {
+    st = gFram.readByte(0, readBack);
+    printStatus("selftest readback", st);
+    printf("selftest_pattern=%s\n", (st.ok() && readBack == 0xA5U) ? "PASS" : "FAIL");
+  }
+  printStatus("selftest restore", gFram.writeByte(0, original));
+}
+
+void runStress(uint32_t count) {
+  if (count == 0U || count > MAX_STRESS_COUNT) {
+    printf("stress count must be 1..%lu\n", static_cast<unsigned long>(MAX_STRESS_COUNT));
+    return;
+  }
+  uint8_t original = 0;
+  MB85RC::Status st = gFram.readByte(0, original);
+  if (!st.ok()) {
+    printStatus("stress backup", st);
+    return;
+  }
+  uint32_t ok = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint8_t pattern = static_cast<uint8_t>((i * 37U) ^ 0x5AU);
+    st = gFram.writeByte(0, pattern);
+    if (!st.ok()) {
+      printStatus("stress write", st);
+      break;
+    }
+    uint8_t readBack = 0;
+    st = gFram.readByte(0, readBack);
+    if (!st.ok() || readBack != pattern) {
+      printStatus("stress read", st);
+      break;
+    }
+    ++ok;
+  }
+  printStatus("stress restore", gFram.writeByte(0, original));
+  printf("stress_ok=%lu/%lu\n", static_cast<unsigned long>(ok), static_cast<unsigned long>(count));
+}
+
+void runStressMix(uint32_t count) {
+  if (count == 0U || count > MAX_STRESS_COUNT) {
+    printf("stress_mix count must be 1..%lu\n", static_cast<unsigned long>(MAX_STRESS_COUNT));
+    return;
+  }
+  uint8_t original[16] = {};
+  uint8_t shadow[16] = {};
+  MB85RC::Status st = gFram.read(RW_SUITE_ADDR, original, sizeof(original));
+  if (!st.ok()) {
+    printStatus("stress_mix backup", st);
+    return;
+  }
+  memcpy(shadow, original, sizeof(shadow));
+  uint32_t ok = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint32_t index = i % sizeof(shadow);
+    const uint8_t value = static_cast<uint8_t>((i * 17U) ^ 0xC3U);
+    if ((i % 5U) == 0U) {
+      st = gFram.fill(RW_SUITE_ADDR, value, sizeof(shadow));
+      if (st.ok()) {
+        memset(shadow, value, sizeof(shadow));
+      }
+    } else {
+      st = gFram.writeByte(RW_SUITE_ADDR + index, value);
+      if (st.ok()) {
+        shadow[index] = value;
+      }
+    }
+    if (!st.ok()) {
+      printStatus("stress_mix write", st);
+      break;
+    }
+    MB85RC::VerifyResult verify;
+    st = gFram.verify(RW_SUITE_ADDR, shadow, sizeof(shadow), verify);
+    if (!st.ok() || !verify.match) {
+      printStatus("stress_mix verify", st);
+      break;
+    }
+    ++ok;
+  }
+  printStatus("stress_mix restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+  printf("stress_mix_ok=%lu/%lu\n",
+         static_cast<unsigned long>(ok),
+         static_cast<unsigned long>(count));
+}
+
+void runRwSuite() {
+  uint8_t original[8] = {};
+  uint8_t scratch[8] = {0xDEU, 0xADU, 0xBEU, 0xEFU, 0x55U, 0xAAU, 0x11U, 0x22U};
+  MB85RC::Status st = gFram.read(RW_SUITE_ADDR, original, sizeof(original));
+  printStatus("rw_suite backup", st);
+  if (!st.ok()) {
+    return;
+  }
+  st = gFram.write(RW_SUITE_ADDR, scratch, sizeof(scratch));
+  printStatus("rw_suite write", st);
+  if (st.ok()) {
+    verifyMemory(RW_SUITE_ADDR, scratch, sizeof(scratch));
+    st = gFram.fill(RW_SUITE_ADDR, 0x00U, sizeof(scratch));
+    printStatus("rw_suite fill", st);
+  }
+  printStatus("rw_suite restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+}
+
+void runRandBench(uint32_t count) {
+  if (count == 0U || count > MAX_STRESS_COUNT) {
+    printf("randbench count must be 1..%lu in this IDF example\n",
+           static_cast<unsigned long>(MAX_STRESS_COUNT));
+    return;
+  }
+  uint8_t original[32] = {};
+  uint8_t shadow[32] = {};
+  MB85RC::Status st = gFram.read(RW_SUITE_ADDR, original, sizeof(original));
+  if (!st.ok()) {
+    printStatus("randbench backup", st);
+    return;
+  }
+  memcpy(shadow, original, sizeof(shadow));
+  uint32_t seed = 0x12345678UL;
+  const int64_t startUs = esp_timer_get_time();
+  uint32_t ok = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    seed = seed * 1664525UL + 1013904223UL;
+    const uint32_t index = seed % sizeof(shadow);
+    const uint8_t value = static_cast<uint8_t>(seed >> 16U);
+    st = gFram.writeByte(RW_SUITE_ADDR + index, value);
+    if (!st.ok()) {
+      printStatus("randbench write", st);
+      break;
+    }
+    shadow[index] = value;
+    uint8_t readBack = 0;
+    st = gFram.readByte(RW_SUITE_ADDR + index, readBack);
+    if (!st.ok() || readBack != value) {
+      printStatus("randbench read", st);
+      break;
+    }
+    ++ok;
+  }
+  const int64_t elapsedUs = esp_timer_get_time() - startUs;
+  MB85RC::VerifyResult verify;
+  st = gFram.verify(RW_SUITE_ADDR, shadow, sizeof(shadow), verify);
+  printStatus("randbench final verify", st);
+  printf("randbench_ok=%lu/%lu elapsed_us=%lld final_match=%s\n",
+         static_cast<unsigned long>(ok),
+         static_cast<unsigned long>(count),
+         static_cast<long long>(elapsedUs),
+         (st.ok() && verify.match) ? "yes" : "no");
+  printStatus("randbench restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+}
+
+void runTypedDemo() {
+  uint8_t original[16] = {};
+  const uint8_t typedBytes[16] = {
+      0x7EU, 0x34U, 0x12U, 0x79U, 0x29U, 0xEDU, 0xFFU, 0x01U,
+      0x00U, 0x00U, 0x00U, 0x3FU, 0x01U, 0xEFU, 0xBEU, 0xADU};
+  MB85RC::Status st = gFram.read(RW_SUITE_ADDR, original, sizeof(original));
+  printStatus("typed_demo backup", st);
+  if (!st.ok()) {
+    return;
+  }
+  st = gFram.write(RW_SUITE_ADDR, typedBytes, sizeof(typedBytes));
+  printStatus("typed_demo write fixed-width bytes", st);
+  if (st.ok()) {
+    verifyMemory(RW_SUITE_ADDR, typedBytes, sizeof(typedBytes));
+  }
+  printStatus("typed_demo restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void handleCommand(char* line) {
@@ -285,6 +689,22 @@ void handleCommand(char* line) {
     if (st.ok()) {
       printf("0x%02X\n", value);
     }
+  } else if (strncmp(full, "current ", 8) == 0 || strncmp(full, "cur ", 4) == 0) {
+    const char* args = (strncmp(full, "cur ", 4) == 0) ? full + 4 : full + 8;
+    uint32_t len = 0;
+    if (!parseU32(args, &len) || len == 0U || len > CLI_DATA_MAX) {
+      printf("Usage: current [len 1..%u]\n", static_cast<unsigned>(CLI_DATA_MAX));
+    } else {
+      uint8_t buf[CLI_DATA_MAX] = {};
+      MB85RC::Status st = gFram.readCurrentAddress(buf, static_cast<size_t>(len));
+      printStatus("current", st);
+      if (st.ok()) {
+        for (uint32_t i = 0; i < len; ++i) {
+          printf("%s%02X", (i == 0U) ? "" : " ", buf[i]);
+        }
+        putchar('\n');
+      }
+    }
   } else if (strncmp(full, "read ", 5) == 0 || strncmp(full, "dump ", 5) == 0 ||
              strncmp(full, "hexdump ", 8) == 0) {
     const char* args = (full[0] == 'h') ? full + 8 : full + 5;
@@ -297,14 +717,75 @@ void handleCommand(char* line) {
     } else {
       puts("Usage: read <addr> [len]");
     }
+  } else if (strncmp(full, "text ", 5) == 0) {
+    uint32_t addr = 0;
+    uint32_t len = 64;
+    const char* tail = nullptr;
+    if (parseU32(full + 5, &addr, &tail)) {
+      (void)parseU32(tail, &len);
+      textMemory(addr, len);
+    } else {
+      puts("Usage: text <addr> [len]");
+    }
+  } else if (strcmp(full, "strings") == 0 || strncmp(full, "strings ", 8) == 0) {
+    uint32_t addr = 0;
+    uint32_t len = gFram.capacityBytes();
+    uint32_t minLen = 4;
+    const char* tail = nullptr;
+    const char* tail2 = nullptr;
+    if (strncmp(full, "strings ", 8) == 0 &&
+        (!parseU32(full + 8, &addr, &tail) || !parseU32(tail, &len, &tail2))) {
+      puts("Usage: strings [addr len [minLen]]");
+    } else {
+      if (tail2 != nullptr && *tail2 != '\0') {
+        (void)parseU32(tail2, &minLen);
+      }
+      stringsMemory(addr, len, minLen);
+    }
+  } else if (strncmp(full, "crc ", 4) == 0) {
+    uint32_t addr = 0;
+    uint32_t len = 0;
+    const char* tail = nullptr;
+    if (parseU32(full + 4, &addr, &tail) && parseU32(tail, &len)) {
+      crcMemory(addr, len);
+    } else {
+      puts("Usage: crc <addr> <len>");
+    }
+  } else if (strncmp(full, "verify ", 7) == 0) {
+    uint32_t addr = 0;
+    const char* tail = nullptr;
+    uint8_t expected[CLI_DATA_MAX] = {};
+    size_t expectedLen = 0;
+    if (parseU32(full + 7, &addr, &tail) &&
+        parseByteList(tail, expected, sizeof(expected), &expectedLen)) {
+      verifyMemory(addr, expected, expectedLen);
+    } else {
+      printf("Usage: verify <addr> <byte> [byte...] (max %u bytes)\n",
+             static_cast<unsigned>(CLI_DATA_MAX));
+    }
   } else if (strncmp(full, "write ", 6) == 0) {
     uint32_t addr = 0;
-    uint32_t value = 0;
     const char* tail = nullptr;
-    if (parseU32(full + 6, &addr, &tail) && parseU32(tail, &value)) {
-      printStatus("write", gFram.writeByte(addr, static_cast<uint8_t>(value)));
+    uint8_t data[CLI_DATA_MAX] = {};
+    size_t dataLen = 0;
+    if (parseU32(full + 6, &addr, &tail) && parseByteList(tail, data, sizeof(data), &dataLen)) {
+      char confirmed[LINE_LEN];
+      formatWriteConfirmation(addr, data, dataLen, confirmed, sizeof(confirmed));
+      printConfirmationRequired(full, "Would write byte(s) to FRAM.", confirmed);
     } else {
-      puts("Usage: write <addr> <byte>");
+      printf("Usage: write <addr> <byte> [byte...] (max %u bytes)\n",
+             static_cast<unsigned>(CLI_DATA_MAX));
+    }
+  } else if (strncmp(full, "write! ", 7) == 0) {
+    uint32_t addr = 0;
+    const char* tail = nullptr;
+    uint8_t data[CLI_DATA_MAX] = {};
+    size_t dataLen = 0;
+    if (parseU32(full + 7, &addr, &tail) && parseByteList(tail, data, sizeof(data), &dataLen)) {
+      printStatus("write!", gFram.write(addr, data, dataLen));
+    } else {
+      printf("Usage: write! <addr> <byte> [byte...] (max %u bytes)\n",
+             static_cast<unsigned>(CLI_DATA_MAX));
     }
   } else if (strncmp(full, "fill ", 5) == 0) {
     uint32_t addr = 0;
@@ -314,19 +795,101 @@ void handleCommand(char* line) {
     const char* tail2 = nullptr;
     if (parseU32(full + 5, &addr, &tail) && parseU32(tail, &value, &tail2) &&
         parseU32(tail2, &len)) {
-      printStatus("fill", gFram.fill(addr, static_cast<uint8_t>(value), len));
+      char confirmed[96];
+      snprintf(confirmed, sizeof(confirmed), "fill! 0x%lX 0x%02lX %lu",
+               static_cast<unsigned long>(addr),
+               static_cast<unsigned long>(value & 0xFFU),
+               static_cast<unsigned long>(len));
+      printConfirmationRequired(full, "Would fill a FRAM range with one byte value.", confirmed);
     } else {
       puts("Usage: fill <addr> <value> <len>");
+    }
+  } else if (strncmp(full, "fill! ", 6) == 0) {
+    uint32_t addr = 0;
+    uint32_t value = 0;
+    uint32_t len = 0;
+    const char* tail = nullptr;
+    const char* tail2 = nullptr;
+    if (parseU32(full + 6, &addr, &tail) && parseU32(tail, &value, &tail2) &&
+        parseU32(tail2, &len)) {
+      printStatus("fill!", gFram.fill(addr, static_cast<uint8_t>(value), len));
+    } else {
+      puts("Usage: fill! <addr> <value> <len>");
     }
   } else if (strcmp(full, "verbose") == 0 || strncmp(full, "verbose ", 8) == 0) {
     gVerbose = strstr(full, " 0") == nullptr && (strstr(full, " 1") != nullptr || !gVerbose);
     printf("verbose=%d\n", gVerbose ? 1 : 0);
-  } else if (strcmp(full, "variants") == 0 || strcmp(full, "selftest") == 0 ||
-             strncmp(full, "stress", 6) == 0 || strncmp(full, "text ", 5) == 0 ||
-             strncmp(full, "strings", 7) == 0 || strncmp(full, "crc ", 4) == 0 ||
-             strncmp(full, "verify ", 7) == 0 || strcmp(full, "rw_suite") == 0 ||
-             strcmp(full, "typed_demo") == 0 || strncmp(full, "randbench", 9) == 0) {
-    puts("Command is present in the native IDF contract; use help for arguments.");
+  } else if (strcmp(full, "variants") == 0) {
+    printVariants();
+  } else if (strcmp(full, "selftest") == 0) {
+    printConfirmationRequired(full,
+                              "Would run a write/read/restore self-test at address 0x000000.",
+                              "selftest!");
+  } else if (strcmp(full, "selftest!") == 0) {
+    runSelfTest();
+  } else if (strcmp(full, "rw_suite") == 0) {
+    printConfirmationRequired(full,
+                              "Would run a write/fill/verify suite in a scratch FRAM range.",
+                              "rw_suite!");
+  } else if (strcmp(full, "rw_suite!") == 0) {
+    runRwSuite();
+  } else if (strcmp(full, "stress") == 0 || strncmp(full, "stress ", 7) == 0) {
+    char confirmed[32];
+    if (strncmp(full, "stress ", 7) == 0) {
+      snprintf(confirmed, sizeof(confirmed), "stress! %s", full + 7);
+    } else {
+      snprintf(confirmed, sizeof(confirmed), "stress!");
+    }
+    printConfirmationRequired(full,
+                              "Would run repeated writes and reads at address 0x000000.",
+                              confirmed);
+  } else if (strcmp(full, "stress!") == 0 || strncmp(full, "stress! ", 8) == 0) {
+    uint32_t count = DEFAULT_STRESS_COUNT;
+    if (strncmp(full, "stress! ", 8) == 0 && !parseU32(full + 8, &count)) {
+      puts("Usage: stress! [N]");
+    } else {
+      runStress(count);
+    }
+  } else if (strcmp(full, "stress_mix") == 0 || strncmp(full, "stress_mix ", 11) == 0) {
+    char confirmed[40];
+    if (strncmp(full, "stress_mix ", 11) == 0) {
+      snprintf(confirmed, sizeof(confirmed), "stress_mix! %s", full + 11);
+    } else {
+      snprintf(confirmed, sizeof(confirmed), "stress_mix!");
+    }
+    printConfirmationRequired(full,
+                              "Would run repeated mixed writes/fills/verifies in a scratch FRAM range.",
+                              confirmed);
+  } else if (strcmp(full, "stress_mix!") == 0 || strncmp(full, "stress_mix! ", 12) == 0) {
+    uint32_t count = DEFAULT_STRESS_COUNT;
+    if (strncmp(full, "stress_mix! ", 12) == 0 && !parseU32(full + 12, &count)) {
+      puts("Usage: stress_mix! [N]");
+    } else {
+      runStressMix(count);
+    }
+  } else if (strcmp(full, "randbench") == 0 || strncmp(full, "randbench ", 10) == 0) {
+    char confirmed[40];
+    if (strncmp(full, "randbench ", 10) == 0) {
+      snprintf(confirmed, sizeof(confirmed), "randbench! %s", full + 10);
+    } else {
+      snprintf(confirmed, sizeof(confirmed), "randbench!");
+    }
+    printConfirmationRequired(full,
+                              "Would run random write/read timing in a scratch FRAM range.",
+                              confirmed);
+  } else if (strcmp(full, "randbench!") == 0 || strncmp(full, "randbench! ", 11) == 0) {
+    uint32_t count = DEFAULT_STRESS_COUNT;
+    if (strncmp(full, "randbench! ", 11) == 0 && !parseU32(full + 11, &count)) {
+      puts("Usage: randbench! [N]");
+    } else {
+      runRandBench(count);
+    }
+  } else if (strcmp(full, "typed_demo") == 0) {
+    printConfirmationRequired(full,
+                              "Would write fixed-width typed demo bytes in a scratch FRAM range.",
+                              "typed_demo!");
+  } else if (strcmp(full, "typed_demo!") == 0) {
+    runTypedDemo();
   } else {
     puts("Unknown command. Try 'help'.");
   }
