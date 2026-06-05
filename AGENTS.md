@@ -196,3 +196,18 @@ Release steps:
 - Enum values: `CAPS_CASE`
 - Locals/params: `camelCase`
 - Config fields: `camelCase`
+
+---
+
+# MB85RC hardening rules
+
+- Core code under `include/` and `src/` must remain framework-neutral: no Arduino, Wire, ESP-IDF, FreeRTOS, logging framework, global buses, hidden delays, or heap-heavy framework types.
+- The MB85RC core must not own the I2C bus. Bus ownership, locking, timeouts, retry policy, and recovery policy belong in the injected transport or application bus manager.
+- FRAM writes are not EEPROM writes: do not add ACK polling or post-write programming delays unless a specific datasheet variant requires it.
+- Multi-chunk write/fill operations are not atomic. Public docs and tests must make prefix-commit behavior explicit.
+- I2C ACK on a write does not prove persistence when the hardware WP pin is high. Critical data paths must use verify or application-level journaling.
+- Device-ID support is variant-specific. Do not require Device ID for variants that do not support it.
+- Current-address read semantics must be conservative after power-up, failed transactions, or address-setting uncertainty.
+- Public APIs are not ISR-safe if they can perform I2C or block.
+- Instances are not internally thread-safe unless explicitly changed and tested; external serialization is required.
+- Do not claim pure ESP-IDF or hardware validation unless the exact commands were run and recorded.
