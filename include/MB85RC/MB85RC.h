@@ -146,6 +146,9 @@ public:
   // =========================================================================
   
   /// Check if device is present on the bus (no health tracking).
+  /// Requires a successful begin() because the active variant and configured
+  /// transport are used. This is a diagnostic check only; it does not
+  /// initialize, reset, recover, or take ownership of the physical I2C bus.
   /// Diagnostic probes do not establish a safe current-address-read starting
   /// point; explicit no-Device-ID probes conservatively clear cached
   /// current-address state because they use a raw memory read.
@@ -156,6 +159,8 @@ public:
   /// Uses a tracked Device ID read when available, or a tracked memory-read
   /// probe for explicit no-Device-ID variants. Transport failures and ID
   /// mismatches update health counters while clearing current-address tracking.
+  /// Does not reset, reconfigure, or recover the physical I2C bus; application
+  /// bus recovery and retry policy remain outside the core driver.
   /// @return Status::Ok() if device now responsive, error otherwise
   Status recover();
   

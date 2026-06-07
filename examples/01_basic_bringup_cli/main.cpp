@@ -1,6 +1,8 @@
 /// @file main.cpp
-/// @brief Basic bringup example for supported MB85RC-family FRAM variants
+/// @brief Diagnostic bring-up CLI for supported MB85RC-family FRAM variants
 /// @note This is an EXAMPLE, not part of the library
+/// @note This CLI owns the example bus and is not a production shared-bus manager,
+///       scheduler template, or storage stack.
 
 #include <Arduino.h>
 #include <cstdlib>

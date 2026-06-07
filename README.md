@@ -17,6 +17,19 @@ Library version: `v2.0.0`
 - Runtime settings snapshot API for examples and diagnostics
 - Manual recovery that records transport failures and Device ID mismatches in health tracking
 
+## Production Readiness Summary
+
+This library is production-oriented in API shape and test coverage: the core is
+framework-neutral, uses injected I2C callbacks, rejects invalid ranges before
+bus traffic, tracks health, and documents FRAM-specific write semantics. Native
+unit tests and CI builds cover the supported runtime variants and examples.
+
+Hardware validation remains board- and variant-dependent. Do not treat CI,
+native tests, or fake-bus WP simulation as proof that a specific FRAM device,
+address-pin strap, pull-up network, WP wiring, brownout profile, or shared-bus
+topology has been validated. Record the hardware matrix below for each target
+board before relying on the library for production storage.
+
 ## Installation
 
 ### PlatformIO
@@ -105,6 +118,22 @@ The default `expectedVariant` is `MB85RC256V` for compatibility with existing us
 
 The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. Applications that need meaningful health timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
 
+## I2C Ownership And Concurrency
+
+The core driver never owns the I2C bus. It does not initialize pins, create
+Arduino `Wire` or ESP-IDF handles, configure bus recovery, change clock speed,
+or implement shared-bus locking. The application owns those policies through
+`Config::i2cWrite`, `Config::i2cWriteRead`, and the user context pointer.
+
+`MB85RC` instances are not internally thread-safe. Use one task, or serialize
+all public calls that can touch driver state or I2C. Public I2C APIs are not
+ISR-safe because transport callbacks can block until the configured timeout.
+Transport callbacks must not recursively call back into the same `MB85RC`
+instance.
+
+The Arduino and ESP-IDF CLIs are diagnostic bring-up examples. They own their
+example buses and are not production shared-bus manager templates.
+
 ## Release 2.0.0 Highlights
 
 - Runtime support now covers every locally documented variant: `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
@@ -169,7 +198,7 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `Status writeVerify(uint32_t addr, const uint8_t* data, size_t len, VerifyDetailedResult* out = nullptr)` - write then verify, returning `VERIFY_MISMATCH` on readback mismatch
 - `Status fillVerify(uint32_t addr, uint8_t value, size_t len, VerifyDetailedResult* out = nullptr)` - fill then verify, returning `VERIFY_MISMATCH` on readback mismatch
 
-### Write Acceptance And Verification
+### FRAM Write Semantics
 
 FRAM writes are immediate for supported variants. The driver does not add
 EEPROM-style write delays or ACK polling after writes.
@@ -190,10 +219,20 @@ successfully by `verify()` or `verifyDetailed()` should be treated as verified.
 For critical writes or fills, use `writeVerify()` / `fillVerify()` or call
 `verify()` after `write()` / `fill()`.
 
+### Current Address Semantics
+
+Current-address read is an I2C/FRAM device feature that returns data from the
+device's internal pointer. That pointer is undefined after power-up and can be
+disturbed by diagnostics or failed transactions. Use explicit-address
+`read(address, ...)` for deterministic production workflows, especially after
+power loss, bus errors, `probe()`, or `recover()`. `readCurrentAddress()` is best
+reserved for diagnostics or carefully controlled transaction sequences after a
+known successful addressed read/write by the same instance.
+
 ### Diagnostics
 
-- `Status probe()` - check presence without health tracking
-- `Status recover()` - manual recovery attempt
+- `Status probe()` - diagnostic presence check after `begin()` using the active variant; it does not initialize, reset, or recover the physical bus
+- `Status recover()` - manual driver-state recovery attempt; application-owned bus recovery remains outside the core
 - `Status readDeviceId(DeviceId& out)` - read manufacturer, product, and density fields where supported
 - `Status readDeviceIdRaw(DeviceIdRaw& out)` - read the raw 3-byte Device ID payload where supported
 - `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime state without I2C
@@ -217,16 +256,55 @@ For critical writes or fills, use `writeVerify()` / `fillVerify()` or call
 
 ## Supported Runtime Variants
 
-| Variant | Product ID | Capacity | Address range | Config selector |
-|---------|------------|----------|---------------|-----------------|
-| `MB85RC04V` | `0x010` | 512 B (4 Kbit) | `0x0000` - `0x01FF` | `DeviceVariant::MB85RC04V` / `AUTO` |
-| `MB85RC16V` | n/a | 2 KB (16 Kbit) | `0x0000` - `0x07FF` | `DeviceVariant::MB85RC16V` only |
-| `MB85RC64TA` | `0x358` | 8 KB (64 Kbit) | `0x0000` - `0x1FFF` | `DeviceVariant::MB85RC64TA` / `AUTO` |
-| `MB85RC256V` | `0x510` | 32 KB (256 Kbit) | `0x0000` - `0x7FFF` | `DeviceVariant::MB85RC256V` |
-| `MB85RC512T` | `0x658` | 64 KB (512 Kbit) | `0x0000` - `0xFFFF` | `DeviceVariant::MB85RC512T` / `AUTO` |
-| `MB85RC1MT` | `0x758` | 128 KB (1 Mbit) | `0x00000` - `0x1FFFF` | `DeviceVariant::MB85RC1MT` / `AUTO` |
+| Variant | Capacity | I2C address model | Memory address bytes/model | Device ID | Max bus speed claimed | Notes |
+| --- | ---: | --- | --- | --- | --- | --- |
+| `MB85RC04V` | 512 B | `0x50`-`0x53`; A2/A1 pins plus A8 in address word | 1 byte plus A8 in I2C address | Yes, product `0x010`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
+| `MB85RC16V` | 2 KB | `0x50`-`0x57` encodes memory A10:A8; no external address-select pins | 1 byte plus A10:A8 in I2C address | No; select `DeviceVariant::MB85RC16V` explicitly | 1 MHz | Memory-probe diagnostics only; `AUTO` cannot discover it. |
+| `MB85RC64TA` | 8 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x1FFF` | Yes, product `0x358`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
+| `MB85RC256V` | 32 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x7FFF` | Yes, product `0x510`; default selector | 1 MHz | Legacy default; no high-speed or sleep command support documented in local summary. |
+| `MB85RC512T` | 64 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0xFFFF` | Yes, product `0x658`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
+| `MB85RC1MT` | 128 KB | `0x50`-`0x53`; A2/A1 pins plus A16 in address word | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
 
-`AUTO` uses the Device ID command and therefore works only on variants that implement Device ID. `MB85RC16V` must be selected explicitly. Small-density variants use upper memory-address bits in the I2C device address; `MB85RC1MT` uses A16 in the I2C device address; the driver derives those transaction addresses from `Config::i2cAddress`.
+`AUTO` uses the Device ID command and therefore works only on variants that implement Device ID. `MB85RC16V` must be selected explicitly. The driver derives runtime transaction addresses from `Config::i2cAddress` plus the active variant's address model.
+
+Local datasheet summaries in `docs/extracted-md/` list endurance and retention
+claims by variant. Use the exact part datasheet for production lifetime budgets:
+the local summaries show 10^12 writes/byte for `MB85RC04V`, `MB85RC16V`, and
+`MB85RC256V`, and 10^13 writes/byte for `MB85RC64TA`, `MB85RC512T`, and
+`MB85RC1MT`. Retention statements vary by part and temperature.
+
+## Validation Status
+
+| Coverage area | Current evidence | Status |
+| --- | --- | --- |
+| Implemented behavior | Public headers, README contracts, framework-neutral `src/`, runtime variant table, range checks, current-address tracking, detailed write/fill/verify APIs | Implemented in code |
+| Unit-test coverage | Native fake-bus tests cover variant selection, address encoding, range boundaries, partial chunk failures, WP-high simulation, current-address invalidation, and health transitions | Covered by native tests |
+| CI/build coverage | PlatformIO Arduino builds for ESP32-S2/S3, native tests, guard scripts, package validation, and pure ESP-IDF CI workflow for `examples/espidf_basic` | Covered by CI configuration; local IDF build depends on `idf.py` availability |
+| Hardware validation | Board/variant/address-pin/WP/brownout/shared-bus/soak evidence | Pending hardware; use the matrix below |
+
+## Hardware Validation Matrix
+
+Status values below are planning states, not claims. Mark rows complete only
+after recording board, MCU, FRAM package/date code, supply voltage, pull-ups,
+bus speed, address-pin straps, WP wiring, command log, and captured evidence.
+
+| Scenario | Variant(s) | Address pins | Command/test | Expected evidence | Status |
+| --- | --- | --- | --- | --- | --- |
+| Device ID read and `begin(AUTO)` | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | Each board's selected strap | `id`, `idraw`, `begin(AUTO)` | Manufacturer `0x00A`, expected product ID, active capacity selected | Pending hardware |
+| No-ID explicit variant | `MB85RC16V` | A10:A8 encoded in transaction address | `begin(MB85RC16V)`, memory probe, `readDeviceId()` negative check | Explicit begin succeeds on present device; Device ID APIs reject as unsupported | Pending hardware |
+| Address pin combinations | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | A1/A2 or A0/A1/A2 low/high combinations as applicable | I2C scan plus `begin()` at each strapped address | Only strapped address responds; wrong addresses NACK | Pending hardware |
+| Upper-address bits in I2C address | `MB85RC16V` | No external address-select pins | Write/read across `0x00FF`, `0x0100`, and `0x07FF` | A10:A8 transaction address selection works and exact-end byte verifies | Pending hardware |
+| Exact-end read/write | All supported variants | Default and at least one nonzero strap | `writeVerify(maxAddress - n + 1, n)` and `read()` | Last valid byte range succeeds and verifies | Pending hardware |
+| Boundary rejection | All supported variants | Any valid strap | Cross-end `read`, `write`, `fill`, `verify` | Driver returns `ADDRESS_OUT_OF_RANGE` before bus traffic when observable | Pending hardware |
+| Sequential public no-wrap contract | All supported variants | Any valid strap | Attempt bulk range crossing capacity | Public API rejects; no reliance on datasheet rollover | Pending hardware |
+| WP high behavior | At least `MB85RC256V`, plus each production BOM variant | WP low/open, then WP high | `write()`, `verify()`, `writeVerify()` | WP low/open persists; WP high may ACK but memory remains unchanged; verify catches mismatch | Pending hardware |
+| Bulk write/fill/verify | All supported variants | Any valid strap | `writeDetailed()`, `fillDetailed()`, `verifyDetailed()` over multi-chunk ranges | Full accepted counts and readback match | Pending hardware |
+| Current-address read after explicit set | All supported variants | Any valid strap | Addressed `read()` or `write()`, then `readCurrentAddress()` | Pointer advances only after known address-setting transaction | Pending hardware |
+| Unplug/NACK and recovery | Representative Device-ID and no-ID variants | Any valid strap | Disconnect device or force wrong address, then `probe()`/`recover()` | Transport errors mapped, health state degrades/offlines, manual recovery documented | Pending hardware |
+| Brownout/power-cycle persistence | Each production BOM variant | Production straps and WP wiring | Write record, verify, power-cycle/brownout, read/verify | Data persists or application journal rejects torn record | Pending hardware |
+| Pure ESP-IDF CLI | ESP32-S2 and ESP32-S3 with production BOM variant | Production straps | `idf.py` build, flash, `id`, `rw_suite!`, `typed_demo!` | Native IDF CLI runs without Arduino compatibility and commands pass | Pending hardware |
+| Shared bus with another device | Production board topology | Production straps | Concurrent application bus manager test with another I2C device | External serialization prevents interleaved transactions and recovers from peer failures | Pending hardware |
+| Long soak on sacrificial range | Each production BOM variant | Production straps | Repeated write/read/verify with CRC/generation counter | No mismatches over planned duration; failures logged with supply and temperature | Pending hardware |
 
 ## Notes
 
@@ -257,10 +335,13 @@ the application layer:
 4. Mark the record valid last, then verify that marker.
 5. On boot, scan records, validate magic/version/length/CRC and the valid marker,
    then choose the newest sequence number.
+6. Size the slot count and rewrite cadence from the actual part's endurance and
+   retention limits, voltage range, and temperature profile.
 
 ## Examples
 
 - `examples/01_basic_bringup_cli/`
+  - Arduino diagnostic/bring-up CLI; not a production storage stack or shared-bus manager.
   - `cfg` / `settings` for runtime/config snapshots
   - `read` / `dump` / `hexdump` for active-capacity-bounded hex+ASCII memory dumps
   - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware

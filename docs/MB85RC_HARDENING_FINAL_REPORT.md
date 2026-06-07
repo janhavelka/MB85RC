@@ -11,8 +11,8 @@ Branch: `hardening/mb85rc-industry-readiness`
 | 00 Kickoff / AGENTS / plan | Complete | `3b1b22f` | Branch created, hardening rules added, final report skeleton started, and Phase 00 checks passed. |
 | 01 Core contracts | Complete | `22d4294` | Copy/move disabled, public contracts documented, guard strengthened, and current-address failure handling tightened. |
 | 02 Partial write + WP persistence | Complete | `b89bc82` | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
-| 03 ESP-IDF CI and CLI polish | Complete | TBD | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
-| 04 Docs, examples, hardware validation matrix | Pending | TBD | Not started. |
+| 03 ESP-IDF CI and CLI polish | Complete | `ab67f83` | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
+| 04 Docs, examples, hardware validation matrix | Complete | TBD | Production FRAM semantics documented, variant table expanded, and hardware validation matrix added with all hardware rows pending. |
 | 05 Final verification and release report | Pending | TBD | Not started. |
 
 ## Phase 00 Kickoff Notes
@@ -147,7 +147,45 @@ Branch: `hardening/mb85rc-industry-readiness`
 - Pure ESP-IDF builds are now represented in CI, but local IDF build proof is still pending until ESP-IDF is activated on the local PATH or CI results are reviewed.
 - The IDF CLI remains a diagnostic bring-up tool. It is not a production scheduler or shared-bus manager template.
 
+## Phase 04 Documentation, Hardware Matrix, And Production Guidance
+
+### Documentation Changes
+
+- Added a README production-readiness summary that separates production-oriented API/test/CI coverage from board- and variant-specific hardware validation.
+- Added a dedicated README I2C ownership and concurrency section covering injected transport ownership, external locking, ISR safety, and non-recursive callbacks.
+- Expanded FRAM write and current-address guidance: no EEPROM-style write delay or ACK polling, non-atomic multi-chunk writes/fills, WP-high ACK/no-persistence risk, verify/writeVerify use, and explicit-address reads for deterministic production paths.
+- Replaced the supported variant table with capacity, I2C address model, memory-address model, Device-ID support, max documented bus speed, and high-speed/sleep notes for all supported runtime variants.
+- Added endurance/retention guidance that points production users back to the exact part datasheet and board conditions.
+- Added a production hardware validation matrix with all rows marked pending hardware, including Device-ID/no-ID paths, address pins/upper-address bits, exact-end access, boundary rejection, WP-high, bulk verify, current-address reads, unplug/NACK, brownout/power-cycle persistence, pure IDF CLI on ESP32-S2/S3, shared bus, and long soak.
+- Clarified `Config` transport callback docs, `probe()` and `recover()` Doxygen, and the Arduino CLI example label.
+
+### Hardware Validation Matrix Status
+
+- No hardware tests were run in Phase 04.
+- README hardware validation rows are planning entries only. They must not be changed to pass/validated without board, FRAM variant, address-pin strap, supply, bus speed, WP wiring, command transcript, date, and commit evidence.
+
+### Phase 04 Verification
+
+| Command | Result |
+| --- | --- |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 92 test cases, 92 succeeded. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `doxygen Doxyfile` | PASS: Doxygen 1.13.2 completed; generated `docs/doxygen` output was removed after the check. |
+
+### Phase 04 Remaining Hardware Work
+
+- Run the full hardware validation matrix on each production BOM variant and address strap.
+- Record WP low/open and WP high persistence behavior on real boards.
+- Record brownout/power-cycle persistence and application journal behavior.
+- Record shared-bus behavior with the actual application bus manager.
+- Record long-soak write/read/verify evidence over a sacrificial range.
+
 ## Remaining Concerns
 
 - Real hardware WP validation is still required: confirm WP low/open permits writes, WP high can ACK while blocking persistence, reads still work while WP high, and write/readback verification detects the protected state.
-- Broader documentation/hardware validation matrix and final release/version metadata remain later-phase work.
+- Actual hardware execution of the validation matrix and final release/version metadata remain later-phase work.

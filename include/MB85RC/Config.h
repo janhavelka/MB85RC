@@ -24,7 +24,11 @@ enum class DeviceVariant : uint8_t {
   MB85RC1MT       ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
 };
 
-/// I2C write callback signature
+/// I2C write callback signature.
+///
+/// The application-owned transport controls bus locking, timeout enforcement,
+/// retry policy, and bus recovery. Callbacks must not recursively call public
+/// methods on the same MB85RC instance.
 /// @param addr I2C device address (7-bit)
 /// @param data Pointer to data to write
 /// @param len Number of bytes to write
@@ -34,7 +38,11 @@ enum class DeviceVariant : uint8_t {
 using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
                               uint32_t timeoutMs, void* user);
 
-/// I2C write-then-read callback signature
+/// I2C write-then-read callback signature.
+///
+/// The application-owned transport controls bus locking, timeout enforcement,
+/// retry policy, and bus recovery. Callbacks must not recursively call public
+/// methods on the same MB85RC instance.
 /// @param addr I2C device address (7-bit)
 /// @param txData Pointer to data to write (nullable when txLen == 0)
 /// @param txLen Number of bytes to write (0 allowed for read-only transactions)
