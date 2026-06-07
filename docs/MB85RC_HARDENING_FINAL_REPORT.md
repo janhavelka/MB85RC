@@ -158,6 +158,7 @@ Branch: `hardening/mb85rc-industry-readiness`
 - Added endurance/retention guidance that points production users back to the exact part datasheet and board conditions.
 - Added a production hardware validation matrix with all rows marked pending hardware, including Device-ID/no-ID paths, address pins/upper-address bits, exact-end access, boundary rejection, WP-high, bulk verify, current-address reads, unplug/NACK, brownout/power-cycle persistence, pure IDF CLI on ESP32-S2/S3, shared bus, and long soak.
 - Clarified `Config` transport callback docs, `probe()` and `recover()` Doxygen, and the Arduino CLI example label.
+- Replay audit tightened README variant address wording for `MB85RC04V` and `MB85RC1MT`, removed "safe" overstatements from mutating Arduino diagnostics, and listed ESP-IDF `stress_mix!` / `randbench!` help forms.
 
 ### Hardware Validation Matrix Status
 

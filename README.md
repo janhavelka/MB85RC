@@ -53,7 +53,8 @@ extra component or dependency, then include `MB85RC/MB85RC.h` and provide
 I2C master bus.
 
 The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
-with the same command contract as the Arduino CLI:
+with matching diagnostic coverage. Mutating commands use framework-specific
+confirmation syntax:
 
 ```bash
 idf.py -C examples/espidf_basic set-target esp32s3 build
@@ -144,7 +145,7 @@ example buses and are not production shared-bus manager templates.
 - Address encoding is centralized for one-byte small-density devices, two-byte address-pin devices, and `MB85RC1MT` A16-in-device-address transactions.
 - `MB85RC16V` is supported through explicit selection and memory-probe diagnostics because the part has no Device ID command.
 - `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
-- Arduino and native ESP-IDF CLIs use separate implementations with a shared command contract, accept 32-bit addresses, and preserve the same command surface in both frameworks.
+- Arduino and native ESP-IDF CLIs use separate implementations with repo-local contract checks, accept 32-bit addresses, and cover the same diagnostic workflows. ESP-IDF mutating commands require explicit `!` confirmation forms.
 - Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples and application glue.
 - ESP-IDF CLI remains a native `app_main` example using `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
 - Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
@@ -258,12 +259,12 @@ known successful addressed read/write by the same instance.
 
 | Variant | Capacity | I2C address model | Memory address bytes/model | Device ID | Max bus speed claimed | Notes |
 | --- | ---: | --- | --- | --- | --- | --- |
-| `MB85RC04V` | 512 B | `0x50`-`0x53`; A2/A1 pins plus A8 in address word | 1 byte plus A8 in I2C address | Yes, product `0x010`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
+| `MB85RC04V` | 512 B | A2/A1 pins select a base pair; A8 selects the transaction address (`0x50`-`0x57` across all straps) | 1 byte plus A8 in I2C address | Yes, product `0x010`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
 | `MB85RC16V` | 2 KB | `0x50`-`0x57` encodes memory A10:A8; no external address-select pins | 1 byte plus A10:A8 in I2C address | No; select `DeviceVariant::MB85RC16V` explicitly | 1 MHz | Memory-probe diagnostics only; `AUTO` cannot discover it. |
 | `MB85RC64TA` | 8 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x1FFF` | Yes, product `0x358`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
 | `MB85RC256V` | 32 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x7FFF` | Yes, product `0x510`; default selector | 1 MHz | Legacy default; no high-speed or sleep command support documented in local summary. |
 | `MB85RC512T` | 64 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0xFFFF` | Yes, product `0x658`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
-| `MB85RC1MT` | 128 KB | `0x50`-`0x53`; A2/A1 pins plus A16 in address word | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
+| `MB85RC1MT` | 128 KB | A2/A1 pins select a base pair; A16 selects the transaction address (`0x50`-`0x57` across all straps) | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
 
 `AUTO` uses the Device ID command and therefore works only on variants that implement Device ID. `MB85RC16V` must be selected explicitly. The driver derives runtime transaction addresses from `Config::i2cAddress` plus the active variant's address model.
 
@@ -348,7 +349,7 @@ the application layer:
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
-  - `rw_suite` for safe read/write/fill/verify coverage with restore
+  - `rw_suite` for read/write/fill/verify diagnostics with best-effort restore
   - `randbench [N]` for random-access timing over a scratch window with compact restore status
   - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
 
@@ -362,7 +363,7 @@ the application layer:
     `randbench!`, and `typed_demo!`.
   - `tools/check_idf_example_contract.py` rejects Arduino compatibility facades and checks the native IDF command surface.
 
-### CLI Inspection Examples
+### ESP-IDF CLI Inspection Examples
 
 ```text
 hexdump 0x0000 128        # Hex + ASCII view of a region

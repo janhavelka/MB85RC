@@ -272,7 +272,8 @@ void printHelp() {
   puts("  current / cur [len] | id | idraw | variants | size");
   puts("  drv | iface_reset | probe | recover | verbose [0|1]");
   puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
-  puts("  stress_mix [N] | randbench [N] | typed_demo | typed_demo!");
+  puts("  stress_mix [N] | stress_mix! [N] | randbench [N] | randbench! [N]");
+  puts("  typed_demo | typed_demo!");
 }
 
 void scanBus() {

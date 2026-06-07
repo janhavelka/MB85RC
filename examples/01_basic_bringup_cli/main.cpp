@@ -1087,7 +1087,7 @@ void runSelfTest() {
     report(name, SelftestOutcome::SKIP, note);
   };
 
-  Serial.println("=== MB85RC selftest (safe commands) ===");
+  Serial.println("=== MB85RC selftest (diagnostic commands) ===");
 
   const uint32_t succBefore = device.totalSuccess();
   const uint32_t failBefore = device.totalFailures();
@@ -1655,8 +1655,8 @@ void printHelp() {
   cli::printHelpItem("verbose [0|1]", "Enable/disable verbose output");
   cli::printHelpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
   cli::printHelpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
-  cli::printHelpItem("selftest", "Run safe self-test report");
-  cli::printHelpItem("rw_suite", "Run a safe read/write/fill/verify suite and restore data");
+  cli::printHelpItem("selftest", "Run diagnostic self-test report with restore checks");
+  cli::printHelpItem("rw_suite", "Run read/write/fill/verify suite with best-effort restore");
   cli::printHelpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
   cli::printHelpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
 }
