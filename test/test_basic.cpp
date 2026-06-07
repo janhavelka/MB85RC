@@ -716,6 +716,23 @@ void test_begin_auto_cannot_select_no_device_id_variant() {
                           static_cast<uint8_t>(st.code));
 }
 
+void test_begin_auto_rejects_unknown_device_id_product() {
+  FakeBus bus;
+  bus.productId = 0x123U;
+
+  MB85RC::MB85RC dev;
+  Config cfg = makeConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_ID_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_FALSE(snap.variantKnown);
+}
+
 void test_begin_normalizes_zero_offline_threshold_in_settings() {
   FakeBus bus;
   Config cfg = makeConfig(bus);
@@ -2747,6 +2764,7 @@ int main() {
   RUN_TEST(test_begin_rejects_expected_variant_mismatch);
   RUN_TEST(test_begin_auto_selects_supported_runtime_variant);
   RUN_TEST(test_begin_auto_cannot_select_no_device_id_variant);
+  RUN_TEST(test_begin_auto_rejects_unknown_device_id_product);
   RUN_TEST(test_begin_normalizes_zero_offline_threshold_in_settings);
   RUN_TEST(test_begin_detects_device_not_found);
   RUN_TEST(test_begin_detects_device_id_mismatch);

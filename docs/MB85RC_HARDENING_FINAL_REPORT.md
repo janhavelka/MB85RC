@@ -241,8 +241,8 @@ The main audit targets handled by this branch were:
 
 ### Test Additions And Coverage
 
-- Native tests cover copy/move deletion, boundary/overflow behavior, exact-end/cross-end rejection, partial multi-chunk write/fill accepted-prefix reporting, failure on first/middle/last chunks, WP-high ACK/no-persistence simulation, write/fill verify success and mismatch failure, Device-ID success/failure paths, current-address invalidation after failure, and framework leakage guards.
-- Guard scripts cover core timing/framework leakage, Arduino/IDF command-contract parity, native IDF example boundaries, confirmation forms, CI IDF command presence, and IDF Device-ID manual-address tokens.
+- Native tests cover copy/move deletion, boundary/overflow behavior, exact-end/cross-end rejection, partial multi-chunk write/fill accepted-prefix reporting, failure on first/middle/last chunks, WP-high ACK/no-persistence simulation, write/fill verify success and mismatch failure, Device-ID success/failure paths, and current-address invalidation after failure.
+- Guard scripts cover framework leakage, core timing, Arduino/IDF command-contract parity, native IDF example boundaries, confirmation forms, CI IDF command presence, and IDF Device-ID manual-address tokens.
 
 ### Documentation Changes
 
@@ -265,7 +265,7 @@ The main audit targets handled by this branch were:
 | `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
 | `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
 | `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
-| `python -m platformio test -e native` | PASS: 92 test cases, 92 succeeded. |
+| `python -m platformio test -e native` | PASS: 93 test cases, 93 succeeded after adding AUTO unknown-product coverage. |
 | `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
 | `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
 | `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
@@ -307,7 +307,7 @@ completed successfully.
 - Run or review pure ESP-IDF S2/S3 CI build results before claiming IDF build proof.
 - Add high-speed and sleep support only if product requirements justify it and the feature is documented and tested per variant.
 - Add a production journaling example if users need an application-level storage pattern beyond README guidance.
-- For an actual release, update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README version text, and generated `Version.h` together.
+- For an actual release, update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README version text, `Doxyfile`, and generated `Version.h` together.
 
 ### Merge Readiness Verdict
 

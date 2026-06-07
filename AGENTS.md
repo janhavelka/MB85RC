@@ -83,11 +83,11 @@ struct Status {
 
 ---
 
-## MB85RC256V Driver Requirements
+## MB85RC256V Reference Requirements
 
 - I2C address configurable: 0x50–0x57 (3 address pins A0, A1, A2).
-- Check device presence in `begin()` by reading Device ID.
-- Verify Manufacturer ID (0x00A) and Product ID (0x510).
+- For MB85RC256V, check device presence in `begin()` by reading Device ID.
+- For MB85RC256V, verify Manufacturer ID (0x00A) and Product ID (0x510). Family variants use their own product IDs, and no-Device-ID variants require explicit selection.
 - 32,768 bytes (256 Kbit), 15-bit addressing (0x0000–0x7FFF).
 - No write delay (FRAM writes are immediate — no EEPROM-style polling).
 - No page boundary limitations — device sequential writes auto-increment through the entire array.

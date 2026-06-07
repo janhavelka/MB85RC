@@ -1,8 +1,11 @@
 # MB85RC Driver Library
 
-Production-grade MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
+Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Library version: `v2.0.0`
+Released library version: `v2.0.0`
+
+This hardening branch documents unreleased API additions. The final hardening
+report recommends `v2.1.0` for an actual release that includes them.
 
 ## Features
 
@@ -38,8 +41,11 @@ Add to `platformio.ini`:
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/MB85RC.git#v2.0.0
+  https://github.com/janhavelka/MB85RC.git#hardening/mb85rc-industry-readiness
 ```
+
+Use `#v2.0.0` for the current tagged release. The unreleased hardening APIs
+documented on this branch are not part of that tag.
 
 ### Manual
 
