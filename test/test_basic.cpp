@@ -712,7 +712,7 @@ void test_begin_auto_cannot_select_no_device_id_variant() {
   Config cfg = makeConfig(bus);
   cfg.expectedVariant = DeviceVariant::AUTO;
   Status st = dev.begin(cfg);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
                           static_cast<uint8_t>(st.code));
 }
 
@@ -736,7 +736,7 @@ void test_begin_detects_device_not_found() {
   bus.readErrorRemaining = 1;
   MB85RC::MB85RC dev;
   Status st = dev.begin(makeConfig(bus));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(st.code));
 
   SettingsSnapshot snap;
@@ -890,7 +890,7 @@ void test_probe_failure_does_not_update_health() {
   bus.readErrorRemaining = 1;
   bus.readError = Status::Error(Err::I2C_ERROR, "forced probe error", -7);
   Status st = dev.probe();
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::DEVICE_NOT_FOUND),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT32(beforeSuccess, dev.totalSuccess());
   TEST_ASSERT_EQUAL_UINT32(beforeFailures, dev.totalFailures());

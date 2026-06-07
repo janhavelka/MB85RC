@@ -1,6 +1,6 @@
 # MB85RC Industry-Readiness Hardening Final Report
 
-Date: 2026-06-05
+Date: 2026-06-07
 Last updated: 2026-06-07
 Branch: `hardening/mb85rc-industry-readiness`
 
@@ -12,8 +12,25 @@ Branch: `hardening/mb85rc-industry-readiness`
 | 01 Core contracts | Complete | `22d4294` | Copy/move disabled, public contracts documented, guard strengthened, and current-address failure handling tightened. |
 | 02 Partial write + WP persistence | Complete | `b89bc82` | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
 | 03 ESP-IDF CI and CLI polish | Complete | `ab67f83` | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
-| 04 Docs, examples, hardware validation matrix | Complete | TBD | Production FRAM semantics documented, variant table expanded, and hardware validation matrix added with all hardware rows pending. |
-| 05 Final verification and release report | Pending | TBD | Not started. |
+| 04 Docs, examples, hardware validation matrix | Complete | `4071f08`, `a159e95` | Production FRAM semantics documented, variant table expanded, hardware validation matrix added, and replay wording fixes applied. |
+| 05 Final verification and release report | Complete | This commit | Final review defects fixed, full local verification rerun, and merge/release readiness documented. |
+
+## Starting Audit Findings
+
+The IDF-merged industry-readiness audit found a strong foundation: framework-neutral
+core code, injected I2C callbacks, variant-aware address encoding, range checks,
+chunked read/write, conservative current-address semantics, no EEPROM-style write
+delay, and passing native tests. The hardening sequence intentionally avoided a
+broad rewrite.
+
+The main audit targets handled by this branch were:
+
+- Pure ESP-IDF build coverage in CI and direct guard invocation.
+- Explicit partial multi-chunk write/fill accepted-prefix reporting.
+- WP-high ACK/no-persistence honesty and write/fill verify convenience APIs.
+- Deleted copy/move operations and documented thread/ISR/reentrancy contracts.
+- IDF CLI diagnostic labeling, confirmation syntax, and native IDF boundary checks.
+- Hardware validation documentation by FRAM variant and address-pin/address-bit mode.
 
 ## Phase 00 Kickoff Notes
 
@@ -186,7 +203,121 @@ Branch: `hardening/mb85rc-industry-readiness`
 - Record shared-bus behavior with the actual application bus manager.
 - Record long-soak write/read/verify evidence over a sacrificial range.
 
-## Remaining Concerns
+## Phase 05 Final Verification And Merge Readiness
 
-- Real hardware WP validation is still required: confirm WP low/open permits writes, WP high can ACK while blocking persistence, reads still work while WP high, and write/readback verification detects the protected state.
-- Actual hardware execution of the validation matrix and final release/version metadata remain later-phase work.
+### Final Review Fixes
+
+- Preserved original transport status codes from `begin()` and diagnostic `probe()` failures instead of wrapping them as `DEVICE_NOT_FOUND`; native tests were updated to lock the precise error model.
+- Added a native ESP-IDF Device-ID manual-address transaction path using `I2C_DEVICE_ADDRESS_NOT_USED` and `i2c_master_execute_defined_operations()` for the reserved `0xF8`/`0xF9` sequence.
+- Wired the existing ESP-IDF Device-ID manual-address token list into `tools/check_idf_example_contract.py`.
+- Set the native ESP-IDF diagnostic CLI to `DeviceVariant::AUTO`, matching Arduino CLI behavior and changelog wording.
+- Clarified `AGENTS.md` so the device-level rollover capability is not confused with the public driver contract: public bulk APIs reject cross-capacity ranges unless a future explicit wrap API is added and tested.
+- Tightened README and public-header wording for ESP-IDF validation status, variant-aware `Config::i2cAddress`, and the no-Device-ID read-only presence probe.
+
+### Public API Changes
+
+- `MB85RC` copy and move construction/assignment are explicitly deleted.
+- `WriteResult`, `writeDetailed()`, and `fillDetailed()` report requested bytes, accepted prefix, failed chunk offset/length, and completion.
+- `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`, and `Err::VERIFY_MISMATCH` add readback verification for critical writes/fills.
+- Existing simple `read()`, `write()`, `fill()`, and `verify()` remain available and keep the public no-wrap active-capacity range contract.
+- Public headers document thread/ISR/reentrancy limitations, injected transport ownership, current-address caveats, non-atomic bulk writes/fills, and WP-high verification caveats.
+
+### Core Changes
+
+- Core under `include/` and `src/` remains framework-neutral: no Arduino, Wire, ESP-IDF, FreeRTOS, logging framework, global bus, hidden delay, or framework heap type is used.
+- All core I2C remains injected through `Config::i2cWrite` and `Config::i2cWriteRead`; the core does not own, lock, reset, or configure the physical I2C bus.
+- No post-write delay or EEPROM-style ACK polling was added.
+- Device-ID behavior remains variant-aware, including explicit no-Device-ID handling for `MB85RC16V`.
+- Current-address tracking is conservative after failures, recovery, and diagnostics that can disturb the device pointer.
+- Final status mapping fix keeps raw transport errors visible from `begin()` and diagnostic `probe()` failures.
+
+### ESP-IDF And CI Changes
+
+- `.github/workflows/ci.yml` includes PlatformIO ESP32-S2/ESP32-S3 builds, native tests, guard scripts, package validation, and an ESP-IDF job using `espressif/idf:release-v6.0`.
+- The ESP-IDF CI job records `idf.py --version` and runs `idf.py -C examples/espidf_basic set-target esp32s3 build` and `idf.py -C examples/espidf_basic set-target esp32s2 build`.
+- The native ESP-IDF example remains `app_main`/`driver/i2c_master.h` based and does not include Arduino compatibility sources.
+- ESP-IDF CLI remains a diagnostic bring-up example; it owns the example bus and is not a production scheduler or shared-bus manager.
+- Local workflow syntax inspection parsed `.github/workflows/ci.yml` successfully with PyYAML.
+
+### Test Additions And Coverage
+
+- Native tests cover copy/move deletion, boundary/overflow behavior, exact-end/cross-end rejection, partial multi-chunk write/fill accepted-prefix reporting, failure on first/middle/last chunks, WP-high ACK/no-persistence simulation, write/fill verify success and mismatch failure, Device-ID success/failure paths, current-address invalidation after failure, and framework leakage guards.
+- Guard scripts cover core timing/framework leakage, Arduino/IDF command-contract parity, native IDF example boundaries, confirmation forms, CI IDF command presence, and IDF Device-ID manual-address tokens.
+
+### Documentation Changes
+
+- README now separates implemented behavior, unit-test coverage, CI/build coverage, and pending hardware validation.
+- README and public headers document non-atomic write/fill behavior, accepted prefix versus verified persistence, WP-high caveat, no EEPROM-style write delay, current-address caveat, thread/ISR/reentrancy contract, and diagnostic versus production example scope.
+- README contains a variant table covering capacity, I2C address model, memory-address model, Device-ID support, max documented bus speed, and high-speed/sleep notes.
+- README contains a hardware validation matrix with all hardware rows still marked pending.
+- Production storage guidance recommends record metadata, CRC/generation counters, verify-before-commit, commit marker last, boot scan, and part-specific endurance/retention budgeting.
+
+### Final Local Verification
+
+| Command | Result |
+| --- | --- |
+| `git status --short` | PASS at start: clean. Before final commit: only expected Prompt 05 edits are modified. |
+| `git branch --show-current` | PASS: `hardening/mb85rc-industry-readiness`. |
+| `git pull --ff-only` | PASS: already up to date. |
+| `python --version` | PASS: `Python 3.12.10`. |
+| `python -m platformio --version` | PASS: `PlatformIO Core, version 6.1.18`. |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 92 test cases, 92 succeeded. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
+| `doxygen Doxyfile` | PASS: Doxygen 1.13.2 completed; generated `docs/doxygen` output was removed after the check. |
+| PyYAML workflow parse | PASS: `.github/workflows/ci.yml: YAML parse OK`. |
+| `git diff --check` | PASS: no whitespace errors; Git reported only local LF-to-CRLF normalization warnings. |
+
+PlatformIO emitted a non-fatal warning that obsolete PlatformIO Core 6.1.18 is
+active while 6.1.19 was previously seen on the machine. Builds and tests still
+completed successfully.
+
+### Commands Not Run
+
+| Command | Reason |
+| --- | --- |
+| `idf.py --version` | UNAVAILABLE locally: `idf.py not found on PATH`. |
+| `idf.py -C examples/espidf_basic set-target esp32s3 build` | SKIPPED locally because `idf.py` is unavailable; configured in CI. |
+| `idf.py -C examples/espidf_basic set-target esp32s2 build` | SKIPPED locally because `idf.py` is unavailable; configured in CI. |
+| GitHub Actions CI run result | Not available to this local agent session; workflow syntax and command presence were inspected, but CI pass is not claimed. |
+| Real hardware validation | Not run in this sequence; README matrix remains pending hardware. |
+
+### Hardware Validation Matrix Status
+
+- No hardware validation was run or claimed in this hardening sequence.
+- The README matrix remains the source of planned hardware evidence by variant, address pin/address-bit mode, WP wiring, power-cycle/brownout behavior, shared bus, pure IDF CLI on ESP32-S2/S3, and long soak.
+- Rows must remain pending until board, FRAM part/package, address straps, voltage, pull-ups, bus speed, WP state, command transcript, date, and commit evidence are recorded.
+
+### Remaining Risks
+
+- Real WP-pin behavior still needs board validation: WP low/open should persist writes; WP high may ACK while blocking memory modification; readback verification should catch that state.
+- Pure ESP-IDF builds are configured in CI but were not locally run because `idf.py` is unavailable on PATH.
+- Hardware behavior across all variants, address straps, power profiles, and shared-bus topologies is not field-proven by this branch.
+- Release metadata still advertises `2.0.0`; the new public APIs and `VERIFY_MISMATCH` are currently under `Unreleased`.
+
+### Future Work
+
+- Execute the hardware validation matrix by supported variant and address pin/address-bit mode.
+- Validate WP pin behavior on representative real boards.
+- Run or review pure ESP-IDF S2/S3 CI build results before claiming IDF build proof.
+- Add high-speed and sleep support only if product requirements justify it and the feature is documented and tested per variant.
+- Add a production journaling example if users need an application-level storage pattern beyond README guidance.
+- For an actual release, update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README version text, and generated `Version.h` together.
+
+### Merge Readiness Verdict
+
+This branch is ready to merge as a production-readiness hardening step, provided
+the normal PR CI run is reviewed for the configured ESP-IDF S2/S3 jobs. It should
+not yet be described as fully field-proven across all MB85RC variants until
+hardware validation is completed on representative parts and boards.
+
+### Release Wording Recommendation
+
+- Recommended release version for the API additions is `2.1.0`, not `2.0.0`, because the branch adds backward-compatible public APIs and an append-only error code.
+- Until release metadata is updated, describe the branch as an unreleased hardening merge.
+- Suggested wording: "MB85RC industry-readiness hardening: adds accepted-prefix write/fill reporting, readback verification helpers, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."

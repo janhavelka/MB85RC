@@ -125,8 +125,8 @@ public:
   // =========================================================================
   
   /// Initialize the driver with configuration.
-  /// Verifies device presence by Device ID when available, or by a safe
-  /// memory-read probe for explicit no-Device-ID variants.
+  /// Verifies device presence by Device ID when available, or by a read-only
+  /// memory presence probe for explicit no-Device-ID variants.
   /// Does not configure or take ownership of the caller-managed I2C bus.
   /// @param config Configuration including transport callbacks
   /// @return Status::Ok() on success, error otherwise

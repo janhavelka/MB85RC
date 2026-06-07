@@ -47,14 +47,14 @@ Copy `include/MB85RC/` and `src/` into your project.
 
 ### ESP-IDF Component
 
-This repository also builds as a pure ESP-IDF component. Add the repo as an
-extra component or dependency, then include `MB85RC/MB85RC.h` and provide
-`Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
-I2C master bus.
+This repository includes pure ESP-IDF component metadata and CI build coverage.
+Add the repo as an extra component or dependency, then include
+`MB85RC/MB85RC.h` and provide `Config::i2cWrite` / `Config::i2cWriteRead`
+callbacks from your project-owned I2C master bus. Local ESP-IDF build
+validation requires `idf.py` on PATH.
 
 The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
-with matching diagnostic coverage. Mutating commands use framework-specific
-confirmation syntax:
+with matching diagnostic coverage. Build it with:
 
 ```bash
 idf.py -C examples/espidf_basic set-target esp32s3 build
@@ -66,6 +66,9 @@ The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 sources or compatibility facades. The command contract covers Device ID reads,
 current-address reads, active-capacity-bounded memory commands, typed demo,
 random benchmark, self-test, and stress diagnostics.
+
+Mutating ESP-IDF CLI commands use explicit `!` confirmation forms such as
+`write!`, `fill!`, `rw_suite!`, and `typed_demo!`.
 
 The ESP-IDF CLI owns its I2C bus and uses blocking console input. That console input can block the example loop before `tick()` runs; this is acceptable for
 the current diagnostic CLI because `tick()` is a no-op for supported FRAM parts.

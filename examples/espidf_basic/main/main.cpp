@@ -80,6 +80,73 @@ esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) 
   return i2c_master_bus_add_device(bus.bus, &dev, out);
 }
 
+esp_err_t transmitReceiveWithManualAddress(NativeBus& bus, uint8_t addr,
+                                           const uint8_t* tx, size_t txLen,
+                                           uint8_t* rx, size_t rxLen,
+                                           uint32_t timeoutMs) {
+  if (tx == nullptr || txLen == 0U || rx == nullptr || rxLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  i2c_device_config_t devCfg = {};
+  devCfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  devCfg.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+  devCfg.scl_speed_hz = bus.freqHz;
+
+  i2c_master_dev_handle_t dev = nullptr;
+  esp_err_t err = i2c_master_bus_add_device(bus.bus, &devCfg, &dev);
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  uint8_t writeAddress = static_cast<uint8_t>(addr << 1);
+  uint8_t readAddress = static_cast<uint8_t>((addr << 1) | 0x01U);
+  i2c_operation_job_t ops[8] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &writeAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = const_cast<uint8_t*>(tx);
+  ops[op].write.total_bytes = txLen;
+  ++op;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &readAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  if (rxLen > 1U) {
+    ops[op].command = I2C_MASTER_CMD_READ;
+    ops[op].read.ack_value = I2C_ACK_VAL;
+    ops[op].read.data = rx;
+    ops[op].read.total_bytes = rxLen - 1U;
+    ++op;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_READ;
+  ops[op].read.ack_value = I2C_NACK_VAL;
+  ops[op].read.data = rx + (rxLen - 1U);
+  ops[op].read.total_bytes = 1U;
+  ++op;
+
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  err = i2c_master_execute_defined_operations(dev, ops, op, timeoutArg(timeoutMs));
+  (void)i2c_master_bus_rm_device(dev);
+  return err;
+}
+
 MB85RC::Status i2cWrite(uint8_t addr, const uint8_t* data, size_t len,
                         uint32_t timeoutMs, void* user) {
   NativeBus* bus = static_cast<NativeBus*>(user);
@@ -104,6 +171,13 @@ MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
   if (bus == nullptr || bus->bus == nullptr) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
   }
+
+  if (addr == 0x7CU && txLen > 0U && rxLen > 0U) {
+    esp_err_t manualErr = transmitReceiveWithManualAddress(*bus, addr, tx, txLen, rx, rxLen,
+                                                           timeoutMs);
+    return mapI2c(manualErr, "I2C manual-address write-read failed");
+  }
+
   i2c_master_dev_handle_t dev = nullptr;
   esp_err_t err = addDevice(*bus, addr, &dev);
   if (err == ESP_OK) {
@@ -259,6 +333,7 @@ void beginDriver() {
   gCfg.i2cUser = &gBus;
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
+  gCfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
   printStatus("begin", gFram.begin(gCfg));
 }
 

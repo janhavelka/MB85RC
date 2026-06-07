@@ -72,7 +72,13 @@ struct Config {
   void* timeUser = nullptr;              ///< User context for timing hook
 
   // === Device Settings ===
-  uint8_t i2cAddress = 0x50;             ///< 0x50-0x57 depending on A2:A1:A0 pins
+  /// Base 7-bit I2C address.
+  ///
+  /// Valid values are `0x50`-`0x57`. For A2/A1/A0 variants this is the strapped
+  /// device address. Small-density variants can use low address bits as memory
+  /// address bits; the driver derives per-transaction addresses from this base
+  /// and the active variant's address model.
+  uint8_t i2cAddress = 0x50;
   uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
   /// Expected runtime variant.
   ///

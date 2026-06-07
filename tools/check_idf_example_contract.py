@@ -83,6 +83,7 @@ def main() -> int:
     ns = runpy.run_path(str(ROOT / "tools" / "check_cli_contract.py"))
     commands = ns.get("MANDATORY_COMMANDS", [])
     components = ns.get("IDF_REQUIRED_COMPONENTS", [])
+    device_id_idf_tokens = ns.get("DEVICE_ID_IDF_TOKENS", [])
     main_path = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
@@ -104,6 +105,9 @@ def main() -> int:
     for token in REQUIRED_CONFIRMATION_TOKENS:
         if token not in text:
             fail(f"confirmation/handler token missing: {token}")
+    for token in device_id_idf_tokens:
+        if token not in text:
+            fail(f"ESP-IDF Device ID manual-address token missing: {token}")
     for cmd in commands:
         if cmd == "?":
             if '"?"' not in text and " / ?" not in text and " | ?" not in text:

@@ -166,8 +166,7 @@ Status MB85RC::begin(const Config& config) {
     uint8_t scratch = 0;
     st = _readMemoryRaw(0, &scratch, 1);
     if (!st.ok()) {
-      return resetAfterFailedBegin(
-          Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+      return resetAfterFailedBegin(st);
     }
     _currentAddressKnown = false;
     _currentAddress = 0;
@@ -175,8 +174,7 @@ Status MB85RC::begin(const Config& config) {
     DeviceId id;
     st = _readDeviceIdRaw(id);
     if (!st.ok()) {
-      return resetAfterFailedBegin(
-          Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail));
+      return resetAfterFailedBegin(st);
     }
     st = _selectVariant(_config.expectedVariant, id);
     if (!st.ok()) {
@@ -258,7 +256,7 @@ Status MB85RC::probe() {
     _currentAddressKnown = false;
     _currentAddress = 0;
     if (!st.ok()) {
-      return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+      return st;
     }
     return Status::Ok();
   }
@@ -266,7 +264,7 @@ Status MB85RC::probe() {
   DeviceId id;
   Status st = _readDeviceIdRaw(id);
   if (!st.ok()) {
-    return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
+    return st;
   }
   return _validateActiveDeviceId(id);
 }

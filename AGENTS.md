@@ -90,8 +90,8 @@ struct Status {
 - Verify Manufacturer ID (0x00A) and Product ID (0x510).
 - 32,768 bytes (256 Kbit), 15-bit addressing (0x0000–0x7FFF).
 - No write delay (FRAM writes are immediate — no EEPROM-style polling).
-- No page boundary limitations — sequential writes auto-increment through the entire array.
-- Address rollover from 0x7FFF to 0x0000.
+- No page boundary limitations — device sequential writes auto-increment through the entire array.
+- The FRAM device protocol can roll over at the physical array end, but public bulk APIs in this driver must reject cross-capacity ranges unless an explicit wrap API is added, documented, and tested.
 - Write protection via hardware WP pin (not software-controlled).
 - Support operations:
   - **Byte Write**: write single byte at specified address
