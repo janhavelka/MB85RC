@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `WriteResult`, `writeDetailed()`, and `fillDetailed()` report requested bytes,
+  transport-accepted prefix length, first failed chunk offset, and completion
+  state for non-atomic bulk write/fill operations.
+- `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`,
+  and `Err::VERIFY_MISMATCH` support explicit readback verification when I2C
+  acceptance is not enough to prove persistence.
+- Native fake-bus coverage for partial write/fill chunk failures, WP-high
+  ACK-without-persistence behavior, and write/fill verify mismatch handling.
+
 ### Changed
 
 - ESP-IDF CLI destructive FRAM workflows now require explicit `!` confirmation

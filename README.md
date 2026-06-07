@@ -154,10 +154,36 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - `Status read(uint32_t addr, uint8_t* buf, size_t len)` - read a contiguous block with chunking
 - `Status readCurrentAddress(uint8_t& out)` - read from the device's current internal address pointer
 - `Status readCurrentAddress(uint8_t* buf, size_t len)` - repeat documented current-address reads into a buffer
-- `Status writeByte(uint32_t addr, uint8_t value)` - write one byte
-- `Status write(uint32_t addr, const uint8_t* data, size_t len)` - write a contiguous block with chunking
-- `Status fill(uint32_t addr, uint8_t value, size_t len)` - fill a region with a constant byte
-- `Status verify(uint32_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - compare FRAM contents against expected bytes
+- `Status writeByte(uint32_t addr, uint8_t value)` - write one byte; success means the I2C transaction was accepted
+- `Status write(uint32_t addr, const uint8_t* data, size_t len)` - write a contiguous block with non-atomic chunking
+- `WriteResult writeDetailed(uint32_t addr, const uint8_t* data, size_t len)` - write and report requested bytes, accepted prefix, and first failed chunk
+- `Status fill(uint32_t addr, uint8_t value, size_t len)` - fill a region with a constant byte using non-atomic chunking
+- `WriteResult fillDetailed(uint32_t addr, uint8_t value, size_t len)` - fill and report requested bytes, accepted prefix, and first failed chunk
+- `Status verify(uint32_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - read back and compare FRAM contents against expected bytes
+- `VerifyDetailedResult verifyDetailed(uint32_t addr, const uint8_t* expected, size_t len)` - verify with requested and verified byte counts
+- `Status writeVerify(uint32_t addr, const uint8_t* data, size_t len, VerifyDetailedResult* out = nullptr)` - write then verify, returning `VERIFY_MISMATCH` on readback mismatch
+- `Status fillVerify(uint32_t addr, uint8_t value, size_t len, VerifyDetailedResult* out = nullptr)` - fill then verify, returning `VERIFY_MISMATCH` on readback mismatch
+
+### Write Acceptance And Verification
+
+FRAM writes are immediate for supported variants. The driver does not add
+EEPROM-style write delays or ACK polling after writes.
+
+`writeByte()`, `write()`, and `fill()` report transport acceptance. A successful
+status means the addressed I2C write transaction, or every chunk in a bulk
+operation, returned `Status::Ok()` from the injected transport. It does not prove
+that bytes persisted when the external `WP` pin is asserted. The device can ACK a
+write while hardware write protection prevents memory from changing, and the core
+driver has no software-visible WP state.
+
+Bulk `write()` and `fill()` calls may be split into multiple I2C chunks. They are
+not atomic: if a later chunk fails, earlier accepted chunks are not rolled back.
+The simple APIs return the first failing `Status`; use `writeDetailed()` or
+`fillDetailed()` when recovery code needs the accepted-prefix length. Their
+`bytesAccepted` field is not committed persistence. Only bytes read back
+successfully by `verify()` or `verifyDetailed()` should be treated as verified.
+For critical writes or fills, use `writeVerify()` / `fillVerify()` or call
+`verify()` after `write()` / `fill()`.
 
 ### Diagnostics
 
@@ -200,6 +226,8 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 ## Notes
 
 - `read()`, `write()`, `fill()`, and `verify()` reject ranges where `address + len > capacityBytes()`; they do not silently wrap bulk operations.
+- `write()` and `fill()` are not atomic across internal chunks. A failed later chunk can leave an accepted prefix in the target range; the driver does not roll back earlier chunks.
+- Successful write/fill status means I2C acceptance, not verified persistence. Use `verify()` for readback confidence, especially when the hardware `WP` pin may be asserted.
 - `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
 - The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior and rejecting cross-capacity reads.
 - Argument validation errors reject null buffers, zero lengths, and out-of-range start addresses before touching the bus or health counters.
@@ -209,6 +237,21 @@ The example transport adapter maps Arduino `Wire` failures to `I2C_*` status cod
 - There is no software block-protect register, OTP lock region, or permanent write lock in this device family.
 - The datasheet software-reset bus sequence is transport-owned by design because the library never drives SDA/SCL directly.
 - Typed storage policy is intentionally kept out of the core driver. If you need fixed-width numeric encoding, use an explicit codec layer such as `examples/common/TypedMemory.h`.
+
+## Production Storage Pattern
+
+For configuration records or other critical data, keep the transaction policy in
+the application layer:
+
+1. Use fixed-size slots or a small journal. Start each record with
+   magic/version/length/sequence/CRC fields and a validity marker that is erased
+   or invalid while the record is being written.
+2. Write the header and payload, with CRC covering the payload and any fields
+   needed to reject torn records.
+3. Read back with `verify()` and reject the update if any byte mismatches.
+4. Mark the record valid last, then verify that marker.
+5. On boot, scan records, validate magic/version/length/CRC and the valid marker,
+   then choose the newest sequence number.
 
 ## Examples
 

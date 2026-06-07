@@ -68,6 +68,39 @@ struct VerifyResult {
   uint8_t actual = 0;             ///< Actual byte read at mismatchOffset
 };
 
+/// @brief Detailed result for logical write/fill operations split into chunks.
+///
+/// `bytesAccepted` counts bytes in chunks for which the injected I2C transport
+/// returned `Status::Ok()`. It is an accepted prefix, not proof that memory
+/// content changed; a hardware WP pin can allow ACK while preventing
+/// persistence. Use verifyDetailed(), writeVerify(), or fillVerify() when
+/// persistence matters.
+struct WriteResult {
+  Status status = Status::Ok();   ///< Final transport/preflight status.
+  uint32_t address = 0;           ///< Requested start address.
+  size_t bytesRequested = 0;      ///< Bytes requested by caller.
+  size_t bytesAccepted = 0;       ///< Prefix accepted by successful I2C chunks.
+  size_t failedChunkOffset = 0;   ///< Offset of first failed chunk, or bytesRequested on success.
+  size_t failedChunkLength = 0;   ///< Length of first failed chunk, or 0 on success.
+  bool complete = false;          ///< True when all requested bytes were accepted.
+};
+
+/// @brief Detailed readback verification result.
+///
+/// `bytesVerified` counts bytes confirmed equal before the first mismatch or
+/// transport failure. A mismatch is reported with `status == Status::Ok()` and
+/// `match == false`; transport/preflight failures return their normal status.
+struct VerifyDetailedResult {
+  Status status = Status::Ok();   ///< Preflight/transport status.
+  uint32_t address = 0;           ///< Requested start address.
+  size_t bytesRequested = 0;      ///< Bytes requested by caller.
+  size_t bytesVerified = 0;       ///< Bytes confirmed equal before failure/mismatch.
+  size_t firstMismatchOffset = 0; ///< First mismatching byte offset.
+  uint8_t expected = 0;           ///< Expected byte at firstMismatchOffset.
+  uint8_t actual = 0;             ///< Actual byte at firstMismatchOffset.
+  bool match = false;             ///< True when all requested bytes matched.
+};
+
 /// @brief MB85RC-family FRAM driver class.
 ///
 /// MB85RC instances are not internally thread-safe. Use one task or provide
@@ -238,6 +271,8 @@ public:
   
   /// Write a single byte to the specified address.
   /// FRAM writes are immediate - no write delay needed.
+  /// Status::Ok() means the I2C write was accepted by the transport, not that
+  /// persistence was verified when external WP may be asserted.
   /// @param address Memory address within the active variant capacity.
   /// @param value Byte to write
   /// @return Status::Ok() on success
@@ -247,18 +282,43 @@ public:
   /// The full range must fit before the active variant's end address.
   /// No page boundary limitations (unlike EEPROM).
   /// FRAM writes are immediate - no write delay needed.
+  /// Large logical writes may be split into I2C chunks and are not atomic:
+  /// a later chunk can fail after earlier chunks were accepted by transport.
+  /// A successful write means the bus transaction was accepted, not that data
+  /// persistence was verified when external WP may be asserted.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
   /// @return Status::Ok() on success
   Status write(uint32_t address, const uint8_t* buf, size_t len);
 
+  /// Write multiple bytes and report the accepted prefix.
+  /// `bytesAccepted` counts bytes in chunks accepted by the transport. It does
+  /// not prove that those bytes persisted when external WP may be asserted.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param buf Data buffer to write
+  /// @param len Number of bytes to write
+  /// @return Detailed accepted-prefix result. `bytesAccepted` is not proof of persistence.
+  WriteResult writeDetailed(uint32_t address, const uint8_t* buf, size_t len);
+
   /// Fill a range of memory with a constant byte value.
+  /// Large logical fills may be split into I2C chunks and are not atomic.
+  /// Status::Ok() means all chunks were accepted by the transport, not that
+  /// persistence was verified when external WP may be asserted.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte
   /// @param len Number of bytes to fill
   /// @return Status::Ok() on success
   Status fill(uint32_t address, uint8_t value, size_t len);
+
+  /// Fill a range and report the accepted prefix.
+  /// `bytesAccepted` counts bytes in chunks accepted by the transport. It does
+  /// not prove that those bytes persisted when external WP may be asserted.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param value Fill byte
+  /// @param len Number of bytes to fill
+  /// @return Detailed accepted-prefix result. `bytesAccepted` is not proof of persistence.
+  WriteResult fillDetailed(uint32_t address, uint8_t value, size_t len);
   
   // =========================================================================
   // Device Information
@@ -297,12 +357,47 @@ public:
   Status readCurrentAddress(uint8_t* buf, size_t len);
 
   /// Compare FRAM contents against an expected buffer.
+  /// Status::Ok() means the readback transactions completed; check out.match
+  /// to determine whether all bytes matched.
   /// @param address Starting memory address within the active variant capacity.
   /// @param expected Expected bytes
   /// @param len Number of bytes to compare
   /// @param out Comparison result
   /// @return Status::Ok() on successful comparison transaction(s)
   Status verify(uint32_t address, const uint8_t* expected, size_t len, VerifyResult& out);
+
+  /// Compare FRAM contents against an expected buffer with byte counts.
+  /// `bytesVerified` counts bytes that matched before the first mismatch or
+  /// transport failure.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param expected Expected bytes
+  /// @param len Number of bytes to compare
+  /// @return Detailed verification result.
+  VerifyDetailedResult verifyDetailed(uint32_t address, const uint8_t* expected, size_t len);
+
+  /// Write and then verify the same bytes by readback.
+  /// Use for writes where transport acceptance is not enough and readback
+  /// confirmation is required. Returns `Err::VERIFY_MISMATCH` when the write
+  /// transport succeeds but readback differs.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param buf Data buffer to write and verify
+  /// @param len Number of bytes to write and verify
+  /// @param verifyOut Optional detailed verification result
+  /// @return Status::Ok() only when write transport succeeds and readback matches.
+  Status writeVerify(uint32_t address, const uint8_t* buf, size_t len,
+                     VerifyDetailedResult* verifyOut = nullptr);
+
+  /// Fill and then verify the same byte value by readback.
+  /// Use for fills where transport acceptance is not enough and readback
+  /// confirmation is required. Returns `Err::VERIFY_MISMATCH` when the fill
+  /// transport succeeds but readback differs.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param value Fill byte to write and verify.
+  /// @param len Number of bytes to fill and verify.
+  /// @param verifyOut Optional detailed verification result.
+  /// @return Status::Ok() only when fill transport succeeds and readback matches.
+  Status fillVerify(uint32_t address, uint8_t value, size_t len,
+                    VerifyDetailedResult* verifyOut = nullptr);
 
   /// Get the legacy MB85RC256V memory size in bytes.
   /// Prefer capacityBytes() for runtime-selected variants.

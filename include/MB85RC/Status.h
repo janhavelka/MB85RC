@@ -17,7 +17,7 @@ enum class Err : uint8_t {
   DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
   DEVICE_ID_MISMATCH,        ///< Device ID does not match expected/active variant
   ADDRESS_OUT_OF_RANGE,      ///< Memory address/range exceeds active variant capacity
-  WRITE_PROTECTED,           ///< Write rejected (WP pin may be high)
+  WRITE_PROTECTED,           ///< Application/transport-reported protection; WP-high writes may still ACK
   BUSY,                      ///< Device is busy or driver is latched OFFLINE until recover()
   IN_PROGRESS,               ///< Operation queued / in progress
 
@@ -25,7 +25,8 @@ enum class Err : uint8_t {
   I2C_NACK_ADDR,             ///< I2C address not acknowledged
   I2C_NACK_DATA,             ///< I2C data byte not acknowledged
   I2C_TIMEOUT,               ///< I2C transaction timeout
-  I2C_BUS                    ///< I2C bus error (arbitration lost, etc.)
+  I2C_BUS,                   ///< I2C bus error (arbitration lost, etc.)
+  VERIFY_MISMATCH            ///< Readback verification did not match expected data
 };
 
 /// @brief Status structure returned by all fallible operations.

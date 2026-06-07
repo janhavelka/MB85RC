@@ -9,8 +9,8 @@ Branch: `hardening/mb85rc-industry-readiness`
 | Phase | Status | Commit | Notes |
 | --- | --- | --- | --- |
 | 00 Kickoff / AGENTS / plan | Complete | `3b1b22f` | Branch created, hardening rules added, final report skeleton started, and Phase 00 checks passed. |
-| 01 Core contracts | Complete | TBD | Copy/move disabled, public contracts documented, guard strengthened, and current-address failure handling tightened. |
-| 02 Partial write + WP persistence | Pending | TBD | Not started. |
+| 01 Core contracts | Complete | `22d4294` | Copy/move disabled, public contracts documented, guard strengthened, and current-address failure handling tightened. |
+| 02 Partial write + WP persistence | Complete | TBD | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
 | 03 ESP-IDF CI and CLI polish | Pending | TBD | Not started. |
 | 04 Docs, examples, hardware validation matrix | Pending | TBD | Not started. |
 | 05 Final verification and release report | Pending | TBD | Not started. |
@@ -64,7 +64,52 @@ Branch: `hardening/mb85rc-industry-readiness`
 | `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
 | `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
 
-### Remaining Concerns
+## Phase 02 Partial Write + WP Persistence
 
-- Prompt 02 must still handle partial multi-chunk write/fill accepted-prefix reporting and WP-high ACK/no-persistence behavior.
-- Pure ESP-IDF CI/build proof, IDF CLI blocking behavior, documentation/hardware validation matrix, and production storage guidance remain later-phase work.
+### API And Core Changes
+
+- Added `WriteResult`, `writeDetailed()`, and `fillDetailed()` so callers can distinguish requested bytes, transport-accepted prefix length, first failed chunk offset/length, and full completion.
+- Added `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`, and append-only `Err::VERIFY_MISMATCH` for explicit readback confidence when I2C acceptance is not enough.
+- Preserved simple `write()` and `fill()` compatibility: they still return the first failing `Status`, with no rollback, no EEPROM-style write delay, and no ACK polling.
+- Updated public Doxygen and README wording to describe `bytesAccepted` as an accepted prefix, not committed or persistent data.
+- Updated example status string maps so `VERIFY_MISMATCH` is not reported as `UNKNOWN`.
+
+### Accepted Prefix Vs Persistence
+
+- `bytesAccepted` means chunks returned `Status::Ok()` from the injected transport. It does not prove memory contents changed.
+- `bytesVerified` means readback matched the expected data before a mismatch or transport failure.
+- WP-high behavior is represented in native tests by a fake backing store mode where writes ACK but memory is unchanged; `verify()`, `verifyDetailed()`, `writeVerify()`, and `fillVerify()` detect the mismatch.
+- The core still does not infer WP state or expose a fake WP-detected status because the device does not provide that signal over I2C.
+
+### Tests Added
+
+- Native tests for single-chunk and multi-chunk `writeDetailed()` / `fillDetailed()` success.
+- Native tests for first, middle, and last chunk failures with exact accepted-prefix and suffix-unchanged assertions.
+- Native tests proving preflight range and overflow failures touch neither bus nor health counters.
+- Native tests for current-address invalidation after failed multi-chunk write/fill operations.
+- Native WP-high simulation tests proving simple write ACK can succeed without persistence, while readback verification reports mismatch.
+- Native tests for `writeVerify()` and `fillVerify()` success and WP-high mismatch failure.
+
+### Phase 02 Verification
+
+| Command | Result |
+| --- | --- |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 92 test cases, 92 succeeded. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
+| `git diff --check` | PASS: no whitespace errors reported. |
+
+### Scope Control
+
+- No CI workflows, IDF example sources, guard tools, or Prompt 03+ implementation files were changed in this phase.
+- Example edits were limited to status-name mapping for the new `VERIFY_MISMATCH` error code.
+
+## Remaining Concerns
+
+- Real hardware WP validation is still required: confirm WP low/open permits writes, WP high can ACK while blocking persistence, reads still work while WP high, and write/readback verification detects the protected state.
+- Pure ESP-IDF CI/build proof, IDF CLI blocking behavior, broader documentation/hardware validation matrix, and final release/version metadata remain later-phase work.

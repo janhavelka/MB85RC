@@ -375,14 +375,27 @@ Status MB85RC::writeByte(uint32_t address, uint8_t value) {
 }
 
 Status MB85RC::write(uint32_t address, const uint8_t* buf, size_t len) {
+  return writeDetailed(address, buf, len).status;
+}
+
+WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t len) {
+  WriteResult result;
+  result.address = address;
+  result.bytesRequested = len;
+
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return result;
   }
   if (buf == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid write buffer");
+    result.status = Status::Error(Err::INVALID_PARAM, "Invalid write buffer");
+    return result;
   }
   if (!_fitsRange(address, len)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Write range exceeds active capacity", address);
+    result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                                  "Write range exceeds active capacity",
+                                  address);
+    return result;
   }
 
   // Break large writes into chunks to stay within I2C buffer limits
@@ -397,23 +410,44 @@ Status MB85RC::write(uint32_t address, const uint8_t* buf, size_t len) {
 
     Status st = _writeMemory(addr, buf + offset, chunk);
     if (!st.ok()) {
-      return st;
+      result.status = st;
+      result.failedChunkOffset = offset;
+      result.failedChunkLength = chunk;
+      return result;
     }
     offset += chunk;
+    result.bytesAccepted = offset;
   }
 
-  return Status::Ok();
+  result.status = Status::Ok();
+  result.failedChunkOffset = result.bytesRequested;
+  result.failedChunkLength = 0;
+  result.complete = true;
+  return result;
 }
 
 Status MB85RC::fill(uint32_t address, uint8_t value, size_t len) {
+  return fillDetailed(address, value, len).status;
+}
+
+WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
+  WriteResult result;
+  result.address = address;
+  result.bytesRequested = len;
+
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return result;
   }
   if (len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Fill length must be > 0");
+    result.status = Status::Error(Err::INVALID_PARAM, "Fill length must be > 0");
+    return result;
   }
   if (!_fitsRange(address, len)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Fill range exceeds active capacity", address);
+    result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                                  "Fill range exceeds active capacity",
+                                  address);
+    return result;
   }
 
   uint8_t chunk[FILL_CHUNK_SIZE];
@@ -431,13 +465,21 @@ Status MB85RC::fill(uint32_t address, uint8_t value, size_t len) {
 
     Status st = _writeMemory(addr, chunk, toWrite);
     if (!st.ok()) {
-      return st;
+      result.status = st;
+      result.failedChunkOffset = offset;
+      result.failedChunkLength = toWrite;
+      return result;
     }
     offset += toWrite;
+    result.bytesAccepted = offset;
     remaining -= toWrite;
   }
 
-  return Status::Ok();
+  result.status = Status::Ok();
+  result.failedChunkOffset = result.bytesRequested;
+  result.failedChunkLength = 0;
+  result.complete = true;
+  return result;
 }
 
 // ===========================================================================
@@ -513,14 +555,37 @@ Status MB85RC::verify(uint32_t address, const uint8_t* expected, size_t len, Ver
   out.expected = 0;
   out.actual = 0;
 
+  VerifyDetailedResult detailed = verifyDetailed(address, expected, len);
+  if (!detailed.status.ok()) {
+    return detailed.status;
+  }
+
+  out.match = detailed.match;
+  out.mismatchOffset = detailed.firstMismatchOffset;
+  out.expected = detailed.expected;
+  out.actual = detailed.actual;
+  return Status::Ok();
+}
+
+VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* expected,
+                                            size_t len) {
+  VerifyDetailedResult result;
+  result.address = address;
+  result.bytesRequested = len;
+
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return result;
   }
   if (expected == nullptr || len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid verify buffer");
+    result.status = Status::Error(Err::INVALID_PARAM, "Invalid verify buffer");
+    return result;
   }
   if (!_fitsRange(address, len)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Verify range exceeds active capacity", address);
+    result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                                  "Verify range exceeds active capacity",
+                                  address);
+    return result;
   }
 
   uint8_t readBuf[cmd::MAX_READ_CHUNK];
@@ -534,23 +599,119 @@ Status MB85RC::verify(uint32_t address, const uint8_t* expected, size_t len, Ver
     const uint32_t chunkAddr = address + static_cast<uint32_t>(offset);
     Status st = _readMemory(chunkAddr, readBuf, chunk);
     if (!st.ok()) {
-      return st;
+      result.status = st;
+      return result;
     }
 
     for (size_t i = 0; i < chunk; ++i) {
       if (readBuf[i] != expected[offset + i]) {
-        out.match = false;
-        out.mismatchOffset = offset + i;
-        out.expected = expected[offset + i];
-        out.actual = readBuf[i];
-        return Status::Ok();
+        result.status = Status::Ok();
+        result.match = false;
+        result.bytesVerified = offset + i;
+        result.firstMismatchOffset = offset + i;
+        result.expected = expected[offset + i];
+        result.actual = readBuf[i];
+        return result;
       }
     }
 
     offset += chunk;
+    result.bytesVerified = offset;
   }
 
-  out.match = true;
+  result.status = Status::Ok();
+  result.match = true;
+  return result;
+}
+
+Status MB85RC::writeVerify(uint32_t address, const uint8_t* buf, size_t len,
+                           VerifyDetailedResult* verifyOut) {
+  WriteResult wr = writeDetailed(address, buf, len);
+  if (!wr.status.ok()) {
+    if (verifyOut != nullptr) {
+      VerifyDetailedResult result;
+      result.status = wr.status;
+      result.address = address;
+      result.bytesRequested = len;
+      *verifyOut = result;
+    }
+    return wr.status;
+  }
+
+  VerifyDetailedResult vr = verifyDetailed(address, buf, len);
+  if (verifyOut != nullptr) {
+    *verifyOut = vr;
+  }
+  if (!vr.status.ok()) {
+    return vr.status;
+  }
+  if (!vr.match) {
+    return Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                         static_cast<int32_t>(vr.firstMismatchOffset));
+  }
+  return Status::Ok();
+}
+
+Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
+                          VerifyDetailedResult* verifyOut) {
+  WriteResult wr = fillDetailed(address, value, len);
+  if (!wr.status.ok()) {
+    if (verifyOut != nullptr) {
+      VerifyDetailedResult result;
+      result.status = wr.status;
+      result.address = address;
+      result.bytesRequested = len;
+      *verifyOut = result;
+    }
+    return wr.status;
+  }
+
+  VerifyDetailedResult result;
+  result.address = address;
+  result.bytesRequested = len;
+
+  uint8_t readBuf[cmd::MAX_READ_CHUNK];
+  size_t offset = 0;
+  while (offset < len) {
+    size_t chunk = len - offset;
+    if (chunk > sizeof(readBuf)) {
+      chunk = sizeof(readBuf);
+    }
+
+    Status st = _readMemory(address + static_cast<uint32_t>(offset), readBuf, chunk);
+    if (!st.ok()) {
+      result.status = st;
+      if (verifyOut != nullptr) {
+        *verifyOut = result;
+      }
+      return st;
+    }
+
+    for (size_t i = 0; i < chunk; ++i) {
+      if (readBuf[i] != value) {
+        result.status = Status::Ok();
+        result.match = false;
+        result.bytesVerified = offset + i;
+        result.firstMismatchOffset = offset + i;
+        result.expected = value;
+        result.actual = readBuf[i];
+        if (verifyOut != nullptr) {
+          *verifyOut = result;
+        }
+        return Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                             static_cast<int32_t>(result.firstMismatchOffset));
+      }
+    }
+
+    offset += chunk;
+    result.bytesVerified = offset;
+  }
+
+  result.status = Status::Ok();
+  result.match = true;
+  if (verifyOut != nullptr) {
+    *verifyOut = result;
+  }
   return Status::Ok();
 }
 

@@ -36,10 +36,12 @@ struct FakeBus {
 
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
+  uint32_t writeErrorOnCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
   bool badDeviceId = false;
   bool deviceIdSupported = true;
+  bool writeProtectHigh = false;
   uint16_t productId = cmd::PRODUCT_ID_MB85RC256V;
   uint32_t memoryBytes = cmd::MEMORY_SIZE_MB85RC256V;
   cmd::AddressModel addressModel = cmd::AddressModel::TWO_BYTE_ADDRESS_PINS;
@@ -118,6 +120,9 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
   if (data == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "invalid fake write args");
   }
+  if (bus->writeErrorOnCall != 0U && bus->writeCalls == bus->writeErrorOnCall) {
+    return bus->writeError;
+  }
   if (bus->writeErrorRemaining > 0) {
     bus->writeErrorRemaining--;
     return bus->writeError;
@@ -129,7 +134,9 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
     recordMemoryAddress(bus, addr, data, addrLen);
     uint32_t memAddr = bus->lastMemoryAddress;
     for (size_t i = addrLen; i < len; ++i) {
-      bus->mem[memAddr % bus->memoryBytes] = data[i];
+      if (!bus->writeProtectHigh) {
+        bus->mem[memAddr % bus->memoryBytes] = data[i];
+      }
       memAddr++;
     }
     bus->currentAddr = memAddr % bus->memoryBytes;
@@ -266,6 +273,148 @@ uint32_t nextRandom(uint32_t& state) {
   state ^= (state >> 17);
   state ^= (state << 5);
   return state;
+}
+
+void assertWriteVerifyFailsWhenWriteProtectHigh(MB85RC::MB85RC& dev, FakeBus& bus) {
+  static constexpr uint32_t ADDR = 0x0220;
+  const uint8_t original[3] = {0x14, 0x25, 0x36};
+  const uint8_t attempted[3] = {0xA1, 0xB2, 0xC3};
+  bus.mem[ADDR] = original[0];
+  bus.mem[ADDR + 1] = original[1];
+  bus.mem[ADDR + 2] = original[2];
+  bus.writeProtectHigh = true;
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+  VerifyDetailedResult verify;
+  Status st = dev.writeVerify(ADDR, attempted, sizeof(attempted), &verify);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::VERIFY_MISMATCH),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_GREATER_THAN_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_GREATER_THAN_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, &bus.mem[ADDR], sizeof(original));
+  TEST_ASSERT_EQUAL_HEX32(ADDR, verify.address);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(attempted), static_cast<uint32_t>(verify.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(verify.bytesVerified));
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(verify.firstMismatchOffset));
+  TEST_ASSERT_EQUAL_HEX8(attempted[0], verify.expected);
+  TEST_ASSERT_EQUAL_HEX8(original[0], verify.actual);
+  TEST_ASSERT_FALSE(verify.match);
+}
+
+void assertWriteVerifySucceedsWhenWriteProtectDisabled(MB85RC::MB85RC& dev, FakeBus& bus) {
+  static constexpr uint32_t ADDR = 0x0230;
+  const uint8_t attempted[4] = {0x4A, 0x5B, 0x6C, 0x7D};
+  bus.writeProtectHigh = false;
+
+  VerifyDetailedResult verify;
+  Status st = dev.writeVerify(ADDR, attempted, sizeof(attempted), &verify);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(attempted, &bus.mem[ADDR], sizeof(attempted));
+  TEST_ASSERT_EQUAL_HEX32(ADDR, verify.address);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(attempted), static_cast<uint32_t>(verify.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(attempted), static_cast<uint32_t>(verify.bytesVerified));
+  TEST_ASSERT_TRUE(verify.match);
+
+  VerifyResult result;
+  st = dev.verify(ADDR, attempted, sizeof(attempted), result);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(result.match);
+}
+
+void setMemoryRange(FakeBus& bus, uint32_t address, size_t len, uint8_t value) {
+  for (size_t i = 0; i < len; ++i) {
+    bus.mem[(address + static_cast<uint32_t>(i)) % bus.memoryBytes] = value;
+  }
+}
+
+void assertMemoryRangeEquals(const FakeBus& bus, uint32_t address, size_t len, uint8_t value) {
+  for (size_t i = 0; i < len; ++i) {
+    TEST_ASSERT_EQUAL_HEX8(value,
+                           bus.mem[(address + static_cast<uint32_t>(i)) % bus.memoryBytes]);
+  }
+}
+
+void assertMemoryMatches(const FakeBus& bus, uint32_t address, const uint8_t* expected,
+                         size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    TEST_ASSERT_EQUAL_HEX8(expected[i],
+                           bus.mem[(address + static_cast<uint32_t>(i)) % bus.memoryBytes]);
+  }
+}
+
+static constexpr uint8_t DETAILED_SENTINEL = 0xEE;
+static constexpr size_t DETAILED_FILL_CHUNK = 64;
+
+void seedDetailedWindow(FakeBus& bus, uint32_t address, size_t len) {
+  setMemoryRange(bus, address - 1U, len + 2U, DETAILED_SENTINEL);
+}
+
+void assertDetailedGuardsUntouched(const FakeBus& bus, uint32_t address, size_t len) {
+  assertMemoryRangeEquals(bus, address - 1U, 1U, DETAILED_SENTINEL);
+  assertMemoryRangeEquals(bus, address + static_cast<uint32_t>(len), 1U, DETAILED_SENTINEL);
+}
+
+void assertDetailedPatternPrefixAndSentinelSuffix(const FakeBus& bus, uint32_t address,
+                                                  const uint8_t* expected, size_t acceptedLen,
+                                                  size_t requestedLen) {
+  assertMemoryMatches(bus, address, expected, acceptedLen);
+  assertMemoryRangeEquals(bus, address + static_cast<uint32_t>(acceptedLen),
+                          requestedLen - acceptedLen, DETAILED_SENTINEL);
+  assertDetailedGuardsUntouched(bus, address, requestedLen);
+}
+
+void assertDetailedFillPrefixAndSentinelSuffix(const FakeBus& bus, uint32_t address,
+                                               uint8_t value, size_t acceptedLen,
+                                               size_t requestedLen) {
+  assertMemoryRangeEquals(bus, address, acceptedLen, value);
+  assertMemoryRangeEquals(bus, address + static_cast<uint32_t>(acceptedLen),
+                          requestedLen - acceptedLen, DETAILED_SENTINEL);
+  assertDetailedGuardsUntouched(bus, address, requestedLen);
+}
+
+void assertWriteResultSuccess(const WriteResult& result, uint32_t address, size_t requestedLen) {
+  TEST_ASSERT_TRUE(result.status.ok());
+  TEST_ASSERT_EQUAL_HEX32(address, result.address);
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(requestedLen),
+                           static_cast<uint32_t>(result.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(requestedLen),
+                           static_cast<uint32_t>(result.bytesAccepted));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(requestedLen),
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkLength));
+  TEST_ASSERT_TRUE(result.complete);
+}
+
+void assertWriteResultFailure(const WriteResult& result, Err expectedCode, uint32_t address,
+                              size_t requestedLen, size_t acceptedLen, size_t failedChunkLen) {
+  TEST_ASSERT_FALSE(result.status.ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expectedCode),
+                          static_cast<uint8_t>(result.status.code));
+  TEST_ASSERT_EQUAL_HEX32(address, result.address);
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(requestedLen),
+                           static_cast<uint32_t>(result.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(acceptedLen),
+                           static_cast<uint32_t>(result.bytesAccepted));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(acceptedLen),
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(failedChunkLen),
+                           static_cast<uint32_t>(result.failedChunkLength));
+  TEST_ASSERT_FALSE(result.complete);
+}
+
+void assertWriteResultPreflightFailure(const WriteResult& result, Err expectedCode,
+                                       uint32_t address, size_t requestedLen) {
+  TEST_ASSERT_FALSE(result.status.ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expectedCode),
+                          static_cast<uint8_t>(result.status.code));
+  TEST_ASSERT_EQUAL_HEX32(address, result.address);
+  TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(requestedLen),
+                           static_cast<uint32_t>(result.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.bytesAccepted));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkLength));
+  TEST_ASSERT_FALSE(result.complete);
 }
 
 }  // namespace
@@ -1042,6 +1191,367 @@ void test_write_read_large_transfer_uses_chunking() {
   TEST_ASSERT_TRUE(dev.read(0x0100, readBuf, sizeof(readBuf)).ok());
   TEST_ASSERT_EQUAL_UINT32(readsBefore + 2u, bus.readCalls);
   TEST_ASSERT_EQUAL_UINT8_ARRAY(writeBuf, readBuf, sizeof(writeBuf));
+}
+
+void test_write_detailed_reports_single_and_multi_chunk_success() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint8_t small[4] = {0x11, 0x22, 0x33, 0x44};
+  uint32_t writesBefore = bus.writeCalls;
+  WriteResult wr = dev.writeDetailed(0x0200, small, sizeof(small));
+  TEST_ASSERT_TRUE(wr.status.ok());
+  TEST_ASSERT_TRUE(wr.complete);
+  TEST_ASSERT_EQUAL_HEX32(0x0200, wr.address);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(small), static_cast<uint32_t>(wr.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(small), static_cast<uint32_t>(wr.bytesAccepted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(small), static_cast<uint32_t>(wr.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(wr.failedChunkLength));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 1U, bus.writeCalls);
+  assertMemoryMatches(bus, 0x0200, small, sizeof(small));
+
+  uint8_t large[300] = {};
+  for (size_t i = 0; i < sizeof(large); ++i) {
+    large[i] = static_cast<uint8_t>(i ^ 0x5AU);
+  }
+
+  writesBefore = bus.writeCalls;
+  wr = dev.writeDetailed(0x0300, large, sizeof(large));
+  TEST_ASSERT_TRUE(wr.status.ok());
+  TEST_ASSERT_TRUE(wr.complete);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(large), static_cast<uint32_t>(wr.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(large), static_cast<uint32_t>(wr.bytesAccepted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(large), static_cast<uint32_t>(wr.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(wr.failedChunkLength));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 3U, bus.writeCalls);
+  assertMemoryMatches(bus, 0x0300, large, sizeof(large));
+}
+
+void test_fill_detailed_reports_single_and_multi_chunk_success() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t SMALL_ADDR = 0x0350;
+  static constexpr size_t SMALL_LEN = 19U;
+  static constexpr uint8_t SMALL_VALUE = 0x5C;
+  seedDetailedWindow(bus, SMALL_ADDR, SMALL_LEN);
+  uint32_t writesBefore = bus.writeCalls;
+  WriteResult wr = dev.fillDetailed(SMALL_ADDR, SMALL_VALUE, SMALL_LEN);
+  assertWriteResultSuccess(wr, SMALL_ADDR, SMALL_LEN);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 1U, bus.writeCalls);
+  assertMemoryRangeEquals(bus, SMALL_ADDR, SMALL_LEN, SMALL_VALUE);
+  assertDetailedGuardsUntouched(bus, SMALL_ADDR, SMALL_LEN);
+
+  static constexpr uint32_t LARGE_ADDR = 0x0380;
+  static constexpr size_t LARGE_LEN = (DETAILED_FILL_CHUNK * 2U) + 7U;
+  static constexpr uint8_t LARGE_VALUE = 0x6D;
+  seedDetailedWindow(bus, LARGE_ADDR, LARGE_LEN);
+  writesBefore = bus.writeCalls;
+  wr = dev.fillDetailed(LARGE_ADDR, LARGE_VALUE, LARGE_LEN);
+  assertWriteResultSuccess(wr, LARGE_ADDR, LARGE_LEN);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 3U, bus.writeCalls);
+  assertMemoryRangeEquals(bus, LARGE_ADDR, LARGE_LEN, LARGE_VALUE);
+  assertDetailedGuardsUntouched(bus, LARGE_ADDR, LARGE_LEN);
+}
+
+void test_write_detailed_reports_failed_chunk_and_accepted_prefix() {
+  static constexpr uint32_t ADDR = 0x0400;
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(i + 1U);
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, sizeof(data));
+    bus.writeError = Status::Error(Err::I2C_NACK_DATA, "forced first chunk nack", -31);
+    bus.writeErrorOnCall = bus.writeCalls + 1U;
+
+    WriteResult wr = dev.writeDetailed(ADDR, data, sizeof(data));
+    assertWriteResultFailure(wr, Err::I2C_NACK_DATA, ADDR, sizeof(data), 0U,
+                             cmd::MAX_WRITE_CHUNK);
+    assertDetailedPatternPrefixAndSentinelSuffix(bus, ADDR, data, 0U, sizeof(data));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, sizeof(data));
+    bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced middle chunk timeout", -32);
+    bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+    WriteResult wr = dev.writeDetailed(ADDR, data, sizeof(data));
+    assertWriteResultFailure(wr, Err::I2C_TIMEOUT, ADDR, sizeof(data),
+                             cmd::MAX_WRITE_CHUNK, cmd::MAX_WRITE_CHUNK);
+    assertDetailedPatternPrefixAndSentinelSuffix(bus, ADDR, data, cmd::MAX_WRITE_CHUNK,
+                                                 sizeof(data));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, sizeof(data));
+    bus.writeError = Status::Error(Err::I2C_BUS, "forced last chunk bus error", -33);
+    bus.writeErrorOnCall = bus.writeCalls + 3U;
+
+    WriteResult wr = dev.writeDetailed(ADDR, data, sizeof(data));
+    assertWriteResultFailure(wr, Err::I2C_BUS, ADDR, sizeof(data), 252U, 48U);
+    assertDetailedPatternPrefixAndSentinelSuffix(bus, ADDR, data, 252U, sizeof(data));
+  }
+}
+
+void test_fill_detailed_reports_failed_chunk_and_accepted_prefix() {
+  static constexpr uint32_t ADDR = 0x0600;
+  static constexpr size_t LEN = 160U;
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, LEN);
+    bus.writeError = Status::Error(Err::I2C_NACK_DATA, "forced fill first chunk nack", -41);
+    bus.writeErrorOnCall = bus.writeCalls + 1U;
+
+    WriteResult wr = dev.fillDetailed(ADDR, 0x5A, LEN);
+    assertWriteResultFailure(wr, Err::I2C_NACK_DATA, ADDR, LEN, 0U,
+                             DETAILED_FILL_CHUNK);
+    assertDetailedFillPrefixAndSentinelSuffix(bus, ADDR, 0x5A, 0U, LEN);
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, LEN);
+    bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced fill middle timeout", -42);
+    bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+    WriteResult wr = dev.fillDetailed(ADDR, 0x5A, LEN);
+    assertWriteResultFailure(wr, Err::I2C_TIMEOUT, ADDR, LEN, DETAILED_FILL_CHUNK,
+                             DETAILED_FILL_CHUNK);
+    assertDetailedFillPrefixAndSentinelSuffix(bus, ADDR, 0x5A, DETAILED_FILL_CHUNK, LEN);
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+    seedDetailedWindow(bus, ADDR, LEN);
+    bus.writeError = Status::Error(Err::I2C_BUS, "forced fill last bus error", -43);
+    bus.writeErrorOnCall = bus.writeCalls + 3U;
+
+    WriteResult wr = dev.fillDetailed(ADDR, 0x5A, LEN);
+    assertWriteResultFailure(wr, Err::I2C_BUS, ADDR, LEN, 128U, 32U);
+    assertDetailedFillPrefixAndSentinelSuffix(bus, ADDR, 0x5A, 128U, LEN);
+  }
+}
+
+void test_detailed_write_fill_preflight_rejects_without_bus_or_health() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t failuresBefore = dev.totalFailures();
+  const uint32_t invalidAddress = cmd::MAX_MEM_ADDRESS_MB85RC256V + 1UL;
+  const uint32_t nearEnd = cmd::MAX_MEM_ADDRESS_MB85RC256V - 1UL;
+  const size_t overflowLen = static_cast<size_t>(std::numeric_limits<uint32_t>::max());
+  uint8_t value = 0xA5;
+
+  WriteResult wr = dev.writeDetailed(invalidAddress, &value, 1U);
+  assertWriteResultPreflightFailure(wr, Err::ADDRESS_OUT_OF_RANGE, invalidAddress, 1U);
+
+  wr = dev.fillDetailed(invalidAddress, 0x00, 1U);
+  assertWriteResultPreflightFailure(wr, Err::ADDRESS_OUT_OF_RANGE, invalidAddress, 1U);
+
+  wr = dev.writeDetailed(nearEnd, &value, overflowLen);
+  assertWriteResultPreflightFailure(wr, Err::ADDRESS_OUT_OF_RANGE, nearEnd, overflowLen);
+
+  wr = dev.fillDetailed(nearEnd, 0x00, overflowLen);
+  assertWriteResultPreflightFailure(wr, Err::ADDRESS_OUT_OF_RANGE, nearEnd, overflowLen);
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_write_protect_ack_does_not_prove_persistence() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0800;
+  const uint8_t original[3] = {0x10, 0x20, 0x30};
+  const uint8_t attempted[3] = {0xA0, 0xB0, 0xC0};
+  for (size_t i = 0; i < sizeof(original); ++i) {
+    bus.mem[ADDR + i] = original[i];
+  }
+
+  bus.writeProtectHigh = true;
+  Status st = dev.write(ADDR, attempted, sizeof(attempted));
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, &bus.mem[ADDR], sizeof(original));
+
+  VerifyResult result;
+  st = dev.verify(ADDR, attempted, sizeof(attempted), result);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(result.match);
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.mismatchOffset));
+  TEST_ASSERT_EQUAL_HEX8(attempted[0], result.expected);
+  TEST_ASSERT_EQUAL_HEX8(original[0], result.actual);
+
+  VerifyDetailedResult detailed = dev.verifyDetailed(ADDR, attempted, sizeof(attempted));
+  TEST_ASSERT_TRUE(detailed.status.ok());
+  TEST_ASSERT_FALSE(detailed.match);
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.bytesVerified));
+}
+
+void test_write_verify_success_and_wp_high_failure() {
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    const uint8_t data[4] = {0x44, 0x55, 0x66, 0x77};
+    VerifyDetailedResult detailed;
+    Status st = dev.writeVerify(0x0900, data, sizeof(data), &detailed);
+    TEST_ASSERT_TRUE(st.ok());
+    TEST_ASSERT_TRUE(detailed.status.ok());
+    TEST_ASSERT_TRUE(detailed.match);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(data), static_cast<uint32_t>(detailed.bytesVerified));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(data, &bus.mem[0x0900], sizeof(data));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    const uint8_t original[3] = {0x01, 0x02, 0x03};
+    const uint8_t attempted[3] = {0x91, 0x92, 0x93};
+    for (size_t i = 0; i < sizeof(original); ++i) {
+      bus.mem[0x0910 + i] = original[i];
+    }
+    bus.writeProtectHigh = true;
+
+    VerifyDetailedResult detailed;
+    Status st = dev.writeVerify(0x0910, attempted, sizeof(attempted), &detailed);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::VERIFY_MISMATCH),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_TRUE(detailed.status.ok());
+    TEST_ASSERT_FALSE(detailed.match);
+    TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.firstMismatchOffset));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(original, &bus.mem[0x0910], sizeof(original));
+  }
+}
+
+void test_fill_verify_success_and_wp_high_failure() {
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    VerifyDetailedResult detailed;
+    Status st = dev.fillVerify(0x0940, 0x6D, 9, &detailed);
+    TEST_ASSERT_TRUE(st.ok());
+    TEST_ASSERT_TRUE(detailed.status.ok());
+    TEST_ASSERT_TRUE(detailed.match);
+    TEST_ASSERT_EQUAL_UINT32(9U, static_cast<uint32_t>(detailed.bytesVerified));
+    assertMemoryRangeEquals(bus, 0x0940, 9, 0x6D);
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    setMemoryRange(bus, 0x0960, 5, 0x11);
+    bus.writeProtectHigh = true;
+
+    VerifyDetailedResult detailed;
+    Status st = dev.fillVerify(0x0960, 0x22, 5, &detailed);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::VERIFY_MISMATCH),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_TRUE(detailed.status.ok());
+    TEST_ASSERT_FALSE(detailed.match);
+    TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.firstMismatchOffset));
+    TEST_ASSERT_EQUAL_HEX8(0x22, detailed.expected);
+    TEST_ASSERT_EQUAL_HEX8(0x11, detailed.actual);
+    assertMemoryRangeEquals(bus, 0x0960, 5, 0x11);
+  }
+}
+
+void test_failed_multichunk_write_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(0x80U + i);
+  }
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced multichunk timeout", -51);
+  bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+  WriteResult wr = dev.writeDetailed(0x0A00, data, sizeof(data));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(wr.status.code));
+  TEST_ASSERT_EQUAL_UINT32(cmd::MAX_WRITE_CHUNK,
+                           static_cast<uint32_t>(wr.bytesAccepted));
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  uint8_t value = 0;
+  const uint32_t readsBefore = bus.readCalls;
+  Status st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+}
+
+void test_failed_multichunk_fill_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  bus.writeError = Status::Error(Err::I2C_BUS, "forced fill multichunk bus error", -52);
+  bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+  static constexpr uint32_t ADDR = 0x0B00;
+  static constexpr size_t LEN = (DETAILED_FILL_CHUNK * 2U) + 1U;
+  WriteResult wr = dev.fillDetailed(ADDR, 0xB8, LEN);
+  assertWriteResultFailure(wr, Err::I2C_BUS, ADDR, LEN, DETAILED_FILL_CHUNK,
+                           DETAILED_FILL_CHUNK);
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  uint8_t value = 0;
+  const uint32_t readsBefore = bus.readCalls;
+  Status st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
 }
 
 void test_write_rejects_cross_end_of_memory() {
@@ -1920,6 +2430,54 @@ void test_verify_reports_match_and_first_mismatch() {
   TEST_ASSERT_EQUAL_HEX8(0x11, result.actual);
 }
 
+void test_write_ack_ok_under_wp_high_but_verify_reports_mismatch() {
+  FakeBus bus;
+  static constexpr uint32_t ADDR = 0x0210;
+  const uint8_t original[4] = {0x10, 0x20, 0x30, 0x40};
+  const uint8_t attempted[4] = {0xA5, 0x5A, 0xC3, 0x3C};
+  bus.mem[ADDR] = original[0];
+  bus.mem[ADDR + 1] = original[1];
+  bus.mem[ADDR + 2] = original[2];
+  bus.mem[ADDR + 3] = original[3];
+  bus.writeProtectHigh = true;
+
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t writesBefore = bus.writeCalls;
+  Status st = dev.write(ADDR, attempted, sizeof(attempted));
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OK), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 1u, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, &bus.mem[ADDR], sizeof(original));
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalSuccess());
+
+  VerifyResult result;
+  st = dev.verify(ADDR, attempted, sizeof(attempted), result);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(result.match);
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(result.mismatchOffset));
+  TEST_ASSERT_EQUAL_HEX8(attempted[0], result.expected);
+  TEST_ASSERT_EQUAL_HEX8(original[0], result.actual);
+}
+
+void test_write_verify_fails_when_wp_high_leaves_backing_store_unchanged() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  assertWriteVerifyFailsWhenWriteProtectHigh(dev, bus);
+}
+
+void test_write_verify_succeeds_when_wp_disabled() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  assertWriteVerifySucceedsWhenWriteProtectDisabled(dev, bus);
+}
+
 void test_verify_rejects_invalid_args() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -2217,6 +2775,13 @@ int main() {
   RUN_TEST(test_write_read_single_byte);
   RUN_TEST(test_write_read_multi_byte);
   RUN_TEST(test_write_read_large_transfer_uses_chunking);
+  RUN_TEST(test_write_detailed_reports_single_and_multi_chunk_success);
+  RUN_TEST(test_fill_detailed_reports_single_and_multi_chunk_success);
+  RUN_TEST(test_write_detailed_reports_failed_chunk_and_accepted_prefix);
+  RUN_TEST(test_fill_detailed_reports_failed_chunk_and_accepted_prefix);
+  RUN_TEST(test_detailed_write_fill_preflight_rejects_without_bus_or_health);
+  RUN_TEST(test_failed_multichunk_write_invalidates_current_address_tracking);
+  RUN_TEST(test_failed_multichunk_fill_invalidates_current_address_tracking);
   RUN_TEST(test_write_rejects_invalid_address);
   RUN_TEST(test_read_rejects_invalid_address);
   RUN_TEST(test_memory_operations_reject_invalid_args_without_bus_or_health);
@@ -2252,6 +2817,12 @@ int main() {
   RUN_TEST(test_1mt_current_address_uses_dynamic_i2c_address_and_32bit_range);
   RUN_TEST(test_no_device_id_variant_probe_recover_and_id_access);
   RUN_TEST(test_verify_reports_match_and_first_mismatch);
+  RUN_TEST(test_write_ack_ok_under_wp_high_but_verify_reports_mismatch);
+  RUN_TEST(test_write_protect_ack_does_not_prove_persistence);
+  RUN_TEST(test_write_verify_fails_when_wp_high_leaves_backing_store_unchanged);
+  RUN_TEST(test_write_verify_succeeds_when_wp_disabled);
+  RUN_TEST(test_write_verify_success_and_wp_high_failure);
+  RUN_TEST(test_fill_verify_success_and_wp_high_failure);
   RUN_TEST(test_verify_rejects_invalid_args);
   RUN_TEST(test_random_access_write_read_verify_sequence);
   RUN_TEST(test_typed_memory_round_trips_fixed_width_values);

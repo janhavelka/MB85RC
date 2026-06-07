@@ -88,6 +88,7 @@ const char* errToStr(MB85RC::Err err) {
     case Err::I2C_NACK_DATA:        return "I2C_NACK_DATA";
     case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
     case Err::I2C_BUS:              return "I2C_BUS";
+    case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
     default:                        return "UNKNOWN";
   }
 }
