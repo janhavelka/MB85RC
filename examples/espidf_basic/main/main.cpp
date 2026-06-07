@@ -1,6 +1,10 @@
 /**
  * @file main.cpp
- * @brief Native ESP-IDF bring-up CLI for MB85RC-family FRAM devices.
+ * @brief Native ESP-IDF diagnostic bring-up CLI for MB85RC-family FRAM devices.
+ *
+ * This example owns its I2C master bus and uses blocking console input. It is a
+ * diagnostic bring-up tool, not a production shared-bus manager or scheduler
+ * template.
  */
 
 #include <ctype.h>
@@ -61,6 +65,9 @@ MB85RC::Status mapI2c(esp_err_t err, const char* msg) {
   }
   if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
     return MB85RC::Status::Error(MB85RC::Err::I2C_NACK_ADDR, msg, err);
+  }
+  if (err == ESP_FAIL) {
+    return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
   }
   return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
 }
@@ -265,10 +272,14 @@ void printHelp() {
   puts("  current / cur [len] | id | idraw | variants | size");
   puts("  drv | iface_reset | probe | recover | verbose [0|1]");
   puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
-  puts("  stress_mix [N] | randbench [N] | typed_demo");
+  puts("  stress_mix [N] | randbench [N] | typed_demo | typed_demo!");
 }
 
 void scanBus() {
+  if (gBus.bus == nullptr) {
+    puts("I2C scan: bus not initialized");
+    return;
+  }
   puts("I2C scan:");
   for (uint8_t addr = 0x08U; addr <= 0x77U; ++addr) {
     if (i2c_master_probe(gBus.bus, addr, timeoutArg(I2C_TIMEOUT_MS)) == ESP_OK) {
@@ -901,6 +912,8 @@ extern "C" void app_main(void) {
   setvbuf(stdin, nullptr, _IONBF, 0);
   setvbuf(stdout, nullptr, _IONBF, 0);
   puts("\nMB85RC native ESP-IDF CLI");
+  puts("Diagnostic-only example: owns the I2C bus and blocks on console input.");
+  puts("Production systems should serialize shared-bus access in their own bus manager.");
   if (!initBus()) {
     puts("I2C init failed");
   }
@@ -909,6 +922,8 @@ extern "C" void app_main(void) {
   char line[LINE_LEN] = {};
   while (true) {
     printf("> ");
+    // Blocking console input is acceptable here because tick() is a no-op for
+    // the supported FRAM parts. Do not copy this loop as a scheduler template.
     if (fgets(line, sizeof(line), stdin) != nullptr) {
       handleCommand(line);
     }

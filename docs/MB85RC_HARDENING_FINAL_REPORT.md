@@ -10,8 +10,8 @@ Branch: `hardening/mb85rc-industry-readiness`
 | --- | --- | --- | --- |
 | 00 Kickoff / AGENTS / plan | Complete | `3b1b22f` | Branch created, hardening rules added, final report skeleton started, and Phase 00 checks passed. |
 | 01 Core contracts | Complete | `22d4294` | Copy/move disabled, public contracts documented, guard strengthened, and current-address failure handling tightened. |
-| 02 Partial write + WP persistence | Complete | TBD | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
-| 03 ESP-IDF CI and CLI polish | Pending | TBD | Not started. |
+| 02 Partial write + WP persistence | Complete | `b89bc82` | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
+| 03 ESP-IDF CI and CLI polish | Complete | TBD | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
 | 04 Docs, examples, hardware validation matrix | Pending | TBD | Not started. |
 | 05 Final verification and release report | Pending | TBD | Not started. |
 
@@ -109,7 +109,45 @@ Branch: `hardening/mb85rc-industry-readiness`
 - No CI workflows, IDF example sources, guard tools, or Prompt 03+ implementation files were changed in this phase.
 - Example edits were limited to status-name mapping for the new `VERIFY_MISMATCH` error code.
 
+## Phase 03 ESP-IDF CI And CLI Polish
+
+### CI And Guard Changes
+
+- Added a dedicated GitHub Actions `esp-idf-build` job using `espressif/idf:release-v6.0`.
+- The new job records `idf.py --version` and builds `examples/espidf_basic` for `esp32s3` and `esp32s2` with `idf.py -C examples/espidf_basic set-target <target> build`.
+- Added direct CI invocation of `python tools/check_idf_example_contract.py`; CI no longer relies only on the indirect call through `check_cli_contract.py`.
+- Strengthened `tools/check_idf_example_contract.py` so it scans the IDF example source/CMake tree for Arduino compatibility tokens, rejects broad main-component include paths, verifies CI contains the IDF build commands, and verifies README IDF validation/diagnostic wording.
+
+### IDF Example Changes
+
+- Narrowed `examples/espidf_basic/main/CMakeLists.txt` to `INCLUDE_DIRS "."`; the public `MB85RC` include path now comes from the `MB85RC` component dependency.
+- Kept the IDF CLI as a diagnostic-only blocking console instead of adding a task/mutex framework in this phase.
+- Added IDF CLI startup text and README wording that the example owns its I2C bus, console input can block before `tick()`, and production systems must serialize shared-bus access in their own transport or bus manager.
+- Added a null-bus guard to `scanBus()` so a failed `initBus()` does not call `i2c_master_probe()` with a null bus handle.
+- Updated IDF CLI help to include the confirmed destructive `typed_demo!` command form.
+- Left transport callbacks single-task and diagnostic-owned; no production shared-bus locking is claimed.
+
+### Phase 03 Verification
+
+| Command | Result |
+| --- | --- |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 92 test cases, 92 succeeded. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `idf.py --version` | UNAVAILABLE: PowerShell reported `idf.py : The term 'idf.py' is not recognized as the name of a cmdlet, function, script file, or operable program.` |
+| `idf.py -C examples/espidf_basic set-target esp32s3 build` | SKIPPED locally because `idf.py` is unavailable; CI is expected to run this command. |
+| `idf.py -C examples/espidf_basic set-target esp32s2 build` | SKIPPED locally because `idf.py` is unavailable; CI is expected to run this command. |
+
+### Phase 03 Remaining Concerns
+
+- Pure ESP-IDF builds are now represented in CI, but local IDF build proof is still pending until ESP-IDF is activated on the local PATH or CI results are reviewed.
+- The IDF CLI remains a diagnostic bring-up tool. It is not a production scheduler or shared-bus manager template.
+
 ## Remaining Concerns
 
 - Real hardware WP validation is still required: confirm WP low/open permits writes, WP high can ACK while blocking persistence, reads still work while WP high, and write/readback verification detects the protected state.
-- Pure ESP-IDF CI/build proof, IDF CLI blocking behavior, broader documentation/hardware validation matrix, and final release/version metadata remain later-phase work.
+- Broader documentation/hardware validation matrix and final release/version metadata remain later-phase work.

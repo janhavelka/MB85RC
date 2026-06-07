@@ -39,13 +39,12 @@ extra component or dependency, then include `MB85RC/MB85RC.h` and provide
 `Config::i2cWrite` / `Config::i2cWriteRead` callbacks from your project-owned
 I2C master bus.
 
-The ESP-IDF bring-up CLI is implemented as a native IDF example with the same
-command contract as the Arduino CLI:
+The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
+with the same command contract as the Arduino CLI:
 
 ```bash
-cd examples/espidf_basic
-idf.py set-target esp32s3
-idf.py build
+idf.py -C examples/espidf_basic set-target esp32s3 build
+idf.py -C examples/espidf_basic set-target esp32s2 build
 ```
 
 The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
@@ -53,6 +52,12 @@ The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 sources or compatibility facades. The command contract covers Device ID reads,
 current-address reads, active-capacity-bounded memory commands, typed demo,
 random benchmark, self-test, and stress diagnostics.
+
+The ESP-IDF CLI owns its I2C bus and uses blocking console input. That console input can block the example loop before `tick()` runs; this is acceptable for
+the current diagnostic CLI because `tick()` is a no-op for supported FRAM parts.
+Production systems must serialize shared-bus access in their injected transport
+or application bus manager and should call `tick()` from their own scheduler
+cadence if future devices need periodic work.
 
 Validation status: command parity is checked by repo-local contract scripts.
 Hardware smoke tests are still pending until target devices are available.
@@ -267,8 +272,9 @@ the application layer:
   - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
 
 - `examples/espidf_basic/`
-  - Native ESP-IDF build of the bring-up CLI command contract.
+  - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.
   - Uses `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
+  - Owns its example I2C bus and blocks on console input; production systems must serialize shared-bus access externally.
   - Preserves current-address, Device ID, raw ID, active-capacity, stress, self-test, benchmark, and typed-demo command coverage.
   - Requires explicit `!` confirmation forms before changing FRAM contents:
     `write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`, `stress_mix!`,
@@ -335,8 +341,8 @@ python -m platformio run -e esp32s3dev
 python -m platformio run -e esp32s2dev
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
-cd examples/espidf_basic
-idf.py build
+idf.py -C examples/espidf_basic set-target esp32s3 build
+idf.py -C examples/espidf_basic set-target esp32s2 build
 doxygen Doxyfile
 ```
 
