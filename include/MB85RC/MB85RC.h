@@ -69,8 +69,24 @@ struct VerifyResult {
 };
 
 /// @brief MB85RC-family FRAM driver class.
+///
+/// MB85RC instances are not internally thread-safe. Use one task or provide
+/// external serialization around all public methods that can touch driver state
+/// or I2C. APIs that perform I2C are not ISR-safe because they can call
+/// transport callbacks and may block until the transport timeout. Transport
+/// callbacks must not recursively call back into the same MB85RC instance.
+///
+/// The core driver does not own the I2C bus: bus initialization, locking,
+/// timeout policy, retry policy, and recovery policy belong to the injected
+/// transport callbacks or the application bus manager.
 class MB85RC {
 public:
+  MB85RC() = default;
+  MB85RC(const MB85RC&) = delete;
+  MB85RC& operator=(const MB85RC&) = delete;
+  MB85RC(MB85RC&&) = delete;
+  MB85RC& operator=(MB85RC&&) = delete;
+
   // =========================================================================
   // Lifecycle
   // =========================================================================
@@ -78,6 +94,7 @@ public:
   /// Initialize the driver with configuration.
   /// Verifies device presence by Device ID when available, or by a safe
   /// memory-read probe for explicit no-Device-ID variants.
+  /// Does not configure or take ownership of the caller-managed I2C bus.
   /// @param config Configuration including transport callbacks
   /// @return Status::Ok() on success, error otherwise
   Status begin(const Config& config);
@@ -88,6 +105,7 @@ public:
   void tick(uint32_t nowMs);
   
   /// Shutdown the driver and release resources.
+  /// Does not deinitialize or release the caller-managed I2C bus.
   void end();
   
   // =========================================================================
@@ -95,6 +113,9 @@ public:
   // =========================================================================
   
   /// Check if device is present on the bus (no health tracking).
+  /// Diagnostic probes do not establish a safe current-address-read starting
+  /// point; explicit no-Device-ID probes conservatively clear cached
+  /// current-address state because they use a raw memory read.
   /// @return Status::Ok() if device responds, error otherwise
   Status probe();
   
@@ -257,13 +278,19 @@ public:
   Status readDeviceIdRaw(DeviceIdRaw& raw);
 
   /// Read the byte at the device's current internal address pointer.
-  /// The pointer is undefined after power-on until a memory read/write succeeds.
+  /// The pointer is undefined after power-on and only safe after a known
+  /// address-setting transaction, such as a successful addressed memory
+  /// read/write by this instance. Failed transactions and recovery paths
+  /// conservatively invalidate cached current-address state.
   /// @param value Output byte
   /// @return Status::Ok() on success
   Status readCurrentAddress(uint8_t& value);
 
   /// Read multiple bytes using repeated documented current-address-read operations.
-  /// The pointer is undefined after power-on until a memory read/write succeeds.
+  /// The pointer is undefined after power-on and only safe after a known
+  /// address-setting transaction, such as a successful addressed memory
+  /// read/write by this instance. Failed transactions and recovery paths
+  /// conservatively invalidate cached current-address state.
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success

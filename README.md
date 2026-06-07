@@ -270,12 +270,15 @@ typed_demo!               # Confirmed explicit typed value storage demo
 
 ## Behavioral Contracts
 
-1. Threading model: single-threaded by default; not thread-safe.
-2. Timing model: `tick()` is bounded and currently a no-op; public I2C operations are blocking.
-3. Resource ownership: bus, pins, and timeout policy remain application-owned via `Config`.
-4. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
-5. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
-6. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
+1. Concurrency: `MB85RC` instances are not internally thread-safe. Use one task, or provide external serialization around all public methods that can touch driver state or I2C.
+2. ISR safety: public APIs are not ISR-safe because they can call I2C transport callbacks and may block until the transport timeout.
+3. Transport non-recursion: injected transport callbacks must not recursively call back into the same `MB85RC` instance.
+4. Timing model: `tick()` is bounded and currently a no-op; public I2C operations are blocking.
+5. Shared-bus ownership: bus, pins, locking, timeout policy, retry policy, and recovery policy remain application-owned via `Config` and the injected transport. The core never initializes or owns `Wire`, ESP-IDF I2C handles, pins, or a global bus.
+6. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
+7. Current-address reads: use `readCurrentAddress()` only after a known address-setting transaction, such as a successful addressed `read()`, `readByte()`, `write()`, `writeByte()`, or `fill()` by the same instance. Current-address state is undefined after power-up and is conservatively invalidated after failed I2C memory/current-address transactions and `recover()`. Raw diagnostics such as `probe()` are not address-setting contracts and may disturb the device pointer; use an addressed read after them if current-address state matters.
+8. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
+9. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
 
 ## Validation
 

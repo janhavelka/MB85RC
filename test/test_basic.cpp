@@ -4,6 +4,7 @@
 #include <unity.h>
 
 #include <limits>
+#include <type_traits>
 
 #include "Arduino.h"
 #include "Wire.h"
@@ -16,6 +17,15 @@ TwoWire Wire;
 #include "common/TypedMemory.h"
 
 using namespace MB85RC;
+
+static_assert(!std::is_copy_constructible_v<::MB85RC::MB85RC>,
+              "MB85RC driver instances must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<::MB85RC::MB85RC>,
+              "MB85RC driver instances must not be copy assignable");
+static_assert(!std::is_move_constructible_v<::MB85RC::MB85RC>,
+              "MB85RC driver instances must not be move constructible");
+static_assert(!std::is_move_assignable_v<::MB85RC::MB85RC>,
+              "MB85RC driver instances must not be move assignable");
 
 namespace {
 
@@ -1081,9 +1091,13 @@ void test_memory_operations_reject_invalid_args_without_bus_or_health() {
   uint8_t value = 0;
   Status st = dev.read(0x0000, nullptr, 1);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = dev.read(0x0000, nullptr, 0);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   st = dev.read(0x0000, &value, 0);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   st = dev.write(0x0000, nullptr, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = dev.write(0x0000, nullptr, 0);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   st = dev.write(0x0000, &value, 0);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
@@ -1157,6 +1171,107 @@ void test_read_rejects_cross_end_of_memory() {
   TEST_ASSERT_TRUE(dev.read(0x7FFE, exact, sizeof(exact)).ok());
   TEST_ASSERT_EQUAL_HEX8(0x11, exact[0]);
   TEST_ASSERT_EQUAL_HEX8(0xAA, exact[1]);
+}
+
+void test_256v_exact_end_and_cross_end_boundaries() {
+  FakeBus bus;
+  bus.mem[cmd::MAX_MEM_ADDRESS_MB85RC256V] = 0x5E;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t maxAddress = cmd::MAX_MEM_ADDRESS_MB85RC256V;
+  uint8_t byte = 0;
+  TEST_ASSERT_TRUE(dev.read(maxAddress, &byte, 1).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x5E, byte);
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX32(0x0000, snap.currentAddress);
+
+  const uint8_t writeValue = 0xA5;
+  TEST_ASSERT_TRUE(dev.write(maxAddress, &writeValue, 1).ok());
+  TEST_ASSERT_EQUAL_HEX8(writeValue, bus.mem[maxAddress]);
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX32(0x0000, snap.currentAddress);
+
+  TEST_ASSERT_TRUE(dev.fill(maxAddress, 0x3C, 1).ok());
+  const uint8_t expected = 0x3C;
+  VerifyResult result;
+  TEST_ASSERT_TRUE(dev.verify(maxAddress, &expected, 1, result).ok());
+  TEST_ASSERT_TRUE(result.match);
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t failuresBefore = dev.totalFailures();
+  uint8_t twoBytes[2] = {};
+
+  Status st = dev.read(maxAddress, twoBytes, sizeof(twoBytes));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.write(maxAddress, twoBytes, sizeof(twoBytes));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.fill(maxAddress, 0x00, sizeof(twoBytes));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.verify(maxAddress, twoBytes, sizeof(twoBytes), result);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_memory_operations_reject_address_overflow_without_bus_or_health() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t failuresBefore = dev.totalFailures();
+  const uint32_t invalidAddress = std::numeric_limits<uint32_t>::max();
+  const size_t oversizedLen = static_cast<size_t>(std::numeric_limits<uint32_t>::max());
+  const uint32_t nearEnd = cmd::MAX_MEM_ADDRESS_MB85RC256V - 1UL;
+  uint8_t byte = 0;
+  VerifyResult result;
+
+  Status st = dev.read(invalidAddress, &byte, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.write(invalidAddress, &byte, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.fill(invalidAddress, 0x00, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.verify(invalidAddress, &byte, 1, result);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.read(nearEnd, &byte, oversizedLen);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.write(nearEnd, &byte, oversizedLen);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.fill(nearEnd, 0x00, oversizedLen);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+  st = dev.verify(nearEnd, &byte, oversizedLen, result);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                          static_cast<uint8_t>(st.code));
+
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
 }
 
 void test_64ta_memory_address_encoding_and_bounds() {
@@ -1495,6 +1610,128 @@ void test_recover_invalidates_current_address_tracking() {
                           static_cast<uint8_t>(st.code));
 }
 
+void test_probe_no_device_id_variant_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, DeviceVariant::MB85RC16V)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0004, 0xA5).ok());
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX32(0x0005, settings.currentAddress);
+
+  const uint32_t successBefore = dev.totalSuccess();
+  const uint32_t failureBefore = dev.totalFailures();
+  TEST_ASSERT_TRUE(dev.probe().ok());
+  TEST_ASSERT_EQUAL_UINT32(successBefore, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(failureBefore, dev.totalFailures());
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  uint8_t value = 0;
+  Status st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+}
+
+void test_failed_random_read_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  const uint32_t readsBefore = bus.readCalls;
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::TIMEOUT, "forced random read timeout", -21);
+  uint8_t value = 0;
+  Status st = dev.readByte(0x0020, value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::TIMEOUT), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 1U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  const uint32_t readsAfterFailure = bus.readCalls;
+  st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsAfterFailure, bus.readCalls);
+}
+
+void test_failed_write_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  const uint32_t writesBefore = bus.writeCalls;
+  bus.writeErrorRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_DATA, "forced random write nack", -22);
+  Status st = dev.writeByte(0x0020, 0xA5);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_DATA),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 1U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  uint8_t value = 0;
+  const uint32_t readsBefore = bus.readCalls;
+  st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+}
+
+void test_failed_current_address_read_invalidates_current_address_tracking() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  const uint32_t readsBefore = bus.readCalls;
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_TIMEOUT, "forced current read timeout", -23);
+  uint8_t value = 0;
+  Status st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_TIMEOUT),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 1U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  const uint32_t readsAfterFailure = bus.readCalls;
+  st = dev.readCurrentAddress(value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(readsAfterFailure, bus.readCalls);
+}
+
 void test_read_current_address_requires_known_pointer() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -1514,6 +1751,8 @@ void test_read_current_address_rejects_invalid_args_without_bus_or_health() {
 
   const uint32_t readsBefore = bus.readCalls;
   Status st = dev.readCurrentAddress(nullptr, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
+  st = dev.readCurrentAddress(nullptr, 0);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
 
   uint8_t value = 0;
@@ -1686,12 +1925,20 @@ void test_verify_rejects_invalid_args() {
   MB85RC::MB85RC dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
+  const uint32_t readsBefore = bus.readCalls;
   VerifyResult result;
   const uint8_t expected[1] = {0x00};
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
                           static_cast<uint8_t>(dev.verify(0x0000, nullptr, 1, result).code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
+                          static_cast<uint8_t>(dev.verify(0x0000, nullptr, 0, result).code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM),
                           static_cast<uint8_t>(dev.verify(0x0000, expected, 0, result).code));
+
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
 }
 
 void test_random_access_write_read_verify_sequence() {
@@ -1979,6 +2226,8 @@ int main() {
   RUN_TEST(test_read_rejects_cross_end_of_memory);
   RUN_TEST(test_write_rejects_cross_end_of_memory);
   RUN_TEST(test_fill_rejects_cross_end_of_memory);
+  RUN_TEST(test_256v_exact_end_and_cross_end_boundaries);
+  RUN_TEST(test_memory_operations_reject_address_overflow_without_bus_or_health);
   RUN_TEST(test_64ta_memory_address_encoding_and_bounds);
   RUN_TEST(test_variant_specific_memory_address_encoding_and_bounds);
   RUN_TEST(test_64ta_bulk_operations_reject_cross_end_ranges);
@@ -1991,6 +2240,10 @@ int main() {
   RUN_TEST(test_current_address_requires_prior_memory_access);
   RUN_TEST(test_current_address_tracks_memory_operations_and_settings);
   RUN_TEST(test_recover_invalidates_current_address_tracking);
+  RUN_TEST(test_probe_no_device_id_variant_invalidates_current_address_tracking);
+  RUN_TEST(test_failed_random_read_invalidates_current_address_tracking);
+  RUN_TEST(test_failed_write_invalidates_current_address_tracking);
+  RUN_TEST(test_failed_current_address_read_invalidates_current_address_tracking);
   RUN_TEST(test_read_current_address_requires_known_pointer);
   RUN_TEST(test_read_current_address_rejects_invalid_args_without_bus_or_health);
   RUN_TEST(test_read_current_address_reads_next_byte_and_advances);

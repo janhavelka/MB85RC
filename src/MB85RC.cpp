@@ -255,6 +255,8 @@ Status MB85RC::probe() {
   if (_variant != nullptr && !_variant->hasDeviceId) {
     uint8_t scratch = 0;
     Status st = _readMemoryRaw(0, &scratch, 1);
+    _currentAddressKnown = false;
+    _currentAddress = 0;
     if (!st.ok()) {
       return Status::Error(Err::DEVICE_NOT_FOUND, "Device not responding", st.detail);
     }
@@ -665,7 +667,12 @@ Status MB85RC::_readMemoryRaw(uint32_t address, uint8_t* buf, size_t len) {
     return st;
   }
 
-  return _i2cWriteReadRaw(enc.i2cAddress, enc.bytes, enc.len, buf, len);
+  st = _i2cWriteReadRaw(enc.i2cAddress, enc.bytes, enc.len, buf, len);
+  // Raw memory reads bypass normal cache advancement; do not leave a possibly
+  // stale current-address pointer behind after probe/begin diagnostics.
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+  return st;
 }
 
 Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len) {
