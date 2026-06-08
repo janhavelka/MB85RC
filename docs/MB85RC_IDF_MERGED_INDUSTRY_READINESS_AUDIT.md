@@ -6,6 +6,11 @@ Branch: `audit/mb85rc-idf-merged-industry-readiness`
 Audit mode: report-only / no implementation
 IDF merge classification: `QUALIFYING_IDF_MERGED`
 
+Historical note: this report is the pre-hardening audit snapshot that launched
+the Phase 00-07 work. Current implementation and release-readiness status is
+tracked in `docs/MB85RC_HARDENING_FINAL_REPORT.md`; where the two documents
+differ, the final hardening report supersedes this audit for current status.
+
 ## Executive Summary
 
 The ESP-IDF port is merged into `main`, the core is framework-neutral, and the native/fault-injection coverage is materially stronger than the other audited repositories. The library has a good foundation for production FRAM use: injected I2C callbacks, variant-aware address encoding, range checks, chunked read/write paths, current-address semantics, and no EEPROM-style write delay assumption.

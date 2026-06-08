@@ -1290,8 +1290,9 @@ extern "C" void app_main(void) {
   char line[LINE_LEN] = {};
   while (true) {
     printf("> ");
-    // Blocking console input is acceptable here because tick() is a no-op for
-    // the supported FRAM parts. Do not copy this loop as a scheduler template.
+    // Blocking console input is acceptable here because tick() performs no
+    // async I2C or write-delay work. It only advances Sleep wake state from
+    // caller-supplied time. Do not copy this loop as a scheduler template.
     if (fgets(line, sizeof(line), stdin) != nullptr) {
       handleCommand(line);
     }

@@ -14,7 +14,8 @@ Branch: `hardening/mb85rc-industry-readiness`
 | 03 ESP-IDF CI and CLI polish | Complete | `ab67f83` | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
 | 04 Docs, examples, hardware validation matrix | Complete | `4071f08`, `a159e95` | Production FRAM semantics documented, variant table expanded, hardware validation matrix added, and replay wording fixes applied. |
 | 05 Final verification and release report | Complete | `da2a5b6`, `c51fde0` | Final review defects fixed, full local verification rerun, and merge/release readiness documented. |
-| 06 High-Speed and Sleep support | Complete | This commit | Variant-gated HS/Sleep APIs, optional special transport callback, diagnostic CLI parity, tests, and documentation added. |
+| 06 High-Speed and Sleep support | Complete | `b5f3998` | Variant-gated HS/Sleep APIs, optional special transport callback, diagnostic CLI parity, tests, and documentation added. |
+| 07 Release docs and metadata cleanup | Complete | This release-prep commit | Version metadata finalized, changelog released, prompt archive added, docs reconciled, and release checks rerun. |
 
 ## Starting Audit Findings
 
@@ -307,11 +308,35 @@ The main audit targets handled by this branch were:
 | `idf.py --version` | UNAVAILABLE: PowerShell reported `idf.py : The term 'idf.py' is not recognized as the name of a cmdlet, function, script file, or operable program.` |
 | `git diff --check` | PASS: no whitespace errors; Git reported only local LF-to-CRLF normalization warnings. |
 
-### Final Local Verification
+## Phase 07 Release Documentation And Metadata Cleanup
+
+### Version Decision
+
+- Selected release version: `3.0.0`.
+- The prompt expected `2.1.0` if the release was purely additive. Final review found source-compatibility breaks: `MB85RC` copy/move operations are now deleted, and `Config` gained fields that can break positional aggregate initialization. The release metadata therefore uses a major version.
+- `library.json` remains the source of truth for generated `include/MB85RC/Version.h`; `python scripts/generate_version.py set 3.0.0` regenerated the header.
+
+### Files Updated
+
+- Release metadata: `library.json`, `idf_component.yml`, `Doxyfile`, and generated `include/MB85RC/Version.h`.
+- Release docs: `CHANGELOG.md`, `README.md`, and this final report.
+- Documentation hygiene: `docs/IDF_PORT.md`, `docs/IDF_PORT_IMPLEMENTATION.md`, `docs/time_ownership_audit.md`, `docs/MB85RC_IDF_MERGED_INDUSTRY_READINESS_AUDIT.md`, and `docs/MB85RC256V_fram_implementation_manual.md`.
+- Release process: added `docs/RELEASE_CHECKLIST.md`.
+- Prompt hygiene: archived Phase 00-05 prompts under `docs/prompts/archive/mb85rc-industry-readiness/` with an index explaining that Phase 06 superseded older HS/Sleep future-work wording.
+
+### Documentation Cleanup
+
+- README now advertises `v3.0.0`, adds release highlights, preserves `2.0.0` as historical release notes, and explains the breaking compatibility notes.
+- Changelog now has a dated `3.0.0` section and an empty reserved `Unreleased` section.
+- Doxygen metadata now says `3.0.0`; Doxygen input is scoped to public headers and current release docs rather than publishing example helper symbols or historical extracted docs as public API.
+- Historical audit/extraction docs now carry superseded-status notes so old "HS not implemented" / "Sleep unknown" findings are not mistaken for current implementation status.
+- `tick()` documentation now states the current behavior: no async I2C and no write-delay work, but Sleep wake recovery advances from caller-supplied time.
+
+### Phase 07 Verification
 
 | Command | Result |
 | --- | --- |
-| `git status --short` | PASS at Phase 06 start: clean. Before final commit: only expected Phase 06 edits are modified. |
+| `git status --short` | PASS at start: clean. After edits: only intended release/docs changes and prompt moves. |
 | `git branch --show-current` | PASS: `hardening/mb85rc-industry-readiness`. |
 | `git pull --ff-only` | PASS: already up to date. |
 | `python --version` | PASS: `Python 3.12.10`. |
@@ -320,12 +345,11 @@ The main audit targets handled by this branch were:
 | `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
 | `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
 | `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
-| `python -m platformio test -e native` | PASS: 104 test cases, 104 succeeded after adding HS/Sleep coverage. |
+| `python -m platformio test -e native` | PASS: 104 test cases, 104 succeeded. |
 | `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
 | `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
-| `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
+| `python -m platformio pkg pack` | PASS: wrote `MB85RC-3.0.0.tar.gz`; artifact removed after validation. |
 | `doxygen Doxyfile` | PASS: Doxygen 1.13.2 completed; generated `docs/doxygen` output was removed after the check. |
-| PyYAML workflow parse | PASS: `.github/workflows/ci.yml: YAML parse OK`. |
 | `git diff --check` | PASS: no whitespace errors; Git reported only local LF-to-CRLF normalization warnings. |
 
 PlatformIO emitted a non-fatal warning that obsolete PlatformIO Core 6.1.18 is
@@ -336,10 +360,11 @@ completed successfully.
 
 | Command | Reason |
 | --- | --- |
-| `idf.py --version` | UNAVAILABLE locally: `idf.py not found on PATH`. |
+| `idf.py --version` | UNAVAILABLE locally: PowerShell reported `idf.py : The term 'idf.py' is not recognized as the name of a cmdlet, function, script file, or operable program.` |
 | `idf.py -C examples/espidf_basic set-target esp32s3 build` | SKIPPED locally because `idf.py` is unavailable; configured in CI. |
 | `idf.py -C examples/espidf_basic set-target esp32s2 build` | SKIPPED locally because `idf.py` is unavailable; configured in CI. |
-| GitHub Actions CI run result | Not available to this local agent session; workflow syntax and command presence were inspected, but CI pass is not claimed. |
+| `gh run list --branch hardening/mb85rc-industry-readiness --limit 10` | UNAVAILABLE locally: PowerShell reported `gh : The term 'gh' is not recognized as the name of a cmdlet, function, script file, or operable program.` |
+| GitHub Actions CI run result | Not observed locally because `gh` is unavailable and this workflow is configured for pushes/PRs to `main`; CI pass is not claimed. |
 | Real hardware validation | Not run in this sequence; README matrix remains pending hardware. |
 
 ### Hardware Validation Matrix Status
@@ -354,7 +379,7 @@ completed successfully.
 - Real High-speed 3.4 MHz operation and Sleep current/wake behavior still need board validation on `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`.
 - Pure ESP-IDF builds are configured in CI but were not locally run because `idf.py` is unavailable on PATH.
 - Hardware behavior across all variants, address straps, power profiles, and shared-bus topologies is not field-proven by this branch.
-- Release metadata still advertises `2.0.0`; the new public APIs and `VERIFY_MISMATCH` are currently under `Unreleased`.
+- GitHub Actions status was not observed locally because `gh` is unavailable; review normal PR CI before tagging.
 
 ### Future Work
 
@@ -363,17 +388,16 @@ completed successfully.
 - Run or review pure ESP-IDF S2/S3 CI build results before claiming IDF build proof.
 - Hardware-validate High-speed and Sleep diagnostics on `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT` before claiming real-board HS/Sleep behavior.
 - Add a production journaling example if users need an application-level storage pattern beyond README guidance.
-- For an actual release, update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README version text, `Doxyfile`, and generated `Version.h` together.
+- Tag and publish `v3.0.0` only after normal PR CI is reviewed.
 
 ### Merge Readiness Verdict
 
-This branch is ready to merge as a production-readiness hardening step, provided
-the normal PR CI run is reviewed for the configured ESP-IDF S2/S3 jobs. It should
-not yet be described as fully field-proven across all MB85RC variants until
+This branch is ready to merge and prepare as MB85RC v3.0.0 after normal PR CI is
+reviewed, including the configured ESP-IDF ESP32-S2/S3 jobs. It should not be
+described as fully field-proven across all supported MB85RC variants until
 hardware validation is completed on representative parts and boards.
 
 ### Release Wording Recommendation
 
-- Recommended release version for the API additions is `2.1.0`, not `2.0.0`, because the branch adds backward-compatible public APIs, optional special transport hooks, and append-only error codes.
-- Until release metadata is updated, describe the branch as an unreleased hardening merge.
-- Suggested wording: "MB85RC industry-readiness hardening: adds accepted-prefix write/fill reporting, readback verification helpers, variant-gated High-speed/Sleep support, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."
+- Recommended tag after CI review: `v3.0.0`.
+- Suggested wording: "MB85RC v3.0.0 adds accepted-prefix write/fill reporting, readback verification helpers, variant-gated High-speed/Sleep support, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."

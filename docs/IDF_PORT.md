@@ -10,7 +10,7 @@ The ESP-IDF example in `examples/espidf_basic` is a native IDF application:
 - delays use `vTaskDelay()`
 - command input uses fixed C buffers and `fgets()`
 
-MB85RC runtime variant support remains in the core driver and the IDF CLI exposes the same variant, size, device-id, raw/current-read, stress, selftest, and memory-boundary workflows as the Arduino command contract.
+MB85RC runtime variant support remains in the core driver and the IDF CLI exposes the same variant, size, device-id, raw/current-read, HS/Sleep diagnostic, stress, selftest, and memory-boundary workflows as the Arduino command contract. The native IDF example installs `Config::i2cSpecial` for HS-prefixed transfers, Sleep entry, and Sleep wake stimulus, while still treating the example as diagnostic-only and hardware-validation-pending.
 
 FRAM write/fill/stress/selftest/benchmark/demo commands can change device
 contents. The native IDF example therefore uses explicit confirmed command

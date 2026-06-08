@@ -106,7 +106,7 @@ struct Config {
   void* i2cUser = nullptr;               ///< User context for callbacks
 
   // === Timing Hooks (optional) ===
-  NowMsFn nowMs = nullptr;               ///< Optional monotonic millisecond source for health timestamps
+  NowMsFn nowMs = nullptr;               ///< Optional monotonic ms source for health and Sleep wake gating
   void* timeUser = nullptr;              ///< User context for timing hook
 
   // === Device Settings ===

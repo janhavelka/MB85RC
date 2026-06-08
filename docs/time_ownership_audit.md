@@ -25,7 +25,7 @@
 
 - `_nowMs()` in `src/MB85RC.cpp` calls only `_config.nowMs(_config.timeUser)` or returns `0U`.
   No framework headers are in scope for the core.
-- `tick(uint32_t nowMs)` accepts injected time but discards it (`(void)nowMs`) — currently a no-op.
+- `tick(uint32_t nowMs)` accepts injected time and performs bounded maintenance only. After Phase 06 it advances Sleep wake recovery from `WAKING` to `AWAKE`; it still performs no async I2C work and adds no FRAM write delay.
 - The timing guard tool `tools/check_core_timing_guard.py` enforces this:
   `millis`, `micros`, `esp_timer_get_time`, `delayMicroseconds` are **forbidden** in `src/` and `include/`.
 
@@ -66,8 +66,9 @@
 | `examples/common/HealthDiag.h` | `HealthMonitor::_intervalMs`, `_lastLogMs` | `uint32_t` | `now - _lastLogMs >= _intervalMs` is wrap-safe (unsigned arithmetic) |
 | `examples/common/HealthDiag.h` | `HealthSnapshot::timestamp` | `uint32_t` | Records `millis()` but is **never used** in any comparison — dead field |
 
-**No 32-bit deadline comparisons exist inside the library core.** The library only stores
-timestamps and returns them; it never computes elapsed time or evaluates staleness internally.
+The library core uses one 32-bit deadline comparison for Sleep wake recovery,
+with unsigned arithmetic suitable for wrap-safe caller-supplied milliseconds.
+It still does not use framework time sources internally.
 
 ---
 

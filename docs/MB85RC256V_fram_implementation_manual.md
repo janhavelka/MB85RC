@@ -983,15 +983,22 @@ This section extends the MB85RC256V-centric extraction with official RAMXEED sib
 
 ### 22.3 Device-ID and optional-command coverage that the local library leaves unused
 
+Historical note: this section was written against the older local
+`MB85_FRAM.h` / `MB85_FRAM.cpp` input reviewed during the original extraction.
+The current MB85RC driver has since added variant-gated High-speed and Sleep
+support for the locally documented capable variants; see
+`docs/MB85RC_HARDENING_FINAL_REPORT.md` Phase 06 for current implementation
+status. The protocol sourcing below remains useful as evidence.
+
 - Official Device-ID coverage across the checked family is broader than the library header comment suggests. The checked sources explicitly document Device ID for MB85RC512T (`00AH` / `658H`), MB85RC256V (`00AH` / `510H`), MB85RC64TA (`00AH` / `358H`), MB85RC1MT (`00AH` / `758H`), and MB85RC04V (`00AH` / `010H`). [MB85RC512T-DS6v1-E.pdf, p10; MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf, p9; MB85RC64TA-DS5v1-E.pdf, p11; MB85RC1MT-DS5v1-E.pdf, p10; MB85RC04V-DS5v1-E.pdf, p8]
 - MB85RC512T, MB85RC64TA, and MB85RC1MT officially support High Speed mode up to 3.4 MHz, but their datasheets describe this as a protocol state entered by the master-code sequence `0000 1XXX`, followed by an expected NACK, with Stop returning the bus to normal mode. Merely calling `Wire.setClock(3400000)` does not implement that documented entry procedure. [MB85RC512T-DS6v1-E.pdf, p8; MB85RC64TA-DS5v1-E.pdf, p9; MB85RC1MT-DS5v1-E.pdf, p8; MB85_FRAM.cpp:42-43]
-- MB85RC512T, MB85RC64TA, and MB85RC1MT also add an official Sleep mode that is entered with `START + F8H`, device address word, repeated `START + 86H`, and exited by another device address followed by a recovery interval `tREC = 400 us`. No helper for Sleep entry/exit or `tREC` handling exists in the local library. [MB85RC512T-DS6v1-E.pdf, pp9, 16; MB85RC64TA-DS5v1-E.pdf, pp10, 17; MB85RC1MT-DS5v1-E.pdf, pp9, 16; MB85_FRAM.h:110-239; MB85_FRAM.cpp:21-169]
+- MB85RC512T, MB85RC64TA, and MB85RC1MT also add an official Sleep mode that is entered with `START + F8H`, device address word, repeated `START + 86H`, and exited by another device address followed by a recovery interval `tREC = 400 us`. At the time of the original extraction, the reviewed older local input had no helper for Sleep entry/exit or `tREC` handling; the current driver now exposes variant-gated Sleep APIs through the optional special transport callback. [MB85RC512T-DS6v1-E.pdf, pp9, 16; MB85RC64TA-DS5v1-E.pdf, pp10, 17; MB85RC1MT-DS5v1-E.pdf, pp9, 16; MB85_FRAM.h:110-239; MB85_FRAM.cpp:21-169]
 
 ### 22.4 Gap-fill conclusions for this manual
 
 - The current manual was already correct to say "no register map" for MB85RC256V. The additional sourcing shows that the missing family-level detail was not hidden registers, but rather address-word variants, Device-ID coverage, and optional wide-voltage-family commands.
 - The current library is best understood as a partially generic front-end for the subset of MB85RC parts that look like MB85RC256V/MB85RC64TA/MB85RC512T at the transaction level. Even within that subset, the current wraparound-based probe logic still does not scale up to the 64 KB MB85RC512T. [MB85_FRAM.cpp:49-50]
-- Any future "whole MB85RC family" implementation would need variant-aware transport formatting: external device-select bits vs upper-memory bits, one-byte vs two-byte memory addresses, Device-ID helpers, and optional High Speed / Sleep sequences where the official datasheets provide them. This is an implementation conclusion derived from the sourced comparison above.
+- A whole-family MB85RC implementation needs variant-aware transport formatting: external device-select bits vs upper-memory bits, one-byte vs two-byte memory addresses, Device-ID helpers, and optional High Speed / Sleep sequences where the official datasheets provide them. The current driver implements these points for the locally documented supported variants, while hardware validation remains separate.
 
 ### 22.5 Implementation-facing code and field map
 

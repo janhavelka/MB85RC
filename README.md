@@ -2,10 +2,7 @@
 
 Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Released library version: `v2.0.0`
-
-This hardening branch documents unreleased API additions. The final hardening
-report recommends `v2.1.0` for an actual release that includes them.
+Released library version: `v3.0.0`
 
 ## Features
 
@@ -44,8 +41,7 @@ lib_deps =
   https://github.com/janhavelka/MB85RC.git#hardening/mb85rc-industry-readiness
 ```
 
-Use `#v2.0.0` for the current tagged release. The unreleased hardening APIs
-documented on this branch are not part of that tag.
+Use `#v3.0.0` for this release after the tag is published.
 
 ### Manual
 
@@ -70,14 +66,16 @@ idf.py -C examples/espidf_basic set-target esp32s2 build
 The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
 `vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
 sources or compatibility facades. The command contract covers Device ID reads,
-current-address reads, active-capacity-bounded memory commands, typed demo,
-random benchmark, self-test, and stress diagnostics.
+current-address reads, active-capacity-bounded memory commands, HS/Sleep
+diagnostics, typed demo, random benchmark, self-test, and stress diagnostics.
 
 Mutating ESP-IDF CLI commands use explicit `!` confirmation forms such as
 `write!`, `fill!`, `rw_suite!`, and `typed_demo!`.
 
 The ESP-IDF CLI owns its I2C bus and uses blocking console input. That console input can block the example loop before `tick()` runs; this is acceptable for
-the current diagnostic CLI because `tick()` is a no-op for supported FRAM parts.
+the current diagnostic CLI because `tick()` does no async I2C or write-delay
+work. It only advances Sleep `WAKING` to `AWAKE` state from caller-supplied
+time after a wake operation.
 Production systems must serialize shared-bus access in their injected transport
 or application bus manager and should call `tick()` from their own scheduler
 cadence if future devices need periodic work.
@@ -126,7 +124,7 @@ void loop() {
 
 The default `expectedVariant` is `MB85RC256V` for compatibility with existing users. New integrations should set `DeviceVariant::AUTO` or an explicit expected variant so `begin()`, `probe()`, and `recover()` validate the actual Device ID and capacity. `MB85RC16V` has no Device ID command, so select it explicitly with `DeviceVariant::MB85RC16V`; `AUTO` cannot discover it.
 
-The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. Applications that need meaningful health timestamps should inject `Config::nowMs`; otherwise timestamps remain `0`.
+The example transport adapter maps Arduino `Wire` failures to `I2C_*` status codes and keeps bus timeout ownership outside the library. Applications that need meaningful health timestamps or Sleep wake gating should inject `Config::nowMs`; otherwise timestamps remain `0` and wake gating advances only when the caller supplies time to `tick()`.
 
 ## I2C Ownership And Concurrency
 
@@ -157,8 +155,10 @@ locking. `enterHighSpeedMode()` enables HS-prefixed memory/current-address
 transfers through the optional `Config::i2cSpecial` callback; each transfer
 sends the `0000 1XXX` master-code prefix because a STOP exits HS state. The
 application bus manager must configure and validate 3.4 MHz operation if that
-bus speed is used. The included diagnostic examples report prefix emission and
-current bus settings; they do not prove real 3.4 MHz hardware operation.
+bus speed is used. The Arduino diagnostic CLI reports capability and missing
+raw-special callback support honestly. The native ESP-IDF diagnostic CLI can
+emit the HS prefix through `Config::i2cSpecial`. Neither example proves real
+3.4 MHz hardware operation without board-level validation.
 
 Sleep entry is emitted through `Config::i2cSpecial` as `F8h` plus the active
 device address word, repeated START, then `86h`. On success the driver marks the
@@ -166,6 +166,23 @@ device asleep and invalidates current-address tracking. `wake()` sends the wake
 stimulus, then the application must wait `tREC >= 400 us` before access or
 `recover()`; the core records a conservative millisecond wake gate and inserts
 no hidden delay.
+
+## Release 3.0.0 Highlights
+
+- Adds accepted-prefix reporting with `writeDetailed()` and `fillDetailed()` for non-atomic bulk writes/fills.
+- Adds readback verification helpers: `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`, and `VERIFY_MISMATCH`.
+- Adds variant-gated High-speed and Sleep APIs for `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`, with unsupported variants returning `UNSUPPORTED` before bus traffic.
+- Adds optional `Config::i2cSpecial` for HS-prefixed transfers, Sleep entry, and Sleep wake stimulus; the core still does not change the MCU I2C clock or insert hidden delays.
+- Deletes `MB85RC` copy/move operations and documents thread/ISR/reentrancy contracts.
+- Tightens current-address invalidation after failed or diagnostic transactions.
+- Adds pure ESP-IDF CI build configuration for ESP32-S2/S3 and native IDF Device-ID manual-address handling.
+- Expands Arduino and ESP-IDF diagnostic CLI parity, including HS/Sleep diagnostics and explicit confirmation for destructive IDF commands.
+- Adds production documentation for WP-high ACK/no-persistence behavior, accepted-prefix versus verified persistence, and hardware-validation planning.
+
+Breaking notes: applications that copied/moved `MB85RC` instances must keep a
+single instance and pass it by reference or pointer. Applications using
+positional aggregate initialization for `Config` should switch to default
+construction plus named member assignment.
 
 ## Release 2.0.0 Highlights
 
@@ -202,7 +219,7 @@ no hidden delay.
 ### Lifecycle
 
 - `Status begin(const Config& config)` - initialize driver and verify Device ID or explicit no-Device-ID presence
-- `void tick(uint32_t nowMs)` - reserved no-op for FRAM
+- `void tick(uint32_t nowMs)` - bounded maintenance hook; no async I2C or write-delay work, but advances Sleep `WAKING` to `AWAKE` from caller-supplied time
 - `void end()` - shut down driver and clear runtime state
 
 ### Variant Selection
@@ -460,13 +477,13 @@ sleep wake                # Wake, wait recovery interval, then recover
 1. Concurrency: `MB85RC` instances are not internally thread-safe. Use one task, or provide external serialization around all public methods that can touch driver state or I2C.
 2. ISR safety: public APIs are not ISR-safe because they can call I2C transport callbacks and may block until the transport timeout.
 3. Transport non-recursion: injected transport callbacks must not recursively call back into the same `MB85RC` instance.
-4. Timing model: `tick()` is bounded and currently a no-op; public I2C operations are blocking.
+4. Timing model: `tick()` is bounded and performs no async I2C or write-delay work; it only advances Sleep `WAKING` to `AWAKE` from caller-supplied time. Public I2C operations are blocking.
 5. Shared-bus ownership: bus, pins, locking, timeout policy, retry policy, and recovery policy remain application-owned via `Config` and the injected transport. The core never initializes or owns `Wire`, ESP-IDF I2C handles, pins, or a global bus.
 6. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
 7. Current-address reads: use `readCurrentAddress()` only after a known address-setting transaction, such as a successful addressed `read()`, `readByte()`, `write()`, `writeByte()`, or `fill()` by the same instance. Current-address state is undefined after power-up and is conservatively invalidated after failed I2C memory/current-address transactions and `recover()`. Raw diagnostics such as `probe()` are not address-setting contracts and may disturb the device pointer; use an addressed read after them if current-address state matters.
 8. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
 9. High-speed and Sleep: HS/Sleep APIs are variant-gated and require the optional special transport callback. The core does not change the MCU bus clock or insert Sleep wake delays; the application bus manager owns those policies.
-9. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
+10. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
 
 ## Validation
 

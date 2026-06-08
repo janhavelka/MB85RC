@@ -151,9 +151,11 @@ public:
   /// @return Status::Ok() on success, error otherwise
   Status begin(const Config& config);
   
-  /// Process pending operations (call regularly from loop).
-  /// Currently a no-op for FRAM (no write delays or async operations).
-  /// @param nowMs Current timestamp in milliseconds
+  /// Process bounded maintenance work (call regularly from loop).
+  ///
+  /// This hook performs no async I2C work and adds no FRAM write delay. It uses
+  /// caller-supplied time to advance Sleep wake recovery from WAKING to AWAKE.
+  /// @param nowMs Current timestamp in milliseconds.
   void tick(uint32_t nowMs);
   
   /// Shutdown the driver and release resources.

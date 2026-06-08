@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No changes yet.
+
+## [3.0.0] - 2026-06-08
+
 ### Added
 
 - Variant-gated High-speed and Sleep APIs:
@@ -29,9 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native fake-bus coverage for HS/Sleep variant gating, special-transfer
   routing, expected HS master-code NACK scoping, Sleep state transitions, and
   wake recovery gating.
+- Pure ESP-IDF CI job configuration that builds `examples/espidf_basic` for
+  `esp32s2` and `esp32s3`.
+- Hardware-validation matrix covering supported variants, address straps,
+  WP behavior, High-speed/Sleep checks, pure ESP-IDF CLI, shared-bus behavior,
+  and soak testing.
 
 ### Changed
 
+- Breaking: `MB85RC` copy and move construction/assignment are now explicitly
+  deleted. Applications should keep one driver instance per device and pass it
+  by reference or pointer.
+- Breaking for positional aggregate initialization: `Config` now contains
+  optional High-speed/Sleep transport fields. Prefer default construction and
+  named member assignment for stable configuration code.
+- Public docs now state the thread-safety, ISR-safety, and non-recursive
+  transport callback contracts.
+- Current-address tracking is invalidated more conservatively after failed or
+  diagnostic transactions that can disturb the device pointer.
 - Arduino and native ESP-IDF diagnostic CLIs now include `hs`, `hs support`,
   `hs enter`, `sleep`, `sleep support`, `sleep enter`, and `sleep wake`
   commands. Hardware validation remains pending for real HS/Sleep mode use.
@@ -44,6 +63,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads instead of advertising them through a generic placeholder message.
 - ESP-IDF port docs now document the confirmation policy and pending hardware
   validation status.
+- Native ESP-IDF Device-ID access now uses a manual-address reserved-ID
+  transaction path instead of normal device-handle addressing for the reserved
+  `0xF8`/`0xF9` sequence.
+
+### Fixed
+
+- `begin()` and diagnostic `probe()` preserve original transport status codes
+  instead of wrapping them as `DEVICE_NOT_FOUND`.
+- Version and release metadata now consistently identify this hardening release
+  as `3.0.0`.
 
 ## [2.0.0] - 2026-05-20
 
@@ -146,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0
