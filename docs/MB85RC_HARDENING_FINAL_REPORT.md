@@ -1,7 +1,7 @@
 # MB85RC Industry-Readiness Hardening Final Report
 
 Date: 2026-06-07
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 Branch: `hardening/mb85rc-industry-readiness`
 
 ## Phase Status
@@ -13,7 +13,8 @@ Branch: `hardening/mb85rc-industry-readiness`
 | 02 Partial write + WP persistence | Complete | `b89bc82` | Accepted-prefix APIs, readback verification helpers, WP-high simulation, and Phase 02 checks passed. |
 | 03 ESP-IDF CI and CLI polish | Complete | `ab67f83` | Pure ESP-IDF CI job added, IDF guard strengthened, and diagnostic CLI blocking/bus-ownership caveats documented. |
 | 04 Docs, examples, hardware validation matrix | Complete | `4071f08`, `a159e95` | Production FRAM semantics documented, variant table expanded, hardware validation matrix added, and replay wording fixes applied. |
-| 05 Final verification and release report | Complete | This commit | Final review defects fixed, full local verification rerun, and merge/release readiness documented. |
+| 05 Final verification and release report | Complete | `da2a5b6`, `c51fde0` | Final review defects fixed, full local verification rerun, and merge/release readiness documented. |
+| 06 High-Speed and Sleep support | Complete | This commit | Variant-gated HS/Sleep APIs, optional special transport callback, diagnostic CLI parity, tests, and documentation added. |
 
 ## Starting Audit Findings
 
@@ -252,11 +253,65 @@ The main audit targets handled by this branch were:
 - README contains a hardware validation matrix with all hardware rows still marked pending.
 - Production storage guidance recommends record metadata, CRC/generation counters, verify-before-commit, commit marker last, boot scan, and part-specific endurance/retention budgeting.
 
+## Phase 06 High-Speed And Sleep Support
+
+### API And Core Changes
+
+- Added explicit variant metadata for High-speed and Sleep capability, normal and HS bus-rate limits, and Sleep recovery time.
+- Added append-only `Err::UNSUPPORTED` for variant-gated mode APIs that are not documented for the active part.
+- Added optional `Config::i2cSpecial` with `I2cSpecialOp` / `I2cSpecialTransfer` for bus sequences that cannot be represented by normal 7-bit write/write-read callbacks.
+- Added `supportsHighSpeedMode()`, `maxNormalBusHz()`, `maxHighSpeedBusHz()`, `enterHighSpeedMode()`, `exitHighSpeedMode()`, and `setHighSpeedMode()`.
+- Added `SleepState`, `supportsSleepMode()`, `sleepRecoveryUs()`, `enterSleep()`, `wake()`, and `wakeFromSleep()`.
+- Kept the core framework-neutral and non-owning: it does not change the MCU I2C clock, does not own bus timing/locking, and inserts no hidden Sleep wake delay.
+
+### Protocol Boundaries
+
+- High-speed mode is implemented as a transfer-mode toggle. While enabled, memory and current-address operations use the special callback so each transaction can be prefixed with `0000 1XXX`; STOP exits HS state per local datasheets.
+- Device ID, `probe()`, and `recover()` continue to use normal callbacks.
+- The expected NACK on the HS master-code prefix is scoped to the special callback only. Generic NACKs remain failures.
+- Sleep entry uses the documented `F8h` + active device address word + repeated-start `86h` sequence through the special callback.
+- Sleep wake sends a wake stimulus, enters `WAKING`, and requires caller-managed `tREC >= 400 us` before normal access.
+
+### Supported And Unsupported Variants
+
+- HS/Sleep supported by local docs and APIs: `MB85RC64TA`, `MB85RC512T`, `MB85RC1MT`.
+- HS/Sleep unsupported by local docs and APIs: `MB85RC04V`, `MB85RC16V`, `MB85RC256V`.
+- Unsupported mode requests return `UNSUPPORTED` before bus traffic.
+
+### Tests Added
+
+- Native fake-bus tests for invalid HS master code, unsupported HS/Sleep no-traffic behavior, missing special callback behavior, HS special-transfer routing, generic NACK failure outside HS prefix, Sleep entry/wake state transitions, wake recovery gating, and Sleep entry failure health/current-address behavior.
+- Native test count increased to 104 passing cases after Phase 06 additions.
+
+### Examples, Guards, And Documentation
+
+- Arduino diagnostic CLI gained `hs`, `hs support`, `hs enter`, `sleep`, `sleep support`, `sleep enter`, and `sleep wake` commands. The default Wire transport does not install a raw special callback, so commands report capability and transport limitations honestly.
+- Native ESP-IDF diagnostic CLI gained the same commands and implements the special callback with `i2c_master_execute_defined_operations()`.
+- Example HS diagnostics emit the HS prefix through the configured bus but do not claim real 3.4 MHz operation; application bus-manager clock changes and hardware validation remain pending.
+- Guard scripts now require HS/Sleep CLI command parity and conservative diagnostic wording.
+- README, extracted protocol notes, changelog, and hardware matrix now document HS/Sleep semantics and pending hardware validation.
+
+### Phase 06 Verification
+
+| Command | Result |
+| --- | --- |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 104 test cases, 104 succeeded after adding HS/Sleep coverage. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
+| `doxygen Doxyfile` | PASS: Doxygen completed; generated `docs/doxygen` output was removed after the check. |
+| `idf.py --version` | UNAVAILABLE: PowerShell reported `idf.py : The term 'idf.py' is not recognized as the name of a cmdlet, function, script file, or operable program.` |
+| `git diff --check` | PASS: no whitespace errors; Git reported only local LF-to-CRLF normalization warnings. |
+
 ### Final Local Verification
 
 | Command | Result |
 | --- | --- |
-| `git status --short` | PASS at start: clean. Before final commit: only expected Prompt 05 edits are modified. |
+| `git status --short` | PASS at Phase 06 start: clean. Before final commit: only expected Phase 06 edits are modified. |
 | `git branch --show-current` | PASS: `hardening/mb85rc-industry-readiness`. |
 | `git pull --ff-only` | PASS: already up to date. |
 | `python --version` | PASS: `Python 3.12.10`. |
@@ -265,7 +320,7 @@ The main audit targets handled by this branch were:
 | `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
 | `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
 | `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
-| `python -m platformio test -e native` | PASS: 93 test cases, 93 succeeded after adding AUTO unknown-product coverage. |
+| `python -m platformio test -e native` | PASS: 104 test cases, 104 succeeded after adding HS/Sleep coverage. |
 | `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
 | `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
 | `python -m platformio pkg pack` | PASS: wrote `MB85RC-2.0.0.tar.gz`; artifact removed after validation. |
@@ -296,6 +351,7 @@ completed successfully.
 ### Remaining Risks
 
 - Real WP-pin behavior still needs board validation: WP low/open should persist writes; WP high may ACK while blocking memory modification; readback verification should catch that state.
+- Real High-speed 3.4 MHz operation and Sleep current/wake behavior still need board validation on `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`.
 - Pure ESP-IDF builds are configured in CI but were not locally run because `idf.py` is unavailable on PATH.
 - Hardware behavior across all variants, address straps, power profiles, and shared-bus topologies is not field-proven by this branch.
 - Release metadata still advertises `2.0.0`; the new public APIs and `VERIFY_MISMATCH` are currently under `Unreleased`.
@@ -305,7 +361,7 @@ completed successfully.
 - Execute the hardware validation matrix by supported variant and address pin/address-bit mode.
 - Validate WP pin behavior on representative real boards.
 - Run or review pure ESP-IDF S2/S3 CI build results before claiming IDF build proof.
-- Add high-speed and sleep support only if product requirements justify it and the feature is documented and tested per variant.
+- Hardware-validate High-speed and Sleep diagnostics on `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT` before claiming real-board HS/Sleep behavior.
 - Add a production journaling example if users need an application-level storage pattern beyond README guidance.
 - For an actual release, update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README version text, `Doxyfile`, and generated `Version.h` together.
 
@@ -318,6 +374,6 @@ hardware validation is completed on representative parts and boards.
 
 ### Release Wording Recommendation
 
-- Recommended release version for the API additions is `2.1.0`, not `2.0.0`, because the branch adds backward-compatible public APIs and an append-only error code.
+- Recommended release version for the API additions is `2.1.0`, not `2.0.0`, because the branch adds backward-compatible public APIs, optional special transport hooks, and append-only error codes.
 - Until release metadata is updated, describe the branch as an unreleased hardening merge.
-- Suggested wording: "MB85RC industry-readiness hardening: adds accepted-prefix write/fill reporting, readback verification helpers, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."
+- Suggested wording: "MB85RC industry-readiness hardening: adds accepted-prefix write/fill reporting, readback verification helpers, variant-gated High-speed/Sleep support, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."

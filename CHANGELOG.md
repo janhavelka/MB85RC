@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Variant-gated High-speed and Sleep APIs:
+  `supportsHighSpeedMode()`, `enterHighSpeedMode()`,
+  `exitHighSpeedMode()`, `setHighSpeedMode()`, `supportsSleepMode()`,
+  `enterSleep()`, `wake()`, and `wakeFromSleep()`.
+- Optional `Config::i2cSpecial` transport callback for HS-prefixed
+  transfers, Sleep entry, and Sleep wake stimulus without changing the
+  existing normal write/write-read callbacks.
+- Variant metadata fields for HS/Sleep capability, normal/HS bus limits, and
+  Sleep recovery time.
 - `WriteResult`, `writeDetailed()`, and `fillDetailed()` report requested bytes,
   transport-accepted prefix length, first failed chunk offset, and completion
   state for non-atomic bulk write/fill operations.
@@ -17,9 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   acceptance is not enough to prove persistence.
 - Native fake-bus coverage for partial write/fill chunk failures, WP-high
   ACK-without-persistence behavior, and write/fill verify mismatch handling.
+- Native fake-bus coverage for HS/Sleep variant gating, special-transfer
+  routing, expected HS master-code NACK scoping, Sleep state transitions, and
+  wake recovery gating.
 
 ### Changed
 
+- Arduino and native ESP-IDF diagnostic CLIs now include `hs`, `hs support`,
+  `hs enter`, `sleep`, `sleep support`, `sleep enter`, and `sleep wake`
+  commands. Hardware validation remains pending for real HS/Sleep mode use.
 - ESP-IDF CLI destructive FRAM workflows now require explicit `!` confirmation
   forms (`write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`,
   `stress_mix!`, `randbench!`, and `typed_demo!`) and unconfirmed forms print

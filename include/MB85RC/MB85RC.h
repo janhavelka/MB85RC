@@ -19,6 +19,17 @@ enum class DriverState : uint8_t {
   OFFLINE    ///< consecutiveFailures >= offlineThreshold
 };
 
+/// @brief Device Sleep power-state tracked by the driver.
+///
+/// Sleep state is separate from DriverState health. `WAKING` means the wake
+/// stimulus has been sent and the caller must allow the datasheet recovery time
+/// before memory or Device ID access.
+enum class SleepState : uint8_t {
+  AWAKE,   ///< Normal access is allowed.
+  ASLEEP,  ///< Sleep command accepted; call wake()/wakeFromSleep().
+  WAKING   ///< Wake stimulus sent; wait tREC and call tick().
+};
+
 /// @brief Device ID fields parsed from 3-byte read.
 ///
 /// Variants without a Device ID command leave these fields at zero in cached
@@ -56,6 +67,14 @@ struct SettingsSnapshot {
   uint8_t densityCode = 0;        ///< Cached Device ID density field.
   uint32_t capacityBytes = 0;     ///< Active runtime memory capacity in bytes.
   uint32_t maxAddress = 0;        ///< Highest valid runtime memory address.
+  uint32_t maxNormalBusHz = 0;    ///< Datasheet normal-mode I2C limit for active variant.
+  uint32_t maxHighSpeedBusHz = 0; ///< Datasheet HS-mode I2C limit, or 0 when unsupported.
+  bool highSpeedModeSupported = false; ///< True when active variant documents HS mode.
+  bool highSpeedModeEnabled = false; ///< True when memory transfers use HS-prefixed callbacks.
+  bool sleepModeSupported = false; ///< True when active variant documents Sleep mode.
+  SleepState sleepState = SleepState::AWAKE; ///< Current tracked Sleep state.
+  uint32_t sleepWakeReadyMs = 0;   ///< Millisecond deadline for WAKING -> AWAKE.
+  uint16_t sleepRecoveryUs = 0;    ///< Datasheet tREC contract for active variant.
   bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer.
   uint32_t currentAddress = 0;    ///< Next byte address for Current Address Read.
 };
@@ -210,6 +229,77 @@ public:
   /// Get highest valid active runtime memory address.
   /// @return Highest valid byte address for the active runtime variant.
   uint32_t maxAddress() const;
+
+  /// Get active variant's normal-mode I2C maximum bus rate.
+  /// @return Datasheet normal-mode bus rate in hertz, or family default before variant selection.
+  uint32_t maxNormalBusHz() const;
+
+  /// Get active variant's High-speed-mode I2C maximum bus rate.
+  /// @return Datasheet HS bus rate in hertz, or 0 when unsupported.
+  uint32_t maxHighSpeedBusHz() const;
+
+  /// Check whether the active variant documents I2C High-speed mode.
+  /// @return true for variants with local datasheet HS support.
+  bool supportsHighSpeedMode() const;
+
+  /// Check whether HS-prefixed memory/current-address transfers are enabled.
+  /// @return true when setHighSpeedMode(true) or enterHighSpeedMode() succeeded.
+  bool highSpeedModeEnabled() const { return _highSpeedModeEnabled; }
+
+  /// Enable or disable HS-prefixed memory/current-address transfers.
+  ///
+  /// The core does not change the controller clock. When enabled, each memory
+  /// or current-address transaction is emitted through Config::i2cSpecial with
+  /// a High-speed master-code prefix because a STOP exits the bus HS state.
+  /// Device ID, probe(), and recover() continue to use normal callbacks.
+  /// @param enabled true to use HS-prefixed transfers; false to use normal I2C.
+  /// @return Status::Ok() when the request is accepted.
+  Status setHighSpeedMode(bool enabled);
+
+  /// Compatibility alias for setHighSpeedMode(true).
+  ///
+  /// This enables HS-prefixed transfers; it does not itself change the MCU bus
+  /// clock or leave the bus permanently in HS after a STOP.
+  /// @return Status::Ok() when HS transfer mode is enabled.
+  Status enterHighSpeedMode() { return setHighSpeedMode(true); }
+
+  /// Compatibility alias for setHighSpeedMode(false).
+  /// @return Status::Ok() after disabling HS-prefixed transfers.
+  Status exitHighSpeedMode() { return setHighSpeedMode(false); }
+
+  /// Check whether the active variant documents Sleep mode.
+  /// @return true for variants with local datasheet Sleep support.
+  bool supportsSleepMode() const;
+
+  /// Get tracked device Sleep state.
+  /// @return Current Sleep power-state tracked by the driver.
+  SleepState sleepState() const { return _sleepState; }
+
+  /// Get the active variant's Sleep recovery time contract.
+  /// @return tREC in microseconds, or 0 when Sleep is unsupported.
+  uint16_t sleepRecoveryUs() const;
+
+  /// Send the active variant's Sleep entry sequence.
+  ///
+  /// The sequence is emitted through Config::i2cSpecial. On success the driver
+  /// marks the device ASLEEP and invalidates current-address tracking. Memory
+  /// and Device ID operations return BUSY until wake()/wakeFromSleep() and the
+  /// recovery interval complete. No delay is inserted by the core.
+  /// @return Status::Ok() when the sleep entry sequence is accepted.
+  Status enterSleep();
+
+  /// Send the wake stimulus for a sleeping device.
+  ///
+  /// On success the driver enters WAKING and records a conservative millisecond
+  /// deadline derived from the datasheet tREC. The application must allow at
+  /// least sleepRecoveryUs() before access; call tick() after that interval to
+  /// transition back to AWAKE. No delay is inserted by the core.
+  /// @return Status::Ok() when the wake stimulus is accepted.
+  Status wake();
+
+  /// Compatibility alias for wake().
+  /// @return Status::Ok() when the wake stimulus is accepted.
+  Status wakeFromSleep() { return wake(); }
 
   /// Get a snapshot of current configuration/runtime state (no I2C).
   /// @param out Output snapshot populated from cached state.
@@ -421,6 +511,9 @@ private:
   
   /// Raw I2C write (no health tracking)
   Status _i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len);
+
+  /// Raw special I2C operation (no health tracking)
+  Status _i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer);
   
   /// Tracked I2C write-read to an explicit address (updates health)
   Status _i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
@@ -435,6 +528,9 @@ private:
 
   /// Tracked I2C write to an explicit address (updates health)
   Status _i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len);
+
+  /// Tracked special I2C operation (updates health)
+  Status _i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& transfer);
   
   // =========================================================================
   // Internal Helpers
@@ -489,6 +585,19 @@ private:
   /// Convert active variant metadata to public enum.
   DeviceVariant _activeVariantEnum() const;
 
+  /// Return OK only when public bus access is allowed by Sleep state.
+  Status _ensureAwakeForI2c();
+
+  /// Advance WAKING -> AWAKE when the caller-supplied time reaches the deadline.
+  void _advanceWakeState(uint32_t nowMs);
+
+  /// Build the special-operation transfer envelope for this instance.
+  I2cSpecialTransfer _specialTransfer(uint8_t i2cAddress,
+                                      const uint8_t* txData = nullptr,
+                                      size_t txLen = 0,
+                                      uint8_t* rxData = nullptr,
+                                      size_t rxLen = 0) const;
+
   /// Update the tracked current address after a successful memory transaction.
   void _setCurrentAddressAfterTransfer(uint32_t address, size_t len);
   
@@ -517,6 +626,9 @@ private:
   bool _initialized = false;
   DriverState _driverState = DriverState::UNINIT;
   bool _allowOfflineI2c = false;
+  bool _highSpeedModeEnabled = false;
+  SleepState _sleepState = SleepState::AWAKE;
+  uint32_t _sleepWakeReadyMs = 0;
   
   // Health counters
   uint32_t _lastOkMs = 0;

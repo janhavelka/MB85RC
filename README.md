@@ -144,6 +144,29 @@ instance.
 The Arduino and ESP-IDF CLIs are diagnostic bring-up examples. They own their
 example buses and are not production shared-bus manager templates.
 
+## High-Speed And Sleep Modes
+
+Local datasheets document High-speed mode and Sleep mode only for
+MB85RC64TA, MB85RC512T, and MB85RC1MT. The driver exposes variant-gated
+capability metadata and APIs for those parts. `MB85RC04V`, `MB85RC16V`, and
+`MB85RC256V` return `UNSUPPORTED` for these mode requests and perform no bus
+traffic.
+
+MB85RC core does not change the MCU I2C clock, pins, controller mode, or bus
+locking. `enterHighSpeedMode()` enables HS-prefixed memory/current-address
+transfers through the optional `Config::i2cSpecial` callback; each transfer
+sends the `0000 1XXX` master-code prefix because a STOP exits HS state. The
+application bus manager must configure and validate 3.4 MHz operation if that
+bus speed is used. The included diagnostic examples report prefix emission and
+current bus settings; they do not prove real 3.4 MHz hardware operation.
+
+Sleep entry is emitted through `Config::i2cSpecial` as `F8h` plus the active
+device address word, repeated START, then `86h`. On success the driver marks the
+device asleep and invalidates current-address tracking. `wake()` sends the wake
+stimulus, then the application must wait `tREC >= 400 us` before access or
+`recover()`; the core records a conservative millisecond wake gate and inserts
+no hidden delay.
+
 ## Release 2.0.0 Highlights
 
 - Runtime support now covers every locally documented variant: `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
@@ -190,7 +213,20 @@ example buses and are not production shared-bus manager templates.
 - `DeviceId deviceId() const` - cached Device ID from the last successful `begin()` / `recover()` validation.
 - `uint32_t capacityBytes() const` - active runtime capacity.
 - `uint32_t maxAddress() const` - active highest valid memory address.
+- `uint32_t maxNormalBusHz() const` - active variant normal-mode I2C bus limit.
+- `uint32_t maxHighSpeedBusHz() const` - active variant HS bus limit, or `0` when unsupported.
 - `static constexpr uint16_t memorySize()` - legacy MB85RC256V size helper retained for existing users.
+
+### High-Speed And Sleep APIs
+
+- `bool supportsHighSpeedMode() const` - true only for variants with local HS-mode datasheet support.
+- `Status enterHighSpeedMode()` / `Status exitHighSpeedMode()` - enable or disable HS-prefixed memory/current-address transfers; the MCU bus clock remains application-owned.
+- `Status setHighSpeedMode(bool enabled)` - explicit form of the same HS transfer-mode toggle.
+- `bool supportsSleepMode() const` - true only for variants with local Sleep-mode datasheet support.
+- `SleepState sleepState() const` - `AWAKE`, `ASLEEP`, or `WAKING` separate from driver health.
+- `uint16_t sleepRecoveryUs() const` - active variant `tREC` contract in microseconds.
+- `Status enterSleep()` - send the Sleep entry sequence through `Config::i2cSpecial`.
+- `Status wake()` / `Status wakeFromSleep()` - send the wake stimulus and enter `WAKING`; call `tick()` after the recovery interval before normal access.
 
 ### Memory Operations
 
@@ -270,10 +306,10 @@ known successful addressed read/write by the same instance.
 | --- | ---: | --- | --- | --- | --- | --- |
 | `MB85RC04V` | 512 B | A2/A1 pins select a base pair; A8 selects the transaction address (`0x50`-`0x57` across all straps) | 1 byte plus A8 in I2C address | Yes, product `0x010`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
 | `MB85RC16V` | 2 KB | `0x50`-`0x57` encodes memory A10:A8; no external address-select pins | 1 byte plus A10:A8 in I2C address | No; select `DeviceVariant::MB85RC16V` explicitly | 1 MHz | Memory-probe diagnostics only; `AUTO` cannot discover it. |
-| `MB85RC64TA` | 8 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x1FFF` | Yes, product `0x358`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
+| `MB85RC64TA` | 8 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x1FFF` | Yes, product `0x358`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
 | `MB85RC256V` | 32 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x7FFF` | Yes, product `0x510`; default selector | 1 MHz | Legacy default; no high-speed or sleep command support documented in local summary. |
-| `MB85RC512T` | 64 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0xFFFF` | Yes, product `0x658`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
-| `MB85RC1MT` | 128 KB | A2/A1 pins select a base pair; A16 selects the transaction address (`0x50`-`0x57` across all straps) | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed and sleep are documented by datasheet but not implemented by the core. |
+| `MB85RC512T` | 64 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0xFFFF` | Yes, product `0x658`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
+| `MB85RC1MT` | 128 KB | A2/A1 pins select a base pair; A16 selects the transaction address (`0x50`-`0x57` across all straps) | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
 
 `AUTO` uses the Device ID command and therefore works only on variants that implement Device ID. `MB85RC16V` must be selected explicitly. The driver derives runtime transaction addresses from `Config::i2cAddress` plus the active variant's address model.
 
@@ -288,7 +324,7 @@ the local summaries show 10^12 writes/byte for `MB85RC04V`, `MB85RC16V`, and
 | Coverage area | Current evidence | Status |
 | --- | --- | --- |
 | Implemented behavior | Public headers, README contracts, framework-neutral `src/`, runtime variant table, range checks, current-address tracking, detailed write/fill/verify APIs | Implemented in code |
-| Unit-test coverage | Native fake-bus tests cover variant selection, address encoding, range boundaries, partial chunk failures, WP-high simulation, current-address invalidation, and health transitions | Covered by native tests |
+| Unit-test coverage | Native fake-bus tests cover variant selection, address encoding, range boundaries, partial chunk failures, WP-high simulation, current-address invalidation, HS/Sleep variant gating, special-transfer routing, and health transitions | Covered by native tests |
 | CI/build coverage | PlatformIO Arduino builds for ESP32-S2/S3, native tests, guard scripts, package validation, and pure ESP-IDF CI workflow for `examples/espidf_basic` | Covered by CI configuration; local IDF build depends on `idf.py` availability |
 | Hardware validation | Board/variant/address-pin/WP/brownout/shared-bus/soak evidence | Pending hardware; use the matrix below |
 
@@ -302,6 +338,10 @@ bus speed, address-pin straps, WP wiring, command log, and captured evidence.
 | --- | --- | --- | --- | --- | --- |
 | Device ID read and `begin(AUTO)` | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | Each board's selected strap | `id`, `idraw`, `begin(AUTO)` | Manufacturer `0x00A`, expected product ID, active capacity selected | Pending hardware |
 | No-ID explicit variant | `MB85RC16V` | A10:A8 encoded in transaction address | `begin(MB85RC16V)`, memory probe, `readDeviceId()` negative check | Explicit begin succeeds on present device; Device ID APIs reject as unsupported | Pending hardware |
+| High-speed entry and 3.4 MHz access | `MB85RC64TA`, `MB85RC512T`, `MB85RC1MT` | Production straps | `hs support`, `hs enter`, reconfigure application bus to 3.4 MHz, `read`/`writeVerify` on sacrificial range | HS entry prefix observed; 3.4 MHz transactions verify; STOP exit behavior understood | Pending hardware |
+| Unsupported High-speed rejection | `MB85RC04V`, `MB85RC16V`, `MB85RC256V` | Any valid strap | `hs support`, `hs enter` | CLI/API report unsupported; no HS bus sequence is emitted | Pending hardware |
+| Sleep enter/wake/recover | `MB85RC64TA`, `MB85RC512T`, `MB85RC1MT` | Production straps | `sleep support`, `sleep enter`, `sleep wake`, `recover`, then `read`/`writeVerify` | Sleep current/reduced activity observed if measured; wake waits `tREC >= 400 us`; access recovers | Pending hardware |
+| Unsupported Sleep rejection | `MB85RC04V`, `MB85RC16V`, `MB85RC256V` | Any valid strap | `sleep support`, `sleep enter`, `sleep wake` | CLI/API report unsupported; no sleep bus sequence is emitted | Pending hardware |
 | Address pin combinations | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | A1/A2 or A0/A1/A2 low/high combinations as applicable | I2C scan plus `begin()` at each strapped address | Only strapped address responds; wrong addresses NACK | Pending hardware |
 | Upper-address bits in I2C address | `MB85RC16V` | No external address-select pins | Write/read across `0x00FF`, `0x0100`, and `0x07FF` | A10:A8 transaction address selection works and exact-end byte verifies | Pending hardware |
 | Exact-end read/write | All supported variants | Default and at least one nonzero strap | `writeVerify(maxAddress - n + 1, n)` and `read()` | Last valid byte range succeeds and verifies | Pending hardware |
@@ -357,6 +397,8 @@ the application layer:
   - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
+  - `hs`, `hs support`, and `hs enter` for High-speed capability diagnostics
+  - `sleep`, `sleep support`, `sleep enter`, and `sleep wake` for Sleep mode diagnostics
   - `drv`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
   - `rw_suite` for read/write/fill/verify diagnostics with best-effort restore
   - `randbench [N]` for random-access timing over a scratch window with compact restore status
@@ -366,7 +408,7 @@ the application layer:
   - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.
   - Uses `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
   - Owns its example I2C bus and blocks on console input; production systems must serialize shared-bus access externally.
-  - Preserves current-address, Device ID, raw ID, active-capacity, stress, self-test, benchmark, and typed-demo command coverage.
+  - Preserves current-address, Device ID, raw ID, active-capacity, HS/Sleep diagnostics, stress, self-test, benchmark, and typed-demo command coverage.
   - Requires explicit `!` confirmation forms before changing FRAM contents:
     `write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`, `stress_mix!`,
     `randbench!`, and `typed_demo!`.
@@ -386,6 +428,11 @@ current 16                # Read 16 bytes from the current internal address
 rw_suite!                 # Confirmed deterministic read/write/fill/verify suite
 randbench! 4096           # Confirmed random writes + random reads timing
 typed_demo!               # Confirmed explicit typed value storage demo
+hs support                # Show active variant High-speed capability
+hs enter                  # Enable HS-prefixed transfers if supported by variant/transport
+sleep support             # Show active variant Sleep capability and tREC
+sleep enter               # Send Sleep entry sequence if supported
+sleep wake                # Wake, wait recovery interval, then recover
 ```
 
 ### Example Helpers
@@ -418,6 +465,7 @@ typed_demo!               # Confirmed explicit typed value storage demo
 6. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
 7. Current-address reads: use `readCurrentAddress()` only after a known address-setting transaction, such as a successful addressed `read()`, `readByte()`, `write()`, `writeByte()`, or `fill()` by the same instance. Current-address state is undefined after power-up and is conservatively invalidated after failed I2C memory/current-address transactions and `recover()`. Raw diagnostics such as `probe()` are not address-setting contracts and may disturb the device pointer; use an addressed read after them if current-address state matters.
 8. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures.
+9. High-speed and Sleep: HS/Sleep APIs are variant-gated and require the optional special transport callback. The core does not change the MCU bus clock or insert Sleep wake delays; the application bus manager owns those policies.
 9. Health behavior: `OFFLINE` is latched. Normal public I2C operations return `BUSY` with `Driver is offline; call recover()` without touching the bus until `recover()` succeeds.
 
 ## Validation

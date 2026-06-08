@@ -75,6 +75,15 @@ int32_t deviceIdDetail(const DeviceId& id) {
   return static_cast<int32_t>((id.manufacturerId << 12) | id.productId);
 }
 
+bool isValidHighSpeedMasterCode(uint8_t value) {
+  return value >= cmd::HIGH_SPEED_MASTER_CODE_MIN &&
+         value <= cmd::HIGH_SPEED_MASTER_CODE_MAX;
+}
+
+bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
+  return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
+}
+
 class ScopedOfflineI2cAllowance {
 public:
   explicit ScopedOfflineI2cAllowance(bool& flag, bool allow) : _flag(flag), _old(flag) {
@@ -113,6 +122,9 @@ Status MB85RC::begin(const Config& config) {
   _totalFailures = 0;
   _totalSuccess = 0;
   _allowOfflineI2c = false;
+  _highSpeedModeEnabled = false;
+  _sleepState = SleepState::AWAKE;
+  _sleepWakeReadyMs = 0;
   _currentAddressKnown = false;
   _currentAddress = 0;
 
@@ -129,6 +141,9 @@ Status MB85RC::begin(const Config& config) {
     _totalFailures = 0;
     _totalSuccess = 0;
     _allowOfflineI2c = false;
+    _highSpeedModeEnabled = false;
+    _sleepState = SleepState::AWAKE;
+    _sleepWakeReadyMs = 0;
     _currentAddressKnown = false;
     _currentAddress = 0;
     return failure;
@@ -143,6 +158,9 @@ Status MB85RC::begin(const Config& config) {
   if (config.i2cAddress < cmd::MIN_ADDRESS || config.i2cAddress > cmd::MAX_ADDRESS) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address (must be 0x50-0x57)");
   }
+  if (!isValidHighSpeedMasterCode(config.highSpeedMasterCode)) {
+    return Status::Error(Err::INVALID_CONFIG, "High-speed master code must be 0x08-0x0F");
+  }
   if (config.expectedVariant != DeviceVariant::AUTO &&
       variantForExpected(config.expectedVariant) == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
@@ -150,6 +168,11 @@ Status MB85RC::begin(const Config& config) {
   const cmd::VariantInfo* explicitVariant = variantForExpected(config.expectedVariant);
   if (explicitVariant != nullptr && !isSupportedRuntimeVariant(*explicitVariant)) {
     return Status::Error(Err::INVALID_CONFIG, "Expected variant not supported by driver");
+  }
+  if (config.sleepRecoveryUs != 0U && explicitVariant != nullptr &&
+      explicitVariant->supportsSleepMode &&
+      config.sleepRecoveryUs < explicitVariant->sleepRecoveryUs) {
+    return Status::Error(Err::INVALID_CONFIG, "Sleep recovery time below datasheet tREC");
   }
 
   _config = config;
@@ -180,6 +203,12 @@ Status MB85RC::begin(const Config& config) {
     if (!st.ok()) {
       return resetAfterFailedBegin(st);
     }
+    if (_config.sleepRecoveryUs != 0U && _variant != nullptr &&
+        _variant->supportsSleepMode &&
+        _config.sleepRecoveryUs < _variant->sleepRecoveryUs) {
+      return resetAfterFailedBegin(
+          Status::Error(Err::INVALID_CONFIG, "Sleep recovery time below datasheet tREC"));
+    }
   }
 
   _initialized = true;
@@ -189,7 +218,7 @@ Status MB85RC::begin(const Config& config) {
 }
 
 void MB85RC::tick(uint32_t nowMs) {
-  (void)nowMs;
+  _advanceWakeState(nowMs);
   // FRAM has no write delays or async operations.
   // Reserved for future use (e.g., periodic health checks).
 }
@@ -207,6 +236,9 @@ void MB85RC::end() {
   _totalFailures = 0;
   _totalSuccess = 0;
   _allowOfflineI2c = false;
+  _highSpeedModeEnabled = false;
+  _sleepState = SleepState::AWAKE;
+  _sleepWakeReadyMs = 0;
   _currentAddressKnown = false;
   _currentAddress = 0;
 }
@@ -227,6 +259,14 @@ Status MB85RC::getSettings(SettingsSnapshot& out) const {
   out.densityCode = _deviceId.densityCode;
   out.capacityBytes = capacityBytes();
   out.maxAddress = maxAddress();
+  out.maxNormalBusHz = maxNormalBusHz();
+  out.maxHighSpeedBusHz = maxHighSpeedBusHz();
+  out.highSpeedModeSupported = supportsHighSpeedMode();
+  out.highSpeedModeEnabled = _highSpeedModeEnabled;
+  out.sleepModeSupported = supportsSleepMode();
+  out.sleepState = _sleepState;
+  out.sleepWakeReadyMs = _sleepWakeReadyMs;
+  out.sleepRecoveryUs = sleepRecoveryUs();
   out.currentAddressKnown = _currentAddressKnown;
   out.currentAddress = _currentAddress;
   return Status::Ok();
@@ -240,6 +280,114 @@ uint32_t MB85RC::capacityBytes() const {
 uint32_t MB85RC::maxAddress() const {
   return (_variant != nullptr) ? cmd::maxAddressForVariant(*_variant)
                                : cmd::MAX_MEM_ADDRESS_MB85RC256V;
+}
+
+uint32_t MB85RC::maxNormalBusHz() const {
+  return (_variant != nullptr) ? _variant->maxNormalBusHz : cmd::NORMAL_BUS_HZ;
+}
+
+uint32_t MB85RC::maxHighSpeedBusHz() const {
+  return supportsHighSpeedMode() ? _variant->maxHighSpeedBusHz : 0UL;
+}
+
+bool MB85RC::supportsHighSpeedMode() const {
+  return _variant != nullptr && _variant->supportsHighSpeedMode;
+}
+
+bool MB85RC::supportsSleepMode() const {
+  return _variant != nullptr && _variant->supportsSleepMode;
+}
+
+uint16_t MB85RC::sleepRecoveryUs() const {
+  if (!supportsSleepMode()) {
+    return 0U;
+  }
+  return (_config.sleepRecoveryUs != 0U) ? _config.sleepRecoveryUs : _variant->sleepRecoveryUs;
+}
+
+Status MB85RC::setHighSpeedMode(bool enabled) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (!enabled) {
+    _highSpeedModeEnabled = false;
+    return Status::Ok();
+  }
+  if (!supportsHighSpeedMode()) {
+    return Status::Error(Err::UNSUPPORTED, "Active variant does not support High-speed mode");
+  }
+  if (_config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
+  }
+  if (!isValidHighSpeedMasterCode(_config.highSpeedMasterCode)) {
+    return Status::Error(Err::INVALID_CONFIG, "High-speed master code must be 0x08-0x0F");
+  }
+  _highSpeedModeEnabled = true;
+  return Status::Ok();
+}
+
+Status MB85RC::enterSleep() {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (!supportsSleepMode()) {
+    return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
+  }
+  if (_config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
+  }
+  if (_sleepState == SleepState::ASLEEP) {
+    return Status::Error(Err::BUSY, "Device is already asleep");
+  }
+  if (_sleepState == SleepState::WAKING) {
+    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+  }
+
+  I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
+  Status st = _i2cSpecialTracked(I2cSpecialOp::ENTER_SLEEP, transfer);
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+  if (!st.ok()) {
+    return st;
+  }
+
+  _sleepState = SleepState::ASLEEP;
+  _sleepWakeReadyMs = 0;
+  return Status::Ok();
+}
+
+Status MB85RC::wake() {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (!supportsSleepMode()) {
+    return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
+  }
+  if (_sleepState == SleepState::AWAKE) {
+    return Status::Ok();
+  }
+  if (_config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
+  }
+  if (_sleepState == SleepState::WAKING) {
+    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+  }
+
+  I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
+  Status st = _i2cSpecialTracked(I2cSpecialOp::WAKE_FROM_SLEEP, transfer);
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+  if (!st.ok()) {
+    return st;
+  }
+
+  _sleepState = SleepState::WAKING;
+  uint32_t recoveryMs = (static_cast<uint32_t>(sleepRecoveryUs()) + 999UL) / 1000UL;
+  if (recoveryMs < cmd::SLEEP_RECOVERY_MS) {
+    recoveryMs = cmd::SLEEP_RECOVERY_MS;
+  }
+  _sleepWakeReadyMs = _nowMs() + recoveryMs;
+  return Status::Ok();
 }
 
 // ===========================================================================
@@ -719,6 +867,10 @@ Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
 
 Status MB85RC::_i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                 uint8_t* rxBuf, size_t rxLen) {
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
+  }
   if ((txLen > 0 && txBuf == nullptr) || (rxLen > 0 && rxBuf == nullptr) ||
       (txLen == 0 && rxLen == 0)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
@@ -726,18 +878,37 @@ Status MB85RC::_i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen
   if (_config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write-read not set");
   }
+  if (_highSpeedModeEnabled && addr >= cmd::MIN_ADDRESS && addr <= cmd::MAX_ADDRESS) {
+    I2cSpecialTransfer transfer = _specialTransfer(addr, txBuf, txLen, rxBuf, rxLen);
+    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE_READ, transfer);
+  }
   return _config.i2cWriteRead(addr, txBuf, txLen, rxBuf, rxLen,
                               _config.i2cTimeoutMs, _config.i2cUser);
 }
 
 Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len) {
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
+  }
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
   if (_config.i2cWrite == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write not set");
   }
+  if (_highSpeedModeEnabled && addr >= cmd::MIN_ADDRESS && addr <= cmd::MAX_ADDRESS) {
+    I2cSpecialTransfer transfer = _specialTransfer(addr, buf, len);
+    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE, transfer);
+  }
   return _config.i2cWrite(addr, buf, len, _config.i2cTimeoutMs, _config.i2cUser);
+}
+
+Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer) {
+  if (_config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
+  }
+  return _config.i2cSpecial(op, transfer, _config.i2cTimeoutMs, _config.i2cUser);
 }
 
 Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
@@ -749,6 +920,10 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
                                         uint8_t* rxBuf, size_t rxLen) {
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
     return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
   }
 
   if ((txLen > 0 && txBuf == nullptr) || (rxLen > 0 && rxBuf == nullptr) ||
@@ -771,6 +946,10 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
     return Status::Error(Err::BUSY, "Driver is offline; call recover()");
   }
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
+  }
 
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
@@ -778,6 +957,19 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
 
   Status st = _i2cWriteRaw(addr, buf, len);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
+    return st;
+  }
+  return _updateHealth(st);
+}
+
+Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& transfer) {
+  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
+    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+  }
+
+  Status st = _i2cSpecialRaw(op, transfer);
+  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
+      st.code == Err::UNSUPPORTED) {
     return st;
   }
   return _updateHealth(st);
@@ -1069,6 +1261,46 @@ DeviceVariant MB85RC::_activeVariantEnum() const {
     return DeviceVariant::MB85RC1MT;
   }
   return DeviceVariant::AUTO;
+}
+
+Status MB85RC::_ensureAwakeForI2c() {
+  if (!_initialized) {
+    return Status::Ok();
+  }
+  if (_sleepState == SleepState::WAKING) {
+    _advanceWakeState(_nowMs());
+  }
+  if (_sleepState == SleepState::ASLEEP) {
+    return Status::Error(Err::BUSY, "Device is asleep; call wake()");
+  }
+  if (_sleepState == SleepState::WAKING) {
+    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+  }
+  return Status::Ok();
+}
+
+void MB85RC::_advanceWakeState(uint32_t nowMs) {
+  if (_sleepState == SleepState::WAKING && deadlineReached(nowMs, _sleepWakeReadyMs)) {
+    _sleepState = SleepState::AWAKE;
+    _sleepWakeReadyMs = 0;
+  }
+}
+
+I2cSpecialTransfer MB85RC::_specialTransfer(uint8_t i2cAddress,
+                                            const uint8_t* txData,
+                                            size_t txLen,
+                                            uint8_t* rxData,
+                                            size_t rxLen) const {
+  I2cSpecialTransfer transfer;
+  transfer.i2cAddress = i2cAddress;
+  transfer.hsMasterCode = _config.highSpeedMasterCode;
+  transfer.txData = txData;
+  transfer.txLen = txLen;
+  transfer.rxData = rxData;
+  transfer.rxLen = rxLen;
+  transfer.recoveryUs = (_config.sleepRecoveryUs != 0U) ? _config.sleepRecoveryUs
+                                                        : cmd::SLEEP_RECOVERY_US;
+  return transfer;
 }
 
 void MB85RC::_setCurrentAddressAfterTransfer(uint32_t address, size_t len) {

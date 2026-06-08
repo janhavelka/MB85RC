@@ -46,6 +46,13 @@ MANDATORY_COMMANDS = [
     "idraw",
     "variants",
     "size",
+    "hs",
+    "hs support",
+    "hs enter",
+    "sleep",
+    "sleep support",
+    "sleep enter",
+    "sleep wake",
     "drv",
     "iface_reset",
     "probe",
@@ -79,6 +86,18 @@ IDF_REQUIRED_COMPONENTS = [
     "esp_timer",
     "freertos",
     "vfs",
+]
+
+MODE_CONTRACT_TOKENS = [
+    "Active variant:",
+    "Support:",
+    "Core bus clock: unchanged",
+    "MB85RC core does not change Wire/ESP-IDF I2C clock",
+    "application bus manager must configure/operate the bus at 3.4 MHz",
+    "STOP exits high-speed mode",
+    "F8h + active device address word + repeated-start 86h",
+    "tREC >= 400 us",
+    "Hardware validation: not claimed by this diagnostic",
 ]
 
 
@@ -158,6 +177,10 @@ def main() -> int:
         require_help(text, cmd)
 
     idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
+    for token in MODE_CONTRACT_TOKENS:
+        require_literal(text, token, "Arduino HS/Sleep diagnostic wording")
+        require_literal(idf_text, token, "ESP-IDF HS/Sleep diagnostic wording")
+
     if 'extern "C" void app_main(void)' not in idf_text:
         fail("ESP-IDF entry point must define app_main()")
 

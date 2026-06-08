@@ -17,6 +17,12 @@ FORBIDDEN_CALLS = {
     "esp_timer_get_time": re.compile(r"\besp_timer_get_time\s*\("),
     "delayMicroseconds": re.compile(r"\bdelayMicroseconds\s*\("),
     "vTaskDelay": re.compile(r"\bvTaskDelay\s*\("),
+    "sleep_for": re.compile(r"\bsleep_for\s*\("),
+    "usleep": re.compile(r"\busleep\s*\("),
+    "nanosleep": re.compile(r"\bnanosleep\s*\("),
+    "Sleep": re.compile(r"\bSleep\s*\("),
+    "esp_rom_delay_us": re.compile(r"\besp_rom_delay_us\s*\("),
+    "ets_delay_us": re.compile(r"\bets_delay_us\s*\("),
     "yield": re.compile(r"\byield\s*\("),
 }
 

@@ -72,6 +72,19 @@ MB85RC::Status mapI2c(esp_err_t err, const char* msg) {
   return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
 }
 
+const char* sleepStateName(MB85RC::SleepState state) {
+  switch (state) {
+    case MB85RC::SleepState::AWAKE:
+      return "AWAKE";
+    case MB85RC::SleepState::ASLEEP:
+      return "ASLEEP";
+    case MB85RC::SleepState::WAKING:
+      return "WAKING";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) {
   i2c_device_config_t dev = {};
   dev.dev_addr_length = I2C_ADDR_BIT_LEN_7;
@@ -147,6 +160,164 @@ esp_err_t transmitReceiveWithManualAddress(NativeBus& bus, uint8_t addr,
   return err;
 }
 
+esp_err_t executeRawOperations(NativeBus& bus, i2c_operation_job_t* ops, size_t opCount,
+                               uint32_t timeoutMs) {
+  i2c_device_config_t devCfg = {};
+  devCfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  devCfg.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+  devCfg.scl_speed_hz = bus.freqHz;
+
+  i2c_master_dev_handle_t dev = nullptr;
+  esp_err_t err = i2c_master_bus_add_device(bus.bus, &devCfg, &dev);
+  if (err == ESP_OK) {
+    err = i2c_master_execute_defined_operations(dev, ops, opCount, timeoutArg(timeoutMs));
+  }
+  if (dev != nullptr) {
+    (void)i2c_master_bus_rm_device(dev);
+  }
+  return err;
+}
+
+esp_err_t highSpeedWrite(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                         uint32_t timeoutMs) {
+  if (transfer.txData == nullptr || transfer.txLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  uint8_t hsMasterCode = transfer.hsMasterCode;
+  uint8_t writeAddress = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  i2c_operation_job_t ops[6] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &hsMasterCode;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &writeAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = const_cast<uint8_t*>(transfer.txData);
+  ops[op].write.total_bytes = transfer.txLen;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t highSpeedWriteRead(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                             uint32_t timeoutMs) {
+  if ((transfer.txLen > 0U && transfer.txData == nullptr) ||
+      (transfer.rxLen > 0U && transfer.rxData == nullptr) ||
+      transfer.rxLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  uint8_t hsMasterCode = transfer.hsMasterCode;
+  uint8_t writeAddress = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  uint8_t readAddress = static_cast<uint8_t>((transfer.i2cAddress << 1) | 0x01U);
+  i2c_operation_job_t ops[10] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &hsMasterCode;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  if (transfer.txLen > 0U) {
+    ops[op].command = I2C_MASTER_CMD_WRITE;
+    ops[op].write.ack_check = true;
+    ops[op].write.data = &writeAddress;
+    ops[op].write.total_bytes = 1U;
+    ++op;
+    ops[op].command = I2C_MASTER_CMD_WRITE;
+    ops[op].write.ack_check = true;
+    ops[op].write.data = const_cast<uint8_t*>(transfer.txData);
+    ops[op].write.total_bytes = transfer.txLen;
+    ++op;
+    ops[op++].command = I2C_MASTER_CMD_START;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &readAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  if (transfer.rxLen > 1U) {
+    ops[op].command = I2C_MASTER_CMD_READ;
+    ops[op].read.ack_value = I2C_ACK_VAL;
+    ops[op].read.data = transfer.rxData;
+    ops[op].read.total_bytes = transfer.rxLen - 1U;
+    ++op;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_READ;
+  ops[op].read.ack_value = I2C_NACK_VAL;
+  ops[op].read.data = transfer.rxData + (transfer.rxLen - 1U);
+  ops[op].read.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t enterSleepRaw(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                        uint32_t timeoutMs) {
+  uint8_t reserved = MB85RC::cmd::SLEEP_RESERVED_ADDR_W;
+  uint8_t deviceWord = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  uint8_t sleepCommand = MB85RC::cmd::SLEEP_ENTRY_COMMAND;
+  i2c_operation_job_t ops[6] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &reserved;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &deviceWord;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &sleepCommand;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t wakeRaw(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                  uint32_t timeoutMs) {
+  uint8_t deviceWord = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  i2c_operation_job_t ops[3] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &deviceWord;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
 MB85RC::Status i2cWrite(uint8_t addr, const uint8_t* data, size_t len,
                         uint32_t timeoutMs, void* user) {
   NativeBus* bus = static_cast<NativeBus*>(user);
@@ -191,6 +362,39 @@ MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
     (void)i2c_master_bus_rm_device(dev);
   }
   return mapI2c(err, "I2C write-read failed");
+}
+
+MB85RC::Status i2cSpecial(MB85RC::I2cSpecialOp op,
+                          const MB85RC::I2cSpecialTransfer& transfer,
+                          uint32_t timeoutMs, void* user) {
+  NativeBus* bus = static_cast<NativeBus*>(user);
+  if (bus == nullptr || bus->bus == nullptr) {
+    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
+  }
+
+  esp_err_t err = ESP_ERR_INVALID_ARG;
+  const char* context = "I2C special operation failed";
+  switch (op) {
+    case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE:
+      context = "I2C high-speed write failed";
+      err = highSpeedWrite(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE_READ:
+      context = "I2C high-speed write-read failed";
+      err = highSpeedWriteRead(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::ENTER_SLEEP:
+      context = "I2C sleep entry failed";
+      err = enterSleepRaw(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::WAKE_FROM_SLEEP:
+      context = "I2C sleep wake failed";
+      err = wakeRaw(*bus, transfer, timeoutMs);
+      break;
+    default:
+      return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Unknown special op");
+  }
+  return mapI2c(err, context);
 }
 
 bool initBus() {
@@ -330,6 +534,7 @@ void formatWriteConfirmation(uint32_t addr, const uint8_t* data, size_t dataLen,
 void beginDriver() {
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
+  gCfg.i2cSpecial = i2cSpecial;
   gCfg.i2cUser = &gBus;
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
@@ -345,6 +550,8 @@ void printHelp() {
   puts("  write <addr> <byte> [byte...] | write! <addr> <byte> [byte...]");
   puts("  fill <addr> <value> <len> | fill! <addr> <value> <len>");
   puts("  current / cur [len] | id | idraw | variants | size");
+  puts("  hs | hs support | hs enter");
+  puts("  sleep | sleep support | sleep enter | sleep wake");
   puts("  drv | iface_reset | probe | recover | verbose [0|1]");
   puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
   puts("  stress_mix [N] | stress_mix! [N] | randbench [N] | randbench! [N]");
@@ -373,6 +580,80 @@ void printDrv() {
          static_cast<unsigned long>(gFram.totalSuccess()),
          static_cast<unsigned long>(gFram.totalFailures()),
          static_cast<unsigned>(gFram.consecutiveFailures()));
+  printf("hs_support=%s hs_enabled=%s normal_hz=%lu hs_hz=%lu sleep_support=%s sleep_state=%s tREC_us=%u wake_ready_ms=%lu\n",
+         snap.highSpeedModeSupported ? "yes" : "no",
+         snap.highSpeedModeEnabled ? "yes" : "no",
+         static_cast<unsigned long>(snap.maxNormalBusHz),
+         static_cast<unsigned long>(snap.maxHighSpeedBusHz),
+         snap.sleepModeSupported ? "yes" : "no",
+         sleepStateName(snap.sleepState),
+         static_cast<unsigned>(snap.sleepRecoveryUs),
+         static_cast<unsigned long>(snap.sleepWakeReadyMs));
+}
+
+void printHighSpeedSupport() {
+  MB85RC::SettingsSnapshot snap = gFram.getSettings();
+  puts("High-speed mode:");
+  printf("  Active variant: %s\n", snap.variantName);
+  printf("  Support: %s\n", snap.highSpeedModeSupported ? "yes" : "no");
+  printf("  Enabled: %s\n", snap.highSpeedModeEnabled ? "yes" : "no");
+  printf("  Default HS master code: 0x%02X\n", MB85RC::cmd::HIGH_SPEED_MASTER_CODE_DEFAULT);
+  puts("  Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock");
+  printf("  Diagnostic bus clock: %lu Hz; this example emits the HS prefix but does not prove 3.4 MHz operation\n",
+         static_cast<unsigned long>(gBus.freqHz));
+  puts("  App action: application bus manager must configure/operate the bus at 3.4 MHz after HS entry");
+  puts("  Note: STOP exits high-speed mode; enabled driver transfers send the HS prefix per transaction");
+  puts("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleHighSpeedCommand(const char* full) {
+  printHighSpeedSupport();
+  if (strcmp(full, "hs") == 0 || strcmp(full, "hs support") == 0) {
+    return;
+  }
+  if (strcmp(full, "hs enter") == 0) {
+    MB85RC::Status st = gFram.enterHighSpeedMode();
+    printStatus("hs enter", st);
+    if (st.ok()) {
+      puts("High-speed transfer mode requested; entry prefix is sent with each memory transfer.");
+    }
+    return;
+  }
+  puts("Usage: hs | hs support | hs enter");
+}
+
+void printSleepSupport() {
+  MB85RC::SettingsSnapshot snap = gFram.getSettings();
+  puts("Sleep mode:");
+  printf("  Active variant: %s\n", snap.variantName);
+  printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
+  printf("  State: %s\n", sleepStateName(snap.sleepState));
+  puts("  Entry: F8h + active device address word + repeated-start 86h");
+  puts("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
+  puts("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
+  puts("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleSleepCommand(const char* full) {
+  printSleepSupport();
+  if (strcmp(full, "sleep") == 0 || strcmp(full, "sleep support") == 0) {
+    return;
+  }
+  if (strcmp(full, "sleep enter") == 0) {
+    printStatus("sleep enter", gFram.enterSleep());
+    return;
+  }
+  if (strcmp(full, "sleep wake") == 0) {
+    MB85RC::Status st = gFram.wake();
+    printStatus("sleep wake", st);
+    if (st.ok()) {
+      vTaskDelay(pdMS_TO_TICKS(MB85RC::cmd::SLEEP_RECOVERY_MS));
+      gFram.tick(nowMs(nullptr));
+      printStatus("recover after sleep wake", gFram.recover());
+    }
+    return;
+  }
+  puts("Usage: sleep | sleep support | sleep enter | sleep wake");
 }
 
 void dumpMemory(uint32_t addr, uint32_t len) {
@@ -547,11 +828,16 @@ void verifyMemory(uint32_t addr, const uint8_t* expected, size_t len) {
 void printVariants() {
   for (size_t i = 0; i < MB85RC::cmd::VARIANT_COUNT; ++i) {
     const MB85RC::cmd::VariantInfo& v = MB85RC::cmd::KNOWN_VARIANTS[i];
-    printf("%s bytes=%lu device_id=%s supported=%s\n",
+    printf("%s bytes=%lu device_id=%s supported=%s hs=%s sleep=%s normal_hz=%lu hs_hz=%lu tREC_us=%u\n",
            v.name,
            static_cast<unsigned long>(v.memoryBytes),
            v.hasDeviceId ? "yes" : "no",
-           v.supportedByDriver ? "yes" : "no");
+           v.supportedByDriver ? "yes" : "no",
+           v.supportsHighSpeedMode ? "yes" : "no",
+           v.supportsSleepMode ? "yes" : "no",
+           static_cast<unsigned long>(v.maxNormalBusHz),
+           static_cast<unsigned long>(v.maxHighSpeedBusHz),
+           static_cast<unsigned>(v.sleepRecoveryUs));
   }
 }
 
@@ -741,6 +1027,12 @@ void handleCommand(char* line) {
     printf("MB85RC %s %s\n", MB85RC::VERSION, MB85RC::VERSION_FULL);
   } else if (strcmp(full, "scan") == 0) {
     scanBus();
+  } else if (strcmp(full, "hs") == 0 || strcmp(full, "hs support") == 0 ||
+             strcmp(full, "hs enter") == 0) {
+    handleHighSpeedCommand(full);
+  } else if (strcmp(full, "sleep") == 0 || strcmp(full, "sleep support") == 0 ||
+             strcmp(full, "sleep enter") == 0 || strcmp(full, "sleep wake") == 0) {
+    handleSleepCommand(full);
   } else if (strcmp(full, "probe") == 0) {
     printStatus("probe", gFram.probe());
   } else if (strcmp(full, "recover") == 0) {

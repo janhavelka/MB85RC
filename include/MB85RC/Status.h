@@ -26,7 +26,8 @@ enum class Err : uint8_t {
   I2C_NACK_DATA,             ///< I2C data byte not acknowledged
   I2C_TIMEOUT,               ///< I2C transaction timeout
   I2C_BUS,                   ///< I2C bus error (arbitration lost, etc.)
-  VERIFY_MISMATCH            ///< Readback verification did not match expected data
+  VERIFY_MISMATCH,           ///< Readback verification did not match expected data
+  UNSUPPORTED                ///< Operation is not supported by the active variant/transport
 };
 
 /// @brief Status structure returned by all fallible operations.

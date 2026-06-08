@@ -14,5 +14,6 @@ Operational notes:
 
 - FeRAM permits frequent writes; operations that cross the last valid address will encounter the datasheet's wrap behavior unless the repository API rejects them earlier.
 - The datasheets' feature sections explicitly contrast these devices with Flash/EEPROM by saying no polling sequence is needed after writes. Source: variant datasheets, p. 1.
-- High-speed capable variants need the documented entry command before 3.4 MHz operation; keep default operation at a conservative supported bus speed unless the user selects high-speed mode. Source: 64TA/512T/1MT datasheets, high-speed sections.
+- High-speed capable variants need the documented entry command before 3.4 MHz operation. The driver can request HS-prefixed transfers through the optional special transport callback, but the application bus manager still owns the MCU I2C clock and must validate 3.4 MHz hardware operation. Source: 64TA/512T/1MT datasheets, high-speed sections.
+- Sleep-capable variants need the documented `F8h` + device-address + repeated-start `86h` entry sequence. Wake recovery starts on the 9th wake clock and requires tREC 400 us before normal access; the core records the state contract and does not insert a hidden delay. Source: 64TA/512T/1MT datasheets, Sleep sections.
 - Repository constraint: core code remains transport-agnostic and uses injected I2C read/write callbacks.

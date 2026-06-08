@@ -33,18 +33,30 @@ struct FakeBus {
   uint32_t nowMs = 1000;
   uint32_t writeCalls = 0;
   uint32_t readCalls = 0;
+  uint32_t specialCalls = 0;
+  uint32_t hsWriteCalls = 0;
+  uint32_t hsWriteReadCalls = 0;
+  uint32_t sleepEntryCalls = 0;
+  uint32_t wakeCalls = 0;
 
   int readErrorRemaining = 0;
   int writeErrorRemaining = 0;
+  int specialErrorRemaining = 0;
   uint32_t writeErrorOnCall = 0;
+  uint32_t specialErrorOnCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
+  Status specialError = Status::Error(Err::I2C_ERROR, "forced special error", -4);
   bool badDeviceId = false;
   bool deviceIdSupported = true;
   bool writeProtectHigh = false;
+  bool sleeping = false;
   uint16_t productId = cmd::PRODUCT_ID_MB85RC256V;
   uint32_t memoryBytes = cmd::MEMORY_SIZE_MB85RC256V;
   cmd::AddressModel addressModel = cmd::AddressModel::TWO_BYTE_ADDRESS_PINS;
+  I2cSpecialOp lastSpecialOp = I2cSpecialOp::HIGH_SPEED_WRITE;
+  uint8_t lastHsMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT;
+  uint16_t lastRecoveryUs = 0;
   uint8_t lastI2cAddress = cmd::DEFAULT_ADDRESS;
   size_t lastAddressLen = 0;
   uint8_t lastAddrHigh = 0;
@@ -208,6 +220,111 @@ Status fakeWriteRead(uint8_t addr, const uint8_t* txData, size_t txLen, uint8_t*
   return Status::Ok();
 }
 
+Status fakeSpecial(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
+                   uint32_t, void* user) {
+  FakeBus* bus = static_cast<FakeBus*>(user);
+  bus->specialCalls++;
+  bus->lastSpecialOp = op;
+  bus->lastI2cAddress = transfer.i2cAddress;
+  bus->lastHsMasterCode = transfer.hsMasterCode;
+  bus->lastRecoveryUs = transfer.recoveryUs;
+
+  if (bus->specialErrorOnCall != 0U && bus->specialCalls == bus->specialErrorOnCall) {
+    return bus->specialError;
+  }
+  if (bus->specialErrorRemaining > 0) {
+    bus->specialErrorRemaining--;
+    return bus->specialError;
+  }
+
+  switch (op) {
+    case I2cSpecialOp::HIGH_SPEED_WRITE: {
+      bus->hsWriteCalls++;
+      if (transfer.hsMasterCode < cmd::HIGH_SPEED_MASTER_CODE_MIN ||
+          transfer.hsMasterCode > cmd::HIGH_SPEED_MASTER_CODE_MAX ||
+          transfer.txData == nullptr || transfer.txLen == 0U) {
+        return Status::Error(Err::INVALID_PARAM, "invalid fake HS write");
+      }
+      const size_t addrLen = memoryAddressLen(bus->addressModel);
+      if (transfer.i2cAddress >= cmd::MIN_ADDRESS &&
+          transfer.i2cAddress <= cmd::MAX_ADDRESS &&
+          transfer.txLen > addrLen) {
+        recordMemoryAddress(bus, transfer.i2cAddress, transfer.txData, addrLen);
+        uint32_t memAddr = bus->lastMemoryAddress;
+        for (size_t i = addrLen; i < transfer.txLen; ++i) {
+          if (!bus->writeProtectHigh) {
+            bus->mem[memAddr % bus->memoryBytes] = transfer.txData[i];
+          }
+          memAddr++;
+        }
+        bus->currentAddr = memAddr % bus->memoryBytes;
+        bus->currentAddrValid = true;
+      }
+      return Status::Ok();
+    }
+
+    case I2cSpecialOp::HIGH_SPEED_WRITE_READ: {
+      bus->hsWriteReadCalls++;
+      if (transfer.hsMasterCode < cmd::HIGH_SPEED_MASTER_CODE_MIN ||
+          transfer.hsMasterCode > cmd::HIGH_SPEED_MASTER_CODE_MAX ||
+          (transfer.txLen > 0U && transfer.txData == nullptr) ||
+          (transfer.rxLen > 0U && transfer.rxData == nullptr) ||
+          (transfer.txLen == 0U && transfer.rxLen == 0U)) {
+        return Status::Error(Err::INVALID_PARAM, "invalid fake HS write-read");
+      }
+      const size_t addrLen = memoryAddressLen(bus->addressModel);
+      if (transfer.i2cAddress >= cmd::MIN_ADDRESS &&
+          transfer.i2cAddress <= cmd::MAX_ADDRESS &&
+          transfer.txLen == addrLen) {
+        recordMemoryAddress(bus, transfer.i2cAddress, transfer.txData, addrLen);
+        uint32_t memAddr = bus->lastMemoryAddress;
+        for (size_t i = 0; i < transfer.rxLen; ++i) {
+          transfer.rxData[i] = bus->mem[memAddr % bus->memoryBytes];
+          memAddr++;
+        }
+        bus->currentAddr = memAddr % bus->memoryBytes;
+        bus->currentAddrValid = true;
+        return Status::Ok();
+      }
+      if (transfer.i2cAddress >= cmd::MIN_ADDRESS &&
+          transfer.i2cAddress <= cmd::MAX_ADDRESS &&
+          transfer.txLen == 0U && transfer.rxLen > 0U) {
+        bus->lastAddressLen = 0;
+        bus->lastAddrHigh = 0;
+        bus->lastAddrLow = 0;
+        bus->lastMemoryAddress = bus->currentAddr;
+        for (size_t i = 0; i < transfer.rxLen; ++i) {
+          transfer.rxData[i] = bus->mem[bus->currentAddr % bus->memoryBytes];
+          bus->currentAddr = (bus->currentAddr + 1) % bus->memoryBytes;
+        }
+        bus->currentAddrValid = true;
+        return Status::Ok();
+      }
+      return Status::Error(Err::I2C_BUS, "unexpected fake HS write-read");
+    }
+
+    case I2cSpecialOp::ENTER_SLEEP:
+      bus->sleepEntryCalls++;
+      if (transfer.i2cAddress < cmd::MIN_ADDRESS || transfer.i2cAddress > cmd::MAX_ADDRESS) {
+        return Status::Error(Err::INVALID_PARAM, "invalid fake sleep address");
+      }
+      bus->sleeping = true;
+      bus->currentAddrValid = false;
+      return Status::Ok();
+
+    case I2cSpecialOp::WAKE_FROM_SLEEP:
+      bus->wakeCalls++;
+      if (transfer.i2cAddress < cmd::MIN_ADDRESS || transfer.i2cAddress > cmd::MAX_ADDRESS) {
+        return Status::Error(Err::INVALID_PARAM, "invalid fake wake address");
+      }
+      bus->sleeping = false;
+      return Status::Ok();
+
+    default:
+      return Status::Error(Err::INVALID_PARAM, "unknown fake special op");
+  }
+}
+
 uint32_t fakeNowMs(void* user) {
   return static_cast<FakeBus*>(user)->nowMs;
 }
@@ -216,6 +333,7 @@ Config makeConfig(FakeBus& bus) {
   Config cfg;
   cfg.i2cWrite = fakeWrite;
   cfg.i2cWriteRead = fakeWriteRead;
+  cfg.i2cSpecial = fakeSpecial;
   cfg.i2cUser = &bus;
   cfg.nowMs = fakeNowMs;
   cfg.timeUser = &bus;
@@ -263,6 +381,10 @@ Config makeVariantConfig(FakeBus& bus, DeviceVariant variant) {
 
 Config make64TaConfig(FakeBus& bus) {
   return makeVariantConfig(bus, DeviceVariant::MB85RC64TA);
+}
+
+uint32_t busTraffic(const FakeBus& bus) {
+  return bus.writeCalls + bus.readCalls + bus.specialCalls;
 }
 
 uint32_t nextRandom(uint32_t& state) {
@@ -458,8 +580,11 @@ void test_config_defaults() {
   Config cfg;
   TEST_ASSERT_NULL(cfg.i2cWrite);
   TEST_ASSERT_NULL(cfg.i2cWriteRead);
+  TEST_ASSERT_NULL(cfg.i2cSpecial);
   TEST_ASSERT_EQUAL_HEX8(0x50, cfg.i2cAddress);
   TEST_ASSERT_EQUAL_UINT16(50, cfg.i2cTimeoutMs);
+  TEST_ASSERT_EQUAL_HEX8(cmd::HIGH_SPEED_MASTER_CODE_DEFAULT, cfg.highSpeedMasterCode);
+  TEST_ASSERT_EQUAL_UINT16(cmd::SLEEP_RECOVERY_US, cfg.sleepRecoveryUs);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
                           static_cast<uint8_t>(cfg.expectedVariant));
   TEST_ASSERT_EQUAL_UINT8(5, cfg.offlineThreshold);
@@ -488,6 +613,15 @@ void test_get_settings_before_begin_reports_defaults() {
   TEST_ASSERT_EQUAL_UINT8(0u, settings.densityCode);
   TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC256V, settings.capacityBytes);
   TEST_ASSERT_EQUAL_HEX32(cmd::MAX_MEM_ADDRESS_MB85RC256V, settings.maxAddress);
+  TEST_ASSERT_EQUAL_UINT32(cmd::NORMAL_BUS_HZ, settings.maxNormalBusHz);
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.maxHighSpeedBusHz);
+  TEST_ASSERT_FALSE(settings.highSpeedModeSupported);
+  TEST_ASSERT_FALSE(settings.highSpeedModeEnabled);
+  TEST_ASSERT_FALSE(settings.sleepModeSupported);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(settings.sleepState));
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.sleepWakeReadyMs);
+  TEST_ASSERT_EQUAL_UINT16(0u, settings.sleepRecoveryUs);
   TEST_ASSERT_FALSE(settings.currentAddressKnown);
   TEST_ASSERT_EQUAL_UINT32(0u, settings.currentAddress);
 
@@ -887,6 +1021,14 @@ void test_get_settings_returns_runtime_snapshot() {
   TEST_ASSERT_EQUAL_UINT8(cmd::DENSITY_CODE, snap.densityCode);
   TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC256V, snap.capacityBytes);
   TEST_ASSERT_EQUAL_HEX32(cmd::MAX_MEM_ADDRESS_MB85RC256V, snap.maxAddress);
+  TEST_ASSERT_EQUAL_UINT32(cmd::NORMAL_BUS_HZ, snap.maxNormalBusHz);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.maxHighSpeedBusHz);
+  TEST_ASSERT_FALSE(snap.highSpeedModeSupported);
+  TEST_ASSERT_FALSE(snap.highSpeedModeEnabled);
+  TEST_ASSERT_FALSE(snap.sleepModeSupported);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(snap.sleepState));
+  TEST_ASSERT_EQUAL_UINT16(0u, snap.sleepRecoveryUs);
   TEST_ASSERT_TRUE(snap.currentAddressKnown);
   TEST_ASSERT_EQUAL_HEX32(0x0011, snap.currentAddress);
 }
@@ -2048,6 +2190,11 @@ void test_variant_catalog_identifies_known_device_ids() {
   TEST_ASSERT_EQUAL_UINT8(cmd::DENSITY_CODE, current->densityCode);
   TEST_ASSERT_TRUE(current->supportedByDriver);
   TEST_ASSERT_TRUE(current->uses256vAccessFormat);
+  TEST_ASSERT_FALSE(current->supportsHighSpeedMode);
+  TEST_ASSERT_FALSE(current->supportsSleepMode);
+  TEST_ASSERT_EQUAL_UINT32(cmd::NORMAL_BUS_HZ, current->maxNormalBusHz);
+  TEST_ASSERT_EQUAL_UINT32(0u, current->maxHighSpeedBusHz);
+  TEST_ASSERT_EQUAL_UINT16(0u, current->sleepRecoveryUs);
 
   const cmd::VariantInfo* rc64ta = cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC64TA);
   TEST_ASSERT_NOT_NULL(rc64ta);
@@ -2056,6 +2203,10 @@ void test_variant_catalog_identifies_known_device_ids() {
   TEST_ASSERT_EQUAL_UINT8(0x03, rc64ta->densityCode);
   TEST_ASSERT_TRUE(rc64ta->supportedByDriver);
   TEST_ASSERT_TRUE(rc64ta->uses256vAccessFormat);
+  TEST_ASSERT_TRUE(rc64ta->supportsHighSpeedMode);
+  TEST_ASSERT_TRUE(rc64ta->supportsSleepMode);
+  TEST_ASSERT_EQUAL_UINT32(cmd::HIGH_SPEED_BUS_HZ, rc64ta->maxHighSpeedBusHz);
+  TEST_ASSERT_EQUAL_UINT16(cmd::SLEEP_RECOVERY_US, rc64ta->sleepRecoveryUs);
 
   const cmd::VariantInfo* rc512 = cmd::findVariantByProductId(0x658);
   TEST_ASSERT_NOT_NULL(rc512);
@@ -2064,12 +2215,17 @@ void test_variant_catalog_identifies_known_device_ids() {
   TEST_ASSERT_TRUE(rc512->supportedByDriver);
   TEST_ASSERT_TRUE(rc512->uses256vAccessFormat);
   TEST_ASSERT_TRUE(rc512->sleepMode);
+  TEST_ASSERT_TRUE(rc512->highSpeedMode);
+  TEST_ASSERT_TRUE(rc512->supportsHighSpeedMode);
+  TEST_ASSERT_TRUE(rc512->supportsSleepMode);
 
   const cmd::VariantInfo* rc04 = cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC04V);
   TEST_ASSERT_NOT_NULL(rc04);
   TEST_ASSERT_EQUAL_STRING("MB85RC04V", rc04->name);
   TEST_ASSERT_TRUE(rc04->supportedByDriver);
   TEST_ASSERT_FALSE(rc04->uses256vAccessFormat);
+  TEST_ASSERT_FALSE(rc04->supportsHighSpeedMode);
+  TEST_ASSERT_FALSE(rc04->supportsSleepMode);
 
   const cmd::VariantInfo* rc1mt = cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC1MT);
   TEST_ASSERT_NOT_NULL(rc1mt);
@@ -2077,6 +2233,8 @@ void test_variant_catalog_identifies_known_device_ids() {
   TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC1MT, rc1mt->memoryBytes);
   TEST_ASSERT_TRUE(rc1mt->supportedByDriver);
   TEST_ASSERT_FALSE(rc1mt->uses256vAccessFormat);
+  TEST_ASSERT_TRUE(rc1mt->supportsHighSpeedMode);
+  TEST_ASSERT_TRUE(rc1mt->supportsSleepMode);
 
   TEST_ASSERT_NULL(cmd::findVariantByProductId(0x123));
   TEST_ASSERT_NULL(cmd::findVariantByProductId(0x000));
@@ -2609,6 +2767,266 @@ void test_typed_memory_rejects_cross_boundary_values() {
 }
 
 // ===========================================================================
+// High-speed and Sleep mode tests
+// ===========================================================================
+
+void test_begin_rejects_invalid_high_speed_master_code() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.highSpeedMasterCode = 0x10U;
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0u, busTraffic(bus));
+}
+
+void test_begin_rejects_sleep_recovery_below_datasheet_minimum() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.sleepRecoveryUs = cmd::SLEEP_RECOVERY_US - 1U;
+  Status st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0u, busTraffic(bus));
+
+  bus = FakeBus{};
+  cfg = makeConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  cfg.sleepRecoveryUs = cmd::SLEEP_RECOVERY_US - 1U;
+  bus.productId = cmd::PRODUCT_ID_MB85RC512T;
+  bus.memoryBytes = cmd::MEMORY_SIZE_MB85RC512T;
+  bus.addressModel = cmd::AddressModel::TWO_BYTE_ADDRESS_PINS;
+  st = dev.begin(cfg);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+}
+
+void test_high_speed_rejects_unsupported_variants_without_bus_traffic() {
+  const DeviceVariant variants[] = {
+      DeviceVariant::MB85RC04V,
+      DeviceVariant::MB85RC16V,
+      DeviceVariant::MB85RC256V,
+  };
+
+  for (DeviceVariant variant : variants) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, variant)).ok());
+    const uint32_t trafficBefore = busTraffic(bus);
+
+    Status st = dev.enterHighSpeedMode();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+    TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+  }
+}
+
+void test_high_speed_requires_special_callback_for_supported_variant() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.i2cSpecial = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  const uint32_t trafficBefore = busTraffic(bus);
+
+  Status st = dev.enterHighSpeedMode();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+}
+
+void test_high_speed_supported_variants_use_special_transfer_path() {
+  const DeviceVariant variants[] = {
+      DeviceVariant::MB85RC64TA,
+      DeviceVariant::MB85RC512T,
+      DeviceVariant::MB85RC1MT,
+  };
+
+  for (DeviceVariant variant : variants) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = makeVariantConfig(bus, variant);
+    cfg.highSpeedMasterCode = cmd::HIGH_SPEED_MASTER_CODE_MAX;
+    TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+    const uint32_t normalWritesBefore = bus.writeCalls;
+    const uint32_t normalReadsBefore = bus.readCalls;
+
+    TEST_ASSERT_TRUE(dev.supportsHighSpeedMode());
+    TEST_ASSERT_EQUAL_UINT32(cmd::HIGH_SPEED_BUS_HZ, dev.maxHighSpeedBusHz());
+    TEST_ASSERT_TRUE(dev.enterHighSpeedMode().ok());
+    TEST_ASSERT_TRUE(dev.highSpeedModeEnabled());
+
+    TEST_ASSERT_TRUE(dev.writeByte(0x0001, 0xA5).ok());
+    TEST_ASSERT_EQUAL_UINT32(normalWritesBefore, bus.writeCalls);
+    TEST_ASSERT_EQUAL_UINT32(1u, bus.hsWriteCalls);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(I2cSpecialOp::HIGH_SPEED_WRITE),
+                            static_cast<uint8_t>(bus.lastSpecialOp));
+    TEST_ASSERT_EQUAL_HEX8(cmd::HIGH_SPEED_MASTER_CODE_MAX, bus.lastHsMasterCode);
+
+    uint8_t value = 0;
+    TEST_ASSERT_TRUE(dev.readByte(0x0001, value).ok());
+    TEST_ASSERT_EQUAL_HEX8(0xA5, value);
+    TEST_ASSERT_EQUAL_UINT32(normalReadsBefore, bus.readCalls);
+    TEST_ASSERT_EQUAL_UINT32(1u, bus.hsWriteReadCalls);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(I2cSpecialOp::HIGH_SPEED_WRITE_READ),
+                            static_cast<uint8_t>(bus.lastSpecialOp));
+
+    TEST_ASSERT_TRUE(dev.exitHighSpeedMode().ok());
+    TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+  }
+}
+
+void test_generic_nack_remains_failure_outside_high_speed_prefix() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  bus.writeErrorRemaining = 1;
+  bus.writeError = Status::Error(Err::I2C_NACK_ADDR, "forced nack", -11);
+  Status st = dev.writeByte(0x0001, 0x22);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(1u, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_sleep_rejects_unsupported_variants_without_bus_traffic() {
+  const DeviceVariant variants[] = {
+      DeviceVariant::MB85RC04V,
+      DeviceVariant::MB85RC16V,
+      DeviceVariant::MB85RC256V,
+  };
+
+  for (DeviceVariant variant : variants) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, variant)).ok());
+    const uint32_t trafficBefore = busTraffic(bus);
+
+    Status st = dev.enterSleep();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+
+    st = dev.wake();
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::UNSUPPORTED),
+                            static_cast<uint8_t>(st.code));
+    TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  }
+}
+
+void test_sleep_requires_special_callback_for_supported_variant() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.i2cSpecial = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  const uint32_t trafficBefore = busTraffic(bus);
+
+  Status st = dev.enterSleep();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+}
+
+void test_wake_is_noop_when_awake_even_without_special_callback() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.i2cSpecial = nullptr;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  const uint32_t trafficBefore = busTraffic(bus);
+
+  Status st = dev.wake();
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+}
+
+void test_sleep_enter_wake_gates_memory_access_and_invalidates_current_address() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(make64TaConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0002, 0x5A).ok());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_TRUE(snap.sleepModeSupported);
+  TEST_ASSERT_EQUAL_UINT16(cmd::SLEEP_RECOVERY_US, snap.sleepRecoveryUs);
+
+  const uint32_t trafficBeforeSleep = busTraffic(bus);
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_EQUAL_UINT32(trafficBeforeSleep + 1U, busTraffic(bus));
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.sleepEntryCalls);
+  TEST_ASSERT_TRUE(bus.sleeping);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::ASLEEP),
+                          static_cast<uint8_t>(dev.sleepState()));
+
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::ASLEEP),
+                          static_cast<uint8_t>(snap.sleepState));
+
+  const uint32_t trafficWhileAsleep = busTraffic(bus);
+  uint8_t value = 0;
+  Status st = dev.readByte(0x0002, value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(trafficWhileAsleep, busTraffic(bus));
+
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  TEST_ASSERT_FALSE(bus.sleeping);
+  TEST_ASSERT_EQUAL_UINT32(1u, bus.wakeCalls);
+  TEST_ASSERT_EQUAL_UINT16(cmd::SLEEP_RECOVERY_US, bus.lastRecoveryUs);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::WAKING),
+                          static_cast<uint8_t>(dev.sleepState()));
+
+  const uint32_t trafficWhileWaking = busTraffic(bus);
+  st = dev.readByte(0x0002, value);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::BUSY), static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(trafficWhileWaking, busTraffic(bus));
+
+  bus.nowMs += cmd::SLEEP_RECOVERY_MS;
+  dev.tick(bus.nowMs);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+  TEST_ASSERT_TRUE(dev.readByte(0x0002, value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x5A, value);
+}
+
+void test_sleep_entry_failure_updates_health_once_and_invalidates_current_address() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(make64TaConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0004, 0x7C).ok());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+
+  const uint32_t failuresBefore = dev.totalFailures();
+  bus.specialErrorOnCall = bus.specialCalls + 1U;
+  bus.specialError = Status::Error(Err::I2C_NACK_ADDR, "sleep nack", -12);
+  Status st = dev.enterSleep();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_NACK_ADDR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore + 1U, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.currentAddressKnown);
+}
+
+// ===========================================================================
 // Health tracking tests
 // ===========================================================================
 
@@ -2845,6 +3263,19 @@ int main() {
   RUN_TEST(test_random_access_write_read_verify_sequence);
   RUN_TEST(test_typed_memory_round_trips_fixed_width_values);
   RUN_TEST(test_typed_memory_rejects_cross_boundary_values);
+
+  // High-speed and Sleep
+  RUN_TEST(test_begin_rejects_invalid_high_speed_master_code);
+  RUN_TEST(test_begin_rejects_sleep_recovery_below_datasheet_minimum);
+  RUN_TEST(test_high_speed_rejects_unsupported_variants_without_bus_traffic);
+  RUN_TEST(test_high_speed_requires_special_callback_for_supported_variant);
+  RUN_TEST(test_high_speed_supported_variants_use_special_transfer_path);
+  RUN_TEST(test_generic_nack_remains_failure_outside_high_speed_prefix);
+  RUN_TEST(test_sleep_rejects_unsupported_variants_without_bus_traffic);
+  RUN_TEST(test_sleep_requires_special_callback_for_supported_variant);
+  RUN_TEST(test_wake_is_noop_when_awake_even_without_special_callback);
+  RUN_TEST(test_sleep_enter_wake_gates_memory_access_and_invalidates_current_address);
+  RUN_TEST(test_sleep_entry_failure_updates_health_once_and_invalidates_current_address);
 
   // Health tracking
   RUN_TEST(test_write_failure_transitions_to_degraded);

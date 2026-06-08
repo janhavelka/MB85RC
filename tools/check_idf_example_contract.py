@@ -45,6 +45,10 @@ REQUIRED_README_TOKENS = [
     "diagnostic-only",
     "console input can block",
     "production systems must serialize",
+    "High-Speed And Sleep Modes",
+    "MB85RC64TA, MB85RC512T, and MB85RC1MT",
+    "MB85RC core does not change the MCU I2C clock",
+    "tREC >= 400 us",
 ]
 
 REQUIRED_CONFIRMATION_TOKENS = [
@@ -56,6 +60,17 @@ REQUIRED_CONFIRMATION_TOKENS = [
     "randbench!",
     "typed_demo!",
     "Confirmation required because this command changes FRAM contents.",
+]
+
+REQUIRED_MODE_TOKENS = [
+    "I2cSpecialOp::HIGH_SPEED_WRITE",
+    "I2cSpecialOp::HIGH_SPEED_WRITE_READ",
+    "I2cSpecialOp::ENTER_SLEEP",
+    "I2cSpecialOp::WAKE_FROM_SLEEP",
+    "HIGH_SPEED_MASTER_CODE_DEFAULT",
+    "SLEEP_ENTRY_COMMAND",
+    "SLEEP_RECOVERY_MS",
+    "Hardware validation: not claimed by this diagnostic",
 ]
 
 
@@ -105,6 +120,9 @@ def main() -> int:
     for token in REQUIRED_CONFIRMATION_TOKENS:
         if token not in text:
             fail(f"confirmation/handler token missing: {token}")
+    for token in REQUIRED_MODE_TOKENS:
+        if token not in text:
+            fail(f"HS/Sleep native token missing: {token}")
     for token in device_id_idf_tokens:
         if token not in text:
             fail(f"ESP-IDF Device ID manual-address token missing: {token}")

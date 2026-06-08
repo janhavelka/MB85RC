@@ -91,6 +91,7 @@ const char* errToStr(MB85RC::Err err) {
     case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
     case Err::I2C_BUS:              return "I2C_BUS";
     case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
+    case Err::UNSUPPORTED:          return "UNSUPPORTED";
     default:                        return "UNKNOWN";
   }
 }
@@ -103,6 +104,16 @@ const char* stateToStr(MB85RC::DriverState st) {
     case DriverState::DEGRADED: return "DEGRADED";
     case DriverState::OFFLINE:  return "OFFLINE";
     default:                    return "UNKNOWN";
+  }
+}
+
+const char* sleepStateToStr(MB85RC::SleepState st) {
+  using namespace MB85RC;
+  switch (st) {
+    case SleepState::AWAKE:  return "AWAKE";
+    case SleepState::ASLEEP: return "ASLEEP";
+    case SleepState::WAKING: return "WAKING";
+    default:                 return "UNKNOWN";
   }
 }
 
@@ -161,11 +172,15 @@ void printVariantInfo(const MB85RC::cmd::VariantInfo& variant) {
   } else {
     Serial.println("  product=n/a  density=n/a");
   }
-  Serial.printf("    %s; runtime driver support=%s; HS=%s; sleep=%s\n",
+  Serial.printf("    %s; runtime driver support=%s; high-speed capability=%s; sleep capability=%s\n",
                 addressModelToStr(variant.addressModel),
                 variant.supportedByDriver ? "yes" : "no",
-                variant.highSpeedMode ? "yes" : "no",
-                variant.sleepMode ? "yes" : "no");
+                variant.supportsHighSpeedMode ? "yes" : "no",
+                variant.supportsSleepMode ? "yes" : "no");
+  Serial.printf("    max normal bus=%lu Hz; max high-speed bus=%lu Hz; sleep tREC=%u us\n",
+                static_cast<unsigned long>(variant.maxNormalBusHz),
+                static_cast<unsigned long>(variant.maxHighSpeedBusHz),
+                static_cast<unsigned>(variant.sleepRecoveryUs));
 }
 
 void printVariantCatalog() {
@@ -588,12 +603,96 @@ void printSettings() {
   Serial.printf("  Capacity: %lu bytes, max address 0x%04lX\n",
                 static_cast<unsigned long>(snap.capacityBytes),
                 static_cast<unsigned long>(snap.maxAddress));
+  Serial.printf("  Bus limits: normal=%lu Hz high-speed=%lu Hz\n",
+                static_cast<unsigned long>(snap.maxNormalBusHz),
+                static_cast<unsigned long>(snap.maxHighSpeedBusHz));
+  Serial.printf("  High-speed mode: support=%s enabled=%s\n",
+                snap.highSpeedModeSupported ? "yes" : "no",
+                snap.highSpeedModeEnabled ? "yes" : "no");
+  Serial.printf("  Sleep mode: support=%s state=%s tREC=%u us wakeReadyMs=%lu\n",
+                snap.sleepModeSupported ? "yes" : "no",
+                sleepStateToStr(snap.sleepState),
+                static_cast<unsigned>(snap.sleepRecoveryUs),
+                static_cast<unsigned long>(snap.sleepWakeReadyMs));
   Serial.println("  Cross-end bulk operations: rejected");
   if (snap.currentAddressKnown) {
     Serial.printf("  Current address: 0x%04lX\n", static_cast<unsigned long>(snap.currentAddress));
   } else {
     Serial.println("  Current address: unknown (needs successful memory read/write first)");
   }
+}
+
+void printHighSpeedSupport() {
+  MB85RC::SettingsSnapshot snap = device.getSettings();
+  Serial.println("High-speed mode:");
+  Serial.printf("  Active variant: %s\n", snap.variantName);
+  Serial.printf("  Support: %s\n", snap.highSpeedModeSupported ? "yes" : "no");
+  Serial.printf("  Enabled: %s\n", snap.highSpeedModeEnabled ? "yes" : "no");
+  Serial.println("  Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock");
+  Serial.println("  Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operation");
+  Serial.println("  App action: application bus manager must configure/operate the bus at 3.4 MHz after HS entry");
+  Serial.println("  Note: STOP exits high-speed mode; enabled driver transfers send the HS prefix per transaction");
+  Serial.println("  Arduino Wire diagnostic transport: raw HS master-code callback not installed");
+  Serial.println("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleHighSpeedCommand(const String& cmd) {
+  printHighSpeedSupport();
+  if (cmd == "hs" || cmd == "hs support") {
+    return;
+  }
+  if (cmd == "hs enter") {
+    MB85RC::Status st = device.enterHighSpeedMode();
+    printStatus(st);
+    if (st.ok()) {
+      LOGI("High-speed transfer mode requested; entry prefix is sent with each memory transfer.");
+    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  LOGW("Usage: hs | hs support | hs enter");
+}
+
+void printSleepSupport() {
+  MB85RC::SettingsSnapshot snap = device.getSettings();
+  Serial.println("Sleep mode:");
+  Serial.printf("  Active variant: %s\n", snap.variantName);
+  Serial.printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
+  Serial.printf("  State: %s\n", sleepStateToStr(snap.sleepState));
+  Serial.println("  Entry: F8h + active device address word + repeated-start 86h");
+  Serial.println("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
+  Serial.println("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
+  Serial.println("  Arduino Wire diagnostic transport: raw Sleep callback not installed");
+  Serial.println("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleSleepCommand(const String& cmd) {
+  printSleepSupport();
+  if (cmd == "sleep" || cmd == "sleep support") {
+    return;
+  }
+  if (cmd == "sleep enter") {
+    MB85RC::Status st = device.enterSleep();
+    printStatus(st);
+    if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  if (cmd == "sleep wake") {
+    MB85RC::Status st = device.wake();
+    printStatus(st);
+    if (st.ok()) {
+      delay(1);
+      device.tick(millis());
+      printCheckStatus("recover after sleep wake", device.recover());
+    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  LOGW("Usage: sleep | sleep support | sleep enter | sleep wake");
 }
 
 void readRangeForDump(uint32_t address, uint32_t len) {
@@ -1646,6 +1745,11 @@ void printHelp() {
   cli::printHelpItem("idraw", "Read raw 3-byte Device ID payload");
   cli::printHelpItem("variants", "List known family variants and driver support");
   cli::printHelpItem("size", "Print active variant capacity");
+  cli::printHelpItem("hs / hs support", "Report active variant High-speed capability");
+  cli::printHelpItem("hs enter", "Enable HS-prefixed transfers if a raw special callback is configured");
+  cli::printHelpItem("sleep / sleep support", "Report active variant Sleep capability and tREC");
+  cli::printHelpItem("sleep enter", "Send Sleep entry sequence if a raw special callback is configured");
+  cli::printHelpItem("sleep wake", "Send wake stimulus, wait tREC, then recover if supported");
 
   cli::printHelpSection("Diagnostics");
   cli::printHelpItem("drv", "Show driver state and health");
@@ -1693,6 +1797,17 @@ void processCommand(const String& cmdLine) {
 
   if (cmd == "scan") {
     bus_diag::scan();
+    return;
+  }
+
+  if (cmd == "hs" || cmd == "hs support" || cmd == "hs enter") {
+    handleHighSpeedCommand(cmd);
+    return;
+  }
+
+  if (cmd == "sleep" || cmd == "sleep support" ||
+      cmd == "sleep enter" || cmd == "sleep wake") {
+    handleSleepCommand(cmd);
     return;
   }
 
