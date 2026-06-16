@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native transfer-budget tests for `maxInstructions` 1, 2, high-budget clamp,
   exact-end/preflight rejection, active-transfer busy handling, verify
   mismatch, and timeout-after-possible-write readback behavior.
+- Simplified `docs/` into maintained entry points plus `reference-pdfs/`,
+  merging extracted device notes and ESP-IDF implementation notes while removing
+  historical audit/extraction leftovers.
 
 ### Changed
 
@@ -35,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented the staged transfer API as the recommended TunnelMonitor
   integration path for preserving one or more bounded backend FRAM chunks per
   scheduler poll.
+- Doxygen input now points only at maintained docs instead of audit reports or
+  generated extraction dumps.
 
 ## [3.0.0] - 2026-06-08
 
@@ -112,8 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime diagnostics: `variantInfo()`, `variantName()`, `deviceId()`, `capacityBytes()`, `maxAddress()`, and expanded `SettingsSnapshot` fields.
 - Native tests for every explicit runtime variant, Device ID AUTO selection where supported, variant mismatches, address encoding, active-capacity bounds, current-address bounds, active-variant `probe()` / `recover()`, and no-Device-ID 16V diagnostics.
 - ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build of the full bring-up CLI command contract.
-- ESP-IDF port notes in `docs/IDF_PORT.md`.
-- ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
+- ESP-IDF port notes, now consolidated in `docs/IDF_PORT.md`.
 
 ### Changed
 
@@ -125,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `readDeviceId()` and `readDeviceIdRaw()` now return `INVALID_PARAM` when the active explicit variant has no Device ID command.
 - `library.json`, `idf_component.yml`, and README now describe the library as an MB85RC-family driver and include all supported runtime variants.
 - `library.json` now declares both `arduino` and `espidf` framework support.
-- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino CLI source, and native IDF entry point.
+- Doxygen input now covers maintained docs, Arduino CLI source, and native IDF entry point.
 - The ESP-IDF example adapter now performs Device ID transactions on reserved address `0x7C` through ESP-IDF defined I2C operations with manual address bytes instead of relying on normal device-handle addressing for a reserved address.
 - `tools/check_idf_example_contract.py` now validates the native ESP-IDF boundary, command surface, required CMake dependencies, and core Device ID address construction.
 - ESP-IDF CLI parity is checked through repo-local command contracts; hardware validation remains pending until target hardware is available.
@@ -160,7 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documented validation behavior for null buffers, zero-length transfers, out-of-range addresses, and current-address tracking.
-- Reference documentation now uses human-readable vendor PDF names and separates compact chip notes from full PDF extractions under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
+- Reference documentation now keeps vendor PDFs and maintained compact device notes in `docs/`.
 - Explicit recovery bypass internals now use the shared `ScopedOfflineI2cAllowance` / `_reassertOfflineLatch()` procedure so failed recovery attempts that begin from `OFFLINE` keep the latch asserted.
 - Health behavior is now standardized on latched `OFFLINE`: normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch I2C until `recover()` succeeds.
 

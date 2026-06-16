@@ -385,11 +385,12 @@ known successful addressed read/write by the same instance.
 
 `AUTO` uses the Device ID command and therefore works only on variants that implement Device ID. `MB85RC16V` must be selected explicitly. The driver derives runtime transaction addresses from `Config::i2cAddress` plus the active variant's address model.
 
-Local datasheet summaries in `docs/extracted-md/` list endurance and retention
-claims by variant. Use the exact part datasheet for production lifetime budgets:
-the local summaries show 10^12 writes/byte for `MB85RC04V`, `MB85RC16V`, and
-`MB85RC256V`, and 10^13 writes/byte for `MB85RC64TA`, `MB85RC512T`, and
-`MB85RC1MT`. Retention statements vary by part and temperature.
+The maintained device reference in `docs/DEVICE_REFERENCE.md` lists endurance
+and retention claims by variant. Use the exact part datasheet for production
+lifetime budgets: the local reference shows 10^12 writes/byte for
+`MB85RC04V`, `MB85RC16V`, and `MB85RC256V`, and 10^13 writes/byte for
+`MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`. Retention statements vary by part
+and temperature.
 
 ## Validation Status
 
@@ -562,16 +563,11 @@ doxygen Doxyfile
 ## Documentation
 
 - `CHANGELOG.md` - release history and GitHub release note source
-- `docs/IDF_PORT.md` - ESP-IDF portability notes
-- `docs/IDF_PORT_IMPLEMENTATION.md` - ESP-IDF implementation and audit closure notes
-- `docs/MB85RC04V-DS5v1-E.pdf` - 04V one-byte address/A8 transaction reference
-- `docs/MB85RC16V-DS11v0-E.pdf` - 16V no-Device-ID and A10:A8 transaction reference
-- `docs/MB85RC64TA-DS5v1-E.pdf` - 64TA 8 KB runtime support reference
-- `docs/MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` - 256V two-byte address reference
-- `docs/MB85RC512T-DS6v1-E.pdf` - 512T 64 KB two-byte address reference
-- `docs/MB85RC1MT-DS5v1-E.pdf` - 1MT A16-in-device-address transaction reference
-- `docs/MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` - short fact sheet used for cross-checking
-- `docs/MB85RC256V_fram_implementation_manual.md` - extracted device behavior reference used for implementation review
+- `docs/README.md` - documentation index and vendor PDF map
+- `docs/DEVICE_REFERENCE.md` - maintained MB85RC-family behavior reference
+- `docs/IDF_PORT.md` - ESP-IDF portability and native example notes
+- `docs/RELEASE_CHECKLIST.md` - release verification checklist
+- `docs/reference-pdfs/` - retained vendor datasheets and fact sheet
 - `Doxyfile` - indexes public headers, the ESP-IDF port notes, the Arduino CLI,
   and the native IDF entry point
 

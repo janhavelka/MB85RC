@@ -31,10 +31,10 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs/IDF_PORT.md docs/IDF_PORT_IMPLEMENTATION.md docs/MB85RC_HARDENING_FINAL_REPORT.md docs/RELEASE_CHECKLIST.md
+INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs/README.md docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
-EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/extracted-md/* */docs/pdf-extracted-md/* */docs/_pdf_extracts/* */docs/prompts/*
+EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*
 EXAMPLE_PATH           = examples/01_basic_bringup_cli examples/espidf_basic examples/common
 
 USE_MDFILE_AS_MAINPAGE = README.md
