@@ -43,6 +43,7 @@ struct FakeBus {
   int writeErrorRemaining = 0;
   int specialErrorRemaining = 0;
   uint32_t writeErrorOnCall = 0;
+  uint32_t writeErrorAfterApplyOnCall = 0;
   uint32_t specialErrorOnCall = 0;
   Status readError = Status::Error(Err::I2C_ERROR, "forced read error", -1);
   Status writeError = Status::Error(Err::I2C_ERROR, "forced write error", -2);
@@ -153,6 +154,11 @@ Status fakeWrite(uint8_t addr, const uint8_t* data, size_t len, uint32_t, void* 
     }
     bus->currentAddr = memAddr % bus->memoryBytes;
     bus->currentAddrValid = true;
+  }
+
+  if (bus->writeErrorAfterApplyOnCall != 0U &&
+      bus->writeCalls == bus->writeErrorAfterApplyOnCall) {
+    return bus->writeError;
   }
 
   return Status::Ok();
@@ -539,6 +545,11 @@ void assertWriteResultPreflightFailure(const WriteResult& result, Err expectedCo
   TEST_ASSERT_FALSE(result.complete);
 }
 
+void assertTransferInProgress(const Status& status) {
+  TEST_ASSERT_TRUE(status.inProgress());
+  TEST_ASSERT_TRUE(status.is(Err::IN_PROGRESS));
+}
+
 }  // namespace
 
 void setUp() {
@@ -556,12 +567,18 @@ void tearDown() {}
 void test_status_ok() {
   Status st = Status::Ok();
   TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_TRUE(st);
+  TEST_ASSERT_TRUE(st.is(Err::OK));
+  TEST_ASSERT_FALSE(st.is(Err::I2C_ERROR));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::OK), static_cast<uint8_t>(st.code));
 }
 
 void test_status_error() {
   Status st = Status::Error(Err::I2C_ERROR, "Test error", 42);
   TEST_ASSERT_FALSE(st.ok());
+  TEST_ASSERT_FALSE(st);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_ERROR));
+  TEST_ASSERT_FALSE(st.is(Err::OK));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::I2C_ERROR), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_INT32(42, st.detail);
 }
@@ -585,7 +602,7 @@ void test_config_defaults() {
   TEST_ASSERT_EQUAL_UINT16(50, cfg.i2cTimeoutMs);
   TEST_ASSERT_EQUAL_HEX8(cmd::HIGH_SPEED_MASTER_CODE_DEFAULT, cfg.highSpeedMasterCode);
   TEST_ASSERT_EQUAL_UINT16(cmd::SLEEP_RECOVERY_US, cfg.sleepRecoveryUs);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(cfg.expectedVariant));
   TEST_ASSERT_EQUAL_UINT8(5, cfg.offlineThreshold);
 }
@@ -602,9 +619,9 @@ void test_get_settings_before_begin_reports_defaults() {
   TEST_ASSERT_EQUAL_UINT32(50u, settings.i2cTimeoutMs);
   TEST_ASSERT_EQUAL_UINT8(5u, settings.offlineThreshold);
   TEST_ASSERT_FALSE(settings.hasNowMsHook);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(settings.expectedVariant));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(settings.activeVariant));
   TEST_ASSERT_FALSE(settings.variantKnown);
   TEST_ASSERT_EQUAL_STRING("unknown", settings.variantName);
@@ -680,6 +697,28 @@ void test_begin_success_sets_ready_and_health() {
   TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC256V, dev.capacityBytes());
   TEST_ASSERT_EQUAL_HEX32(cmd::MAX_MEM_ADDRESS_MB85RC256V, dev.maxAddress());
   TEST_ASSERT_EQUAL_HEX16(cmd::PRODUCT_ID_MB85RC256V, dev.deviceId().productId);
+}
+
+void test_begin_default_auto_selects_detected_device_id_variant() {
+  FakeBus bus;
+  bus.productId = cmd::PRODUCT_ID_MB85RC64TA;
+  bus.memoryBytes = cmd::MEMORY_SIZE_MB85RC64TA;
+  bus.addressModel = cmd::AddressModel::TWO_BYTE_ADDRESS_PINS;
+
+  MB85RC::MB85RC dev;
+  Config cfg = makeConfig(bus);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
+                          static_cast<uint8_t>(cfg.expectedVariant));
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
+                          static_cast<uint8_t>(snap.expectedVariant));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC64TA),
+                          static_cast<uint8_t>(snap.activeVariant));
+  TEST_ASSERT_EQUAL_STRING("MB85RC64TA", snap.variantName);
+  TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC64TA, snap.capacityBytes);
 }
 
 void test_begin_success_for_explicit_64ta_variant() {
@@ -1010,7 +1049,7 @@ void test_get_settings_returns_runtime_snapshot() {
   TEST_ASSERT_EQUAL_UINT32(10u, snap.i2cTimeoutMs);
   TEST_ASSERT_EQUAL_UINT8(1u, snap.offlineThreshold);
   TEST_ASSERT_TRUE(snap.hasNowMsHook);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(snap.expectedVariant));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
                           static_cast<uint8_t>(snap.activeVariant));
@@ -1352,6 +1391,237 @@ void test_write_read_large_transfer_uses_chunking() {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(writeBuf, readBuf, sizeof(writeBuf));
 }
 
+void test_transfer_read_respects_single_instruction_budget() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0100;
+  uint8_t expected[300] = {};
+  for (size_t i = 0; i < sizeof(expected); ++i) {
+    expected[i] = static_cast<uint8_t>(0x20U + (i & 0x7FU));
+    bus.mem[ADDR + static_cast<uint32_t>(i)] = expected[i];
+  }
+  uint8_t actual[sizeof(expected)] = {};
+
+  const uint32_t readsBefore = bus.readCalls;
+  TEST_ASSERT_TRUE(dev.requestRead(ADDR, actual, sizeof(actual)).ok());
+  TEST_ASSERT_TRUE(dev.isTransferBusy());
+  assertTransferInProgress(dev.getTransferStatus());
+
+  Status st = dev.pollTransfer(bus.nowMs, 0);
+  assertTransferInProgress(st);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_TRUE(dev.isTransferBusy());
+
+  st = dev.pollTransfer(bus.nowMs, 1);
+  assertTransferInProgress(st);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 1U, bus.readCalls);
+  TEST_ASSERT_EQUAL_HEX32(ADDR, bus.lastMemoryAddress);
+
+  st = dev.pollTransfer(bus.nowMs, 1);
+  assertTransferInProgress(st);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 2U, bus.readCalls);
+  TEST_ASSERT_EQUAL_HEX32(ADDR + cmd::MAX_READ_CHUNK, bus.lastMemoryAddress);
+
+  st = dev.pollTransfer(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 3U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, actual, sizeof(expected));
+
+  st = dev.pollTransfer(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + 3U, bus.readCalls);
+}
+
+void test_transfer_write_respects_two_instruction_budget() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0300;
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(0x40U + (i & 0x3FU));
+  }
+  setMemoryRange(bus, ADDR, sizeof(data), DETAILED_SENTINEL);
+
+  const uint32_t writesBefore = bus.writeCalls;
+  TEST_ASSERT_TRUE(dev.requestWrite(ADDR, data, sizeof(data)).ok());
+
+  Status st = dev.pollTransfer(bus.nowMs, 2);
+  assertTransferInProgress(st);
+  TEST_ASSERT_TRUE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 2U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_HEX32(ADDR + cmd::MAX_WRITE_CHUNK, bus.lastMemoryAddress);
+  assertMemoryMatches(bus, ADDR, data, cmd::MAX_WRITE_CHUNK * 2U);
+  assertMemoryRangeEquals(bus, ADDR + static_cast<uint32_t>(cmd::MAX_WRITE_CHUNK * 2U),
+                          sizeof(data) - (cmd::MAX_WRITE_CHUNK * 2U),
+                          DETAILED_SENTINEL);
+
+  st = dev.pollTransfer(bus.nowMs, 2);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 3U, bus.writeCalls);
+  assertMemoryMatches(bus, ADDR, data, sizeof(data));
+}
+
+void test_transfer_fill_clamps_high_instruction_budget() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0500;
+  static constexpr size_t LEN = 600U;
+  static constexpr uint8_t VALUE = 0xC7;
+  setMemoryRange(bus, ADDR, LEN, DETAILED_SENTINEL);
+
+  const uint32_t writesBefore = bus.writeCalls;
+  TEST_ASSERT_TRUE(dev.requestFill(ADDR, VALUE, LEN).ok());
+
+  Status st = dev.pollTransfer(bus.nowMs, 255);
+  assertTransferInProgress(st);
+  TEST_ASSERT_TRUE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 8U, bus.writeCalls);
+  assertMemoryRangeEquals(bus, ADDR, DETAILED_FILL_CHUNK * 8U, VALUE);
+  assertMemoryRangeEquals(bus, ADDR + static_cast<uint32_t>(DETAILED_FILL_CHUNK * 8U),
+                          LEN - (DETAILED_FILL_CHUNK * 8U), DETAILED_SENTINEL);
+
+  st = dev.pollTransfer(bus.nowMs, 255);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 10U, bus.writeCalls);
+  assertMemoryRangeEquals(bus, ADDR, LEN, VALUE);
+}
+
+void test_transfer_verify_respects_budget_and_reports_mismatch() {
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    static constexpr uint32_t ADDR = 0x0800;
+    uint8_t expected[300] = {};
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+      expected[i] = static_cast<uint8_t>(0x60U + (i & 0x1FU));
+      bus.mem[ADDR + static_cast<uint32_t>(i)] = expected[i];
+    }
+
+    const uint32_t readsBefore = bus.readCalls;
+    TEST_ASSERT_TRUE(dev.requestVerify(ADDR, expected, sizeof(expected)).ok());
+    Status st = dev.pollTransfer(bus.nowMs, 2);
+    assertTransferInProgress(st);
+    TEST_ASSERT_EQUAL_UINT32(readsBefore + 2U, bus.readCalls);
+
+    st = dev.pollTransfer(bus.nowMs, 2);
+    TEST_ASSERT_TRUE(st.ok());
+    TEST_ASSERT_FALSE(dev.isTransferBusy());
+    TEST_ASSERT_EQUAL_UINT32(readsBefore + 3U, bus.readCalls);
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+    static constexpr uint32_t ADDR = 0x0900;
+    uint8_t expected[300] = {};
+    for (size_t i = 0; i < sizeof(expected); ++i) {
+      expected[i] = static_cast<uint8_t>(0x80U + (i & 0x0FU));
+      bus.mem[ADDR + static_cast<uint32_t>(i)] = expected[i];
+    }
+    bus.mem[ADDR + 130U] ^= 0x7FU;
+
+    const uint32_t readsBefore = bus.readCalls;
+    TEST_ASSERT_TRUE(dev.requestVerify(ADDR, expected, sizeof(expected)).ok());
+    Status st = dev.pollTransfer(bus.nowMs, 2);
+    TEST_ASSERT_TRUE(st.is(Err::VERIFY_MISMATCH));
+    TEST_ASSERT_EQUAL_INT32(130, st.detail);
+    TEST_ASSERT_FALSE(dev.isTransferBusy());
+    TEST_ASSERT_EQUAL_UINT32(readsBefore + 2U, bus.readCalls);
+    TEST_ASSERT_TRUE(dev.getTransferStatus().is(Err::VERIFY_MISMATCH));
+    TEST_ASSERT_EQUAL_UINT32(0U, dev.totalFailures());
+  }
+}
+
+void test_transfer_preflight_busy_cancel_and_exact_end_boundary() {
+  FakeBus bus;
+  bus.mem[cmd::MAX_MEM_ADDRESS_MB85RC256V] = 0xA6;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t readsBefore = bus.readCalls;
+  uint8_t byte = 0;
+
+  Status st = dev.requestRead(0x0000, nullptr, 1);
+  TEST_ASSERT_TRUE(st.is(Err::INVALID_PARAM));
+  st = dev.requestRead(0x0000, &byte, 0);
+  TEST_ASSERT_TRUE(st.is(Err::INVALID_PARAM));
+  st = dev.requestRead(cmd::MAX_MEM_ADDRESS_MB85RC256V, &byte, 2);
+  TEST_ASSERT_TRUE(st.is(Err::ADDRESS_OUT_OF_RANGE));
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+
+  TEST_ASSERT_TRUE(dev.requestRead(cmd::MAX_MEM_ADDRESS_MB85RC256V, &byte, 1).ok());
+  st = dev.readByte(0x0000, byte);
+  TEST_ASSERT_TRUE(st.is(Err::BUSY));
+  st = dev.requestFill(0x0000, 0x00, 1);
+  TEST_ASSERT_TRUE(st.is(Err::BUSY));
+  dev.cancelTransfer();
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_TRUE(dev.getTransferStatus().is(Err::BUSY));
+
+  TEST_ASSERT_TRUE(dev.requestRead(cmd::MAX_MEM_ADDRESS_MB85RC256V, &byte, 1).ok());
+  st = dev.pollTransfer(bus.nowMs, 1);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA6, byte);
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+}
+
+void test_transfer_timeout_after_possible_write_can_be_verified_afterwards() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0A80;
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(0xA0U + (i & 0x1FU));
+  }
+  seedDetailedWindow(bus, ADDR, sizeof(data));
+
+  const uint32_t writesBefore = bus.writeCalls;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced timeout after apply", -71);
+  bus.writeErrorAfterApplyOnCall = bus.writeCalls + 2U;
+
+  TEST_ASSERT_TRUE(dev.requestWrite(ADDR, data, sizeof(data)).ok());
+  Status st = dev.pollTransfer(bus.nowMs, 3);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_INT32(-71, st.detail);
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(writesBefore + 2U, bus.writeCalls);
+  assertMemoryMatches(bus, ADDR, data, cmd::MAX_WRITE_CHUNK * 2U);
+  assertMemoryRangeEquals(bus, ADDR + static_cast<uint32_t>(cmd::MAX_WRITE_CHUNK * 2U),
+                          sizeof(data) - (cmd::MAX_WRITE_CHUNK * 2U),
+                          DETAILED_SENTINEL);
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+  TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+
+  VerifyDetailedResult verify = dev.verifyDetailed(ADDR, data, sizeof(data));
+  TEST_ASSERT_TRUE(verify.status.ok());
+  TEST_ASSERT_FALSE(verify.match);
+  TEST_ASSERT_EQUAL_UINT32(cmd::MAX_WRITE_CHUNK * 2U,
+                           static_cast<uint32_t>(verify.bytesVerified));
+  TEST_ASSERT_EQUAL_UINT32(cmd::MAX_WRITE_CHUNK * 2U,
+                           static_cast<uint32_t>(verify.firstMismatchOffset));
+}
+
 void test_write_detailed_reports_single_and_multi_chunk_success() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -1647,6 +1917,100 @@ void test_fill_verify_success_and_wp_high_failure() {
     TEST_ASSERT_EQUAL_HEX8(0x11, detailed.actual);
     assertMemoryRangeEquals(bus, 0x0960, 5, 0x11);
   }
+}
+
+void test_write_verify_reports_timeout_after_accepted_prefix_without_readback_claim() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0A00;
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(0x30U + (i & 0x3FU));
+  }
+
+  seedDetailedWindow(bus, ADDR, sizeof(data));
+  const uint32_t readsBefore = bus.readCalls;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced possible-write timeout", -61);
+  bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+  VerifyDetailedResult detailed;
+  Status st = dev.writeVerify(ADDR, data, sizeof(data), &detailed);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_TRUE(detailed.status.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_INT32(-61, detailed.status.detail);
+  TEST_ASSERT_EQUAL_HEX32(ADDR, detailed.address);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data), static_cast<uint32_t>(detailed.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.bytesVerified));
+  TEST_ASSERT_FALSE(detailed.match);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  assertDetailedPatternPrefixAndSentinelSuffix(bus, ADDR, data, cmd::MAX_WRITE_CHUNK,
+                                               sizeof(data));
+}
+
+void test_write_verify_timeout_after_possible_write_leaves_failed_chunk_unverified() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0B80;
+  uint8_t data[300] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    data[i] = static_cast<uint8_t>(0x80U + (i & 0x7FU));
+  }
+
+  seedDetailedWindow(bus, ADDR, sizeof(data));
+  const uint32_t readsBefore = bus.readCalls;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced timeout after write", -63);
+  bus.writeErrorAfterApplyOnCall = bus.writeCalls + 2U;
+
+  VerifyDetailedResult detailed;
+  Status st = dev.writeVerify(ADDR, data, sizeof(data), &detailed);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_TRUE(detailed.status.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_INT32(-63, detailed.status.detail);
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.bytesVerified));
+  TEST_ASSERT_FALSE(detailed.match);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+
+  const size_t physicallyChanged = cmd::MAX_WRITE_CHUNK * 2U;
+  assertDetailedPatternPrefixAndSentinelSuffix(bus, ADDR, data, physicallyChanged,
+                                               sizeof(data));
+}
+
+void test_fill_verify_reports_timeout_after_accepted_prefix_without_readback_claim() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+
+  static constexpr uint32_t ADDR = 0x0C00;
+  static constexpr size_t LEN = 160U;
+  static constexpr uint8_t VALUE = 0xA7;
+
+  seedDetailedWindow(bus, ADDR, LEN);
+  const uint32_t readsBefore = bus.readCalls;
+  bus.writeError = Status::Error(Err::I2C_TIMEOUT, "forced possible-fill timeout", -62);
+  bus.writeErrorOnCall = bus.writeCalls + 2U;
+
+  VerifyDetailedResult detailed;
+  Status st = dev.fillVerify(ADDR, VALUE, LEN, &detailed);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_TRUE(detailed.status.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_INT32(-62, detailed.status.detail);
+  TEST_ASSERT_EQUAL_HEX32(ADDR, detailed.address);
+  TEST_ASSERT_EQUAL_UINT32(LEN, static_cast<uint32_t>(detailed.bytesRequested));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(detailed.bytesVerified));
+  TEST_ASSERT_FALSE(detailed.match);
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  assertDetailedFillPrefixAndSentinelSuffix(bus, ADDR, VALUE, DETAILED_FILL_CHUNK, LEN);
 }
 
 void test_failed_multichunk_write_invalidates_current_address_tracking() {
@@ -2105,6 +2469,60 @@ void test_64ta_bulk_operations_reject_cross_end_ranges() {
   TEST_ASSERT_TRUE(dev.write(0x1FFE, bytes, 2).ok());
   TEST_ASSERT_TRUE(dev.read(0x1FFE, readBack, 2).ok());
   TEST_ASSERT_EQUAL_UINT8_ARRAY(bytes, readBack, 2);
+}
+
+void test_all_variants_bulk_exact_end_and_cross_end_bounds() {
+  const DeviceVariant variants[] = {
+      DeviceVariant::MB85RC04V,
+      DeviceVariant::MB85RC16V,
+      DeviceVariant::MB85RC64TA,
+      DeviceVariant::MB85RC256V,
+      DeviceVariant::MB85RC512T,
+      DeviceVariant::MB85RC1MT,
+  };
+
+  for (DeviceVariant variant : variants) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, variant)).ok());
+
+    const uint32_t exactStart = dev.maxAddress() - 1UL;
+    const uint32_t crossStart = dev.maxAddress();
+    const uint8_t bytes[2] = {0x71, 0x72};
+    uint8_t readBack[2] = {};
+    VerifyResult verify;
+
+    TEST_ASSERT_TRUE(dev.write(exactStart, bytes, sizeof(bytes)).ok());
+    TEST_ASSERT_TRUE(dev.read(exactStart, readBack, sizeof(readBack)).ok());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(bytes, readBack, sizeof(bytes));
+    TEST_ASSERT_TRUE(dev.verify(exactStart, bytes, sizeof(bytes), verify).ok());
+    TEST_ASSERT_TRUE(verify.match);
+
+    VerifyDetailedResult detailed;
+    TEST_ASSERT_TRUE(dev.writeVerify(exactStart, bytes, sizeof(bytes), &detailed).ok());
+    TEST_ASSERT_TRUE(detailed.match);
+    TEST_ASSERT_TRUE(dev.fillVerify(exactStart, 0x5E, sizeof(bytes), &detailed).ok());
+    TEST_ASSERT_TRUE(detailed.match);
+
+    Status st = dev.write(crossStart, bytes, sizeof(bytes));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+    st = dev.read(crossStart, readBack, sizeof(readBack));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+    st = dev.fill(crossStart, 0x00, sizeof(bytes));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+    st = dev.verify(crossStart, bytes, sizeof(bytes), verify);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+    st = dev.writeVerify(crossStart, bytes, sizeof(bytes), &detailed);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+    st = dev.fillVerify(crossStart, 0x00, sizeof(bytes), &detailed);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::ADDRESS_OUT_OF_RANGE),
+                            static_cast<uint8_t>(st.code));
+  }
 }
 
 void test_memory_operations_reject_oversized_size_t_lengths() {
@@ -3177,6 +3595,7 @@ int main() {
   RUN_TEST(test_begin_rejects_invalid_address);
   RUN_TEST(test_begin_rejects_zero_timeout);
   RUN_TEST(test_begin_success_sets_ready_and_health);
+  RUN_TEST(test_begin_default_auto_selects_detected_device_id_variant);
   RUN_TEST(test_begin_success_for_explicit_64ta_variant);
   RUN_TEST(test_begin_success_for_all_explicit_variants);
   RUN_TEST(test_begin_rejects_expected_variant_mismatch);
@@ -3211,6 +3630,12 @@ int main() {
   RUN_TEST(test_write_read_single_byte);
   RUN_TEST(test_write_read_multi_byte);
   RUN_TEST(test_write_read_large_transfer_uses_chunking);
+  RUN_TEST(test_transfer_read_respects_single_instruction_budget);
+  RUN_TEST(test_transfer_write_respects_two_instruction_budget);
+  RUN_TEST(test_transfer_fill_clamps_high_instruction_budget);
+  RUN_TEST(test_transfer_verify_respects_budget_and_reports_mismatch);
+  RUN_TEST(test_transfer_preflight_busy_cancel_and_exact_end_boundary);
+  RUN_TEST(test_transfer_timeout_after_possible_write_can_be_verified_afterwards);
   RUN_TEST(test_write_detailed_reports_single_and_multi_chunk_success);
   RUN_TEST(test_fill_detailed_reports_single_and_multi_chunk_success);
   RUN_TEST(test_write_detailed_reports_failed_chunk_and_accepted_prefix);
@@ -3232,6 +3657,7 @@ int main() {
   RUN_TEST(test_64ta_memory_address_encoding_and_bounds);
   RUN_TEST(test_variant_specific_memory_address_encoding_and_bounds);
   RUN_TEST(test_64ta_bulk_operations_reject_cross_end_ranges);
+  RUN_TEST(test_all_variants_bulk_exact_end_and_cross_end_bounds);
   RUN_TEST(test_memory_operations_reject_oversized_size_t_lengths);
 
   // Device ID
@@ -3259,6 +3685,9 @@ int main() {
   RUN_TEST(test_write_verify_succeeds_when_wp_disabled);
   RUN_TEST(test_write_verify_success_and_wp_high_failure);
   RUN_TEST(test_fill_verify_success_and_wp_high_failure);
+  RUN_TEST(test_write_verify_reports_timeout_after_accepted_prefix_without_readback_claim);
+  RUN_TEST(test_write_verify_timeout_after_possible_write_leaves_failed_chunk_unverified);
+  RUN_TEST(test_fill_verify_reports_timeout_after_accepted_prefix_without_readback_claim);
   RUN_TEST(test_verify_rejects_invalid_args);
   RUN_TEST(test_random_access_write_read_verify_sequence);
   RUN_TEST(test_typed_memory_round_trips_fixed_width_values);

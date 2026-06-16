@@ -12,7 +12,7 @@ enum class Err : uint8_t {
   NOT_INITIALIZED,           ///< begin() not called
   INVALID_CONFIG,            ///< Invalid configuration parameter
   I2C_ERROR,                 ///< I2C communication failure
-  TIMEOUT,                   ///< Operation timed out
+  TIMEOUT,                   ///< Core-owned deadline timed out (not an I2C transport timeout)
   INVALID_PARAM,             ///< Invalid parameter value
   DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
   DEVICE_ID_MISMATCH,        ///< Device ID does not match expected/active variant
@@ -24,7 +24,7 @@ enum class Err : uint8_t {
   // I2C transport details (append-only to preserve existing values)
   I2C_NACK_ADDR,             ///< I2C address not acknowledged
   I2C_NACK_DATA,             ///< I2C data byte not acknowledged
-  I2C_TIMEOUT,               ///< I2C transaction timeout
+  I2C_TIMEOUT,               ///< I2C transport transaction timeout
   I2C_BUS,                   ///< I2C bus error (arbitration lost, etc.)
   VERIFY_MISMATCH,           ///< Readback verification did not match expected data
   UNSUPPORTED                ///< Operation is not supported by the active variant/transport
@@ -42,8 +42,14 @@ struct Status {
   /// @return true if operation succeeded
   constexpr bool ok() const { return code == Err::OK; }
 
+  /// @return true if this status has the requested error code
+  constexpr bool is(Err err) const { return code == err; }
+
   /// @return true if operation is in progress (queued, not yet complete)
   constexpr bool inProgress() const { return code == Err::IN_PROGRESS; }
+
+  /// @return true if operation succeeded
+  constexpr explicit operator bool() const { return ok(); }
 
   /// Create a success status
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }

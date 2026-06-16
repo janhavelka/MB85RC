@@ -58,8 +58,8 @@ struct SettingsSnapshot {
   uint32_t i2cTimeoutMs = 0;      ///< Configured per-transaction I2C timeout.
   uint8_t offlineThreshold = 0;   ///< Consecutive failures required to enter OFFLINE.
   bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
-  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V; ///< Configured variant expectation.
-  DeviceVariant activeVariant = DeviceVariant::MB85RC256V; ///< Active runtime variant after begin().
+  DeviceVariant expectedVariant = DeviceVariant::AUTO; ///< Configured variant expectation.
+  DeviceVariant activeVariant = DeviceVariant::AUTO; ///< Active runtime variant after begin().
   bool variantKnown = false;      ///< True when begin() selected a supported variant.
   const char* variantName = "unknown"; ///< Active runtime variant name, or "unknown".
   uint16_t manufacturerId = 0;    ///< Cached Device ID manufacturer field.
@@ -355,6 +355,9 @@ public:
   Status readByte(uint32_t address, uint8_t& value);
 
   /// Read multiple bytes starting at the specified address.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// The full range must fit before the active variant's end address.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Output buffer
@@ -376,6 +379,9 @@ public:
   Status writeByte(uint32_t address, uint8_t value);
 
   /// Write multiple bytes starting at the specified address.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// The full range must fit before the active variant's end address.
   /// No page boundary limitations (unlike EEPROM).
   /// FRAM writes are immediate - no write delay needed.
@@ -390,8 +396,13 @@ public:
   Status write(uint32_t address, const uint8_t* buf, size_t len);
 
   /// Write multiple bytes and report the accepted prefix.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// `bytesAccepted` counts bytes in chunks accepted by the transport. It does
   /// not prove that those bytes persisted when external WP may be asserted.
+  /// A failed chunk may also have an unknown physical commit state if the
+  /// transport reports a timeout after the device possibly accepted bytes.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
@@ -399,6 +410,9 @@ public:
   WriteResult writeDetailed(uint32_t address, const uint8_t* buf, size_t len);
 
   /// Fill a range of memory with a constant byte value.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// Large logical fills may be split into I2C chunks and are not atomic.
   /// Status::Ok() means all chunks were accepted by the transport, not that
   /// persistence was verified when external WP may be asserted.
@@ -409,8 +423,13 @@ public:
   Status fill(uint32_t address, uint8_t value, size_t len);
 
   /// Fill a range and report the accepted prefix.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// `bytesAccepted` counts bytes in chunks accepted by the transport. It does
   /// not prove that those bytes persisted when external WP may be asserted.
+  /// A failed chunk may also have an unknown physical commit state if the
+  /// transport reports a timeout after the device possibly accepted bytes.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte
   /// @param len Number of bytes to fill
@@ -444,6 +463,9 @@ public:
   Status readCurrentAddress(uint8_t& value);
 
   /// Read multiple bytes using repeated documented current-address-read operations.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// The pointer is undefined after power-on and only safe after a known
   /// address-setting transaction, such as a successful addressed memory
   /// read/write by this instance. Failed transactions and recovery paths
@@ -454,6 +476,9 @@ public:
   Status readCurrentAddress(uint8_t* buf, size_t len);
 
   /// Compare FRAM contents against an expected buffer.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// Status::Ok() means the readback transactions completed; check out.match
   /// to determine whether all bytes matched.
   /// @param address Starting memory address within the active variant capacity.
@@ -464,6 +489,9 @@ public:
   Status verify(uint32_t address, const uint8_t* expected, size_t len, VerifyResult& out);
 
   /// Compare FRAM contents against an expected buffer with byte counts.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// `bytesVerified` counts bytes that matched before the first mismatch or
   /// transport failure.
   /// @param address Starting memory address within the active variant capacity.
@@ -473,9 +501,14 @@ public:
   VerifyDetailedResult verifyDetailed(uint32_t address, const uint8_t* expected, size_t len);
 
   /// Write and then verify the same bytes by readback.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// Use for writes where transport acceptance is not enough and readback
   /// confirmation is required. Returns `Err::VERIFY_MISMATCH` when the write
-  /// transport succeeds but readback differs.
+  /// transport succeeds but readback differs. If the write phase returns a
+  /// transport error, this method returns that error without performing
+  /// readback because bus state and failed-chunk commit state are unknown.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Data buffer to write and verify
   /// @param len Number of bytes to write and verify
@@ -485,9 +518,14 @@ public:
                      VerifyDetailedResult* verifyOut = nullptr);
 
   /// Fill and then verify the same byte value by readback.
+  /// This is a blocking, synchronous convenience API. Poll-budgeted systems
+  /// that must advance one backend transfer per scheduler poll should use a
+  /// staged adapter/API rather than this whole-range helper.
   /// Use for fills where transport acceptance is not enough and readback
   /// confirmation is required. Returns `Err::VERIFY_MISMATCH` when the fill
-  /// transport succeeds but readback differs.
+  /// transport succeeds but readback differs. If the fill phase returns a
+  /// transport error, this method returns that error without performing
+  /// readback because bus state and failed-chunk commit state are unknown.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte to write and verify.
   /// @param len Number of bytes to fill and verify.
@@ -495,6 +533,79 @@ public:
   /// @return Status::Ok() only when fill transport succeeds and readback matches.
   Status fillVerify(uint32_t address, uint8_t value, size_t len,
                     VerifyDetailedResult* verifyOut = nullptr);
+
+  // =========================================================================
+  // Poll-Chunked Transfer API
+  // =========================================================================
+
+  /// Queue a staged explicit-address read transfer.
+  ///
+  /// The request performs validation only and emits no I2C traffic. Call
+  /// pollTransfer() to execute bounded random-read chunks. Each chunk carries
+  /// its own memory address and counts as one instruction.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param data Output buffer that must remain valid until completion/cancel.
+  /// @param length Number of bytes to read.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  Status requestRead(uint32_t address, uint8_t* data, size_t length);
+
+  /// Queue a staged explicit-address write transfer.
+  ///
+  /// The request performs validation only and emits no I2C traffic. Call
+  /// pollTransfer() to execute bounded sequential-write chunks. Successful
+  /// chunks are not rolled back if a later chunk fails.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param data Source buffer that must remain valid until completion/cancel.
+  /// @param length Number of bytes to write.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  Status requestWrite(uint32_t address, const uint8_t* data, size_t length);
+
+  /// Queue a staged explicit-address fill transfer.
+  ///
+  /// The request performs validation only and emits no I2C traffic. Call
+  /// pollTransfer() to execute bounded addressed write chunks using a fixed
+  /// local fill buffer. Successful chunks are not rolled back if a later chunk
+  /// fails.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param value Fill byte.
+  /// @param length Number of bytes to fill.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  Status requestFill(uint32_t address, uint8_t value, size_t length);
+
+  /// Queue a staged explicit-address readback verification transfer.
+  ///
+  /// Each poll instruction reads one addressed chunk and compares it before the
+  /// next chunk is attempted. A mismatch terminates the transfer with
+  /// Err::VERIFY_MISMATCH and detail set to the first mismatching offset.
+  /// @param address Starting memory address within the active variant capacity.
+  /// @param data Expected bytes that must remain valid until completion/cancel.
+  /// @param length Number of bytes to verify.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  Status requestVerify(uint32_t address, const uint8_t* data, size_t length);
+
+  /// Execute bounded work for a queued transfer.
+  ///
+  /// A random-read chunk, sequential-write chunk, or verify readback chunk is
+  /// one instruction. `maxInstructions == 0` performs no I2C and returns the
+  /// current transfer status. Device ID and current-address reads remain
+  /// single-instruction synchronous diagnostics outside this staged API.
+  /// @param nowMs Current timestamp in milliseconds for Sleep wake advancement.
+  /// @param maxInstructions Maximum transfer chunks to execute this poll.
+  /// @return IN_PROGRESS while queued work remains, OK on completion, or error.
+  Status pollTransfer(uint32_t nowMs, uint8_t maxInstructions);
+
+  /// @return true while a staged transfer is queued or being polled.
+  bool isTransferBusy() const { return _transferBusy(); }
+
+  /// @return Last staged transfer status, or OK before any transfer.
+  Status getTransferStatus() const { return _transfer.status; }
+
+  /// Cancel the active staged transfer, if any.
+  ///
+  /// Cancellation emits no I2C traffic. Already accepted write/fill chunks are
+  /// not rolled back; current-address tracking remains whatever the last
+  /// successful chunk established.
+  void cancelTransfer();
 
   /// Get the legacy MB85RC256V memory size in bytes.
   /// Prefer capacityBytes() for runtime-selected variants.
@@ -543,6 +654,25 @@ private:
     uint8_t i2cAddress = cmd::DEFAULT_ADDRESS;
     uint8_t bytes[cmd::ADDRESS_BYTES] = {};
     size_t len = 0;
+  };
+
+  enum class TransferKind : uint8_t {
+    NONE,
+    READ,
+    WRITE,
+    FILL,
+    VERIFY
+  };
+
+  struct TransferJob {
+    TransferKind kind = TransferKind::NONE;
+    uint32_t address = 0;
+    uint8_t* data = nullptr;
+    const uint8_t* constData = nullptr;
+    uint8_t fillValue = 0;
+    size_t length = 0;
+    size_t offset = 0;
+    Status status = Status::Ok();
   };
 
   /// Read from memory using tracked path
@@ -602,6 +732,23 @@ private:
 
   /// Update the tracked current address after a successful memory transaction.
   void _setCurrentAddressAfterTransfer(uint32_t address, size_t len);
+
+  /// True when a staged transfer is active.
+  bool _transferBusy() const;
+
+  /// Return BUSY if a staged transfer is active.
+  Status _ensureNoTransferActive() const;
+
+  /// Reset staged transfer state and preserve a terminal status.
+  void _clearTransfer(const Status& status);
+
+  /// Queue a validated staged transfer.
+  Status _requestTransfer(TransferKind kind, uint32_t address, uint8_t* data,
+                          const uint8_t* constData, uint8_t fillValue,
+                          size_t length);
+
+  /// Execute one staged transfer instruction.
+  Status _pollTransferInstruction();
   
   // =========================================================================
   // Health Management
@@ -641,6 +788,7 @@ private:
   uint32_t _totalSuccess = 0;
   bool _currentAddressKnown = false;
   uint32_t _currentAddress = 0;
+  TransferJob _transfer;
 };
 
 }  // namespace MB85RC

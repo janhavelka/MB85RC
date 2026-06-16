@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- `Status::is(Err)` and explicit `Status` bool conversion convenience helpers
+  while preserving existing `ok()` and `inProgress()` calls.
+- Native tests for write/fill verify behavior when a later chunk times out
+  after an earlier prefix may already have been accepted by the transport.
+- Native all-variant exact-end and cross-end tests for synchronous bulk read,
+  write, fill, verify, write-verify, and fill-verify helpers.
+- Poll-chunked transfer API:
+  `requestRead()`, `requestWrite()`, `requestFill()`, `requestVerify()`,
+  `pollTransfer()`, `isTransferBusy()`, `getTransferStatus()`, and
+  `cancelTransfer()`.
+- Native transfer-budget tests for `maxInstructions` 1, 2, high-budget clamp,
+  exact-end/preflight rejection, active-transfer busy handling, verify
+  mismatch, and timeout-after-possible-write readback behavior.
+
+### Changed
+
+- `Config::expectedVariant` now defaults to `DeviceVariant::AUTO` so
+  Device-ID-capable parts select active capacity from readback. Fixed-BOM
+  production integrations should still set the exact expected variant.
+- Documented synchronous whole-range memory helpers as convenience APIs for
+  TunnelMonitor-style poll-budgeted integrations.
+- Documented timeout status policy and possible-write ambiguity after
+  transport timeouts.
+- Documented the staged transfer API as the recommended TunnelMonitor
+  integration path for preserving one or more bounded backend FRAM chunks per
+  scheduler poll.
 
 ## [3.0.0] - 2026-06-08
 

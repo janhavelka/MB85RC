@@ -1,7 +1,7 @@
 # MB85RC Industry-Readiness Hardening Final Report
 
 Date: 2026-06-07
-Last updated: 2026-06-08
+Last updated: 2026-06-16
 Branch: `hardening/mb85rc-industry-readiness`
 
 ## Phase Status
@@ -16,6 +16,7 @@ Branch: `hardening/mb85rc-industry-readiness`
 | 05 Final verification and release report | Complete | `da2a5b6`, `c51fde0` | Final review defects fixed, full local verification rerun, and merge/release readiness documented. |
 | 06 High-Speed and Sleep support | Complete | `b5f3998` | Variant-gated HS/Sleep APIs, optional special transport callback, diagnostic CLI parity, tests, and documentation added. |
 | 07 Release docs and metadata cleanup | Complete | This release-prep commit | Version metadata finalized, changelog released, prompt archive added, docs reconciled, and release checks rerun. |
+| 08 TunnelMonitor fit audit | Complete | Working tree | Status helpers, AUTO default, synchronous convenience classification, timeout ambiguity tests, all-variant bulk bounds tests, and TunnelMonitor integration recommendation. |
 
 ## Starting Audit Findings
 
@@ -367,6 +368,48 @@ completed successfully.
 | GitHub Actions CI run result | Not observed locally because `gh` is unavailable and this workflow is configured for pushes/PRs to `main`; CI pass is not claimed. |
 | Real hardware validation | Not run in this sequence; README matrix remains pending hardware. |
 
+### Phase 08 Poll-Chunked Transfer Jobs
+
+Implemented an additive staged FRAM transfer API for poll-budgeted schedulers:
+
+- `requestRead()`, `requestWrite()`, `requestFill()`, and `requestVerify()` validate and queue work without I2C traffic.
+- `pollTransfer(nowMs, maxInstructions)` executes bounded whole chunks. One random-read chunk, sequential-write chunk, or verify readback chunk is one instruction.
+- `isTransferBusy()`, `getTransferStatus()`, and `cancelTransfer()` expose queue state without heap allocation or framework dependencies.
+- Every staged memory chunk uses the existing addressed `_readMemory()` / `_writeMemory()` helpers, so each poll instruction encodes its own address and preserves existing health/current-address handling.
+- `maxInstructions == 0` performs no bus traffic. High budgets are clamped internally; chunk sizes remain bounded by the existing read/write/fill chunk limits.
+- Public synchronous bus-touching APIs now return `Err::BUSY` while a staged transfer is active, preventing accidental interleaving.
+
+Synchronous convenience APIs remain available for simple users and diagnostics.
+They may execute multiple backend I2C transactions before returning and are not
+the right integration point for TunnelMonitor's normal one-transfer-per-poll
+model. TunnelMonitor should queue FRAM work through the staged API from its
+`I2cTask` active job, call `pollTransfer(nowMs, 1)` for the current poll
+contract, and increase `maxInstructions` only where the scheduler explicitly
+budgets multiple independent FRAM chunks in one pass. For critical writes, pair
+staged `requestWrite()` / `requestFill()` with staged `requestVerify()` or keep
+the existing application journaling/readback policy because an ACKed write does
+not prove persistence when WP is asserted.
+
+Native coverage added:
+
+- `maxInstructions == 1`, `2`, and high-budget/clamp behavior for read, write, fill, and verify transfer jobs.
+- Exact-end, null/zero/cross-end preflight, active-transfer busy, cancel, and no-extra-traffic checks.
+- Verify mismatch reporting through `Err::VERIFY_MISMATCH` with mismatch offset in `Status::detail`.
+- Timeout-after-possible-write behavior using a fake bus hook that mutates the failed chunk before returning timeout, followed by explicit readback verification.
+
+Verification run:
+
+| Command | Result |
+| --- | --- |
+| `python -m platformio test -e native` | PASS: 115 test cases, 115 succeeded. |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `git diff --check` | PASS: no whitespace errors; Git reported only local LF-to-CRLF normalization warnings. |
+
 ### Hardware Validation Matrix Status
 
 - No hardware validation was run or claimed in this hardening sequence.
@@ -401,3 +444,114 @@ hardware validation is completed on representative parts and boards.
 
 - Recommended tag after CI review: `v3.0.0`.
 - Suggested wording: "MB85RC v3.0.0 adds accepted-prefix write/fill reporting, readback verification helpers, variant-gated High-speed/Sleep support, stronger contracts, ESP-IDF CI coverage, and production documentation. Hardware validation remains board- and variant-dependent."
+
+## Phase 08 TunnelMonitor Fit Audit
+
+### Scope
+
+This audit focused on correctness, stability, status/error behavior, variant
+selection, bounds checks, readback verification policy, framework neutrality,
+and convenience API classification for TunnelMonitor adoption. Exact staged
+chunk sequencing, instruction budgeting, and transaction-budget design belong
+to the companion poll-chunking work.
+
+Two read-only subagents were used before coding:
+
+- API/timing explorer: reviewed synchronous memory helpers, Device ID paths,
+  current-address behavior, status helpers, default variant selection, and
+  timeout-after-write ambiguity.
+- Test/package explorer: reviewed variant/bounds/readback tests, package
+  metadata, example-only `TypedMemory`, and validation commands.
+
+### API And Core Changes
+
+- Added `Status::is(Err)` and explicit `Status` bool conversion while keeping
+  existing `ok()` and `inProgress()` compatibility.
+- Changed `Config::expectedVariant` default to `DeviceVariant::AUTO` so
+  Device-ID-capable parts select active capacity from readback instead of
+  assuming MB85RC256V.
+- Kept explicit no-Device-ID handling for `MB85RC16V`; fixed-BOM production
+  integrations should still set the exact expected part number.
+- Documented all whole-range synchronous memory helpers as convenience APIs:
+  `read()`, `write()`, `fill()`, `verify()`, `writeDetailed()`,
+  `fillDetailed()`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`, and
+  `readCurrentAddress(uint8_t*, size_t)`.
+- Documented that `I2C_TIMEOUT` is the injected transport timeout code, while
+  generic `TIMEOUT` is reserved for core-owned deadlines.
+- Documented that write/fill verify helpers skip readback if the write/fill
+  phase returns a transport error, because failed-chunk commit state and bus
+  state are unknown.
+
+### Tests Added
+
+- Native status-helper compatibility tests.
+- Native default-`AUTO` selection test proving a non-256V Device-ID-capable
+  part is selected without explicit selector.
+- Native timeout-after-accepted-prefix tests for `writeVerify()` and
+  `fillVerify()` proving they return the original transport error and do not
+  claim readback verification.
+- Native timeout-after-possible-write test where the fake transport physically
+  applies a chunk before returning `I2C_TIMEOUT`, proving the failed chunk must
+  be treated as application-verified ambiguity.
+- Native all-variant exact-end and cross-end tests for synchronous bulk read,
+  write, fill, verify, write-verify, and fill-verify helpers across
+  `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and
+  `MB85RC1MT`.
+
+### Synchronous Vs Staged APIs
+
+The synchronous helpers remain useful for simple applications, diagnostics, and
+short blocking flows. They may perform multiple backend I2C transactions before
+returning, and therefore do not preserve TunnelMonitor's normal model of
+advancing one backend transfer per poll.
+
+For TunnelMonitor, treat the synchronous helpers as convenience-only. Use the
+staged transfer path from the companion poll-chunking work for production FRAM
+traffic so each poll can bound backend transfers and preserve scheduler
+behavior.
+
+### TunnelMonitor Integration Recommendation
+
+- Set `Config::expectedVariant` to the exact production BOM FRAM variant in the
+  TunnelMonitor adapter. Do not rely on default `AUTO` for production BOM
+  enforcement, although `AUTO` is the safer library default for general users.
+- Keep TunnelMonitor's FRAM data paths raw-byte oriented. Do not pull
+  `examples/common/TypedMemory.h` into steady firmware; it remains
+  example-only codec glue.
+- Use staged explicit-address read/write/verify operations for normal
+  `I2cTask` active jobs. Do not call synchronous `read()`, `write()`, `fill()`,
+  `verify()`, `writeVerify()`, or `fillVerify()` from the poll-budgeted FRAM
+  backend.
+- Preserve write-readback verification at the TunnelMonitor layer. For critical
+  records, write payload/header, stage readback verify, then commit the marker
+  last with its own verify.
+- If any write/fill chunk returns `I2C_TIMEOUT` or another transport error,
+  treat the touched record/window as unknown. Recover the bus first, then
+  explicitly verify, repair, or discard via the application journal.
+- Continue rejecting cross-capacity public ranges. No production code should
+  rely on the device's physical rollover behavior unless a future explicit wrap
+  API is designed, documented, and tested.
+
+### Phase 08 Verification
+
+| Command | Result |
+| --- | --- |
+| `python tools/check_core_timing_guard.py` | PASS: `Core timing guard PASSED`. |
+| `python tools/check_cli_contract.py` | PASS: `IDF example contract PASSED`; `CLI contract PASSED`. |
+| `python tools/check_idf_example_contract.py` | PASS: `IDF example contract PASSED`. |
+| `python scripts/generate_version.py check` | PASS: `include\MB85RC\Version.h` up to date. |
+| `python -m platformio test -e native` | PASS: 115 test cases, 115 succeeded. |
+| `python -m platformio run -e esp32s3dev` | PASS: `esp32s3dev` succeeded. |
+| `python -m platformio run -e esp32s2dev` | PASS: `esp32s2dev` succeeded. |
+| `python -m platformio pkg pack` | PASS: wrote `MB85RC-3.0.0.tar.gz`; artifact removed after validation. |
+
+PlatformIO emitted the same non-fatal obsolete-core warning seen in prior
+verification: active Core 6.1.18, previous 6.1.19. Builds, tests, guards, and
+package packing still completed successfully.
+
+### Phase 08 Commands Not Run
+
+| Command | Reason |
+| --- | --- |
+| `idf.py --version` | Not run in this audit; prior report records local `idf.py` unavailable and CI remains responsible for pure ESP-IDF build proof. |
+| Real hardware validation | Not run; hardware matrix rows remain pending. |

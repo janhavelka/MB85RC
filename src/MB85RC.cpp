@@ -13,6 +13,7 @@ namespace {
 
 static constexpr size_t MAX_WRITE_BUF = cmd::MAX_WRITE_CHUNK + cmd::ADDRESS_BYTES;
 static constexpr size_t FILL_CHUNK_SIZE = 64;
+static constexpr uint8_t MAX_TRANSFER_INSTRUCTIONS_PER_POLL = 8;
 
 void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
@@ -109,6 +110,7 @@ private:
 // ===========================================================================
 
 Status MB85RC::begin(const Config& config) {
+  _clearTransfer(Status::Ok());
   _config = Config{};
   _variant = nullptr;
   _deviceId = DeviceId{};
@@ -146,6 +148,7 @@ Status MB85RC::begin(const Config& config) {
     _sleepWakeReadyMs = 0;
     _currentAddressKnown = false;
     _currentAddress = 0;
+    _clearTransfer(Status::Ok());
     return failure;
   };
 
@@ -224,6 +227,7 @@ void MB85RC::tick(uint32_t nowMs) {
 }
 
 void MB85RC::end() {
+  _clearTransfer(Status::Ok());
   _config = Config{};
   _variant = nullptr;
   _deviceId = DeviceId{};
@@ -309,6 +313,10 @@ Status MB85RC::setHighSpeedMode(bool enabled) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
   if (!enabled) {
     _highSpeedModeEnabled = false;
     return Status::Ok();
@@ -329,6 +337,10 @@ Status MB85RC::setHighSpeedMode(bool enabled) {
 Status MB85RC::enterSleep() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
   if (!supportsSleepMode()) {
     return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
@@ -359,6 +371,10 @@ Status MB85RC::enterSleep() {
 Status MB85RC::wake() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
   if (!supportsSleepMode()) {
     return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
@@ -398,6 +414,10 @@ Status MB85RC::probe() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
   if (_variant != nullptr && !_variant->hasDeviceId) {
     uint8_t scratch = 0;
     Status st = _readMemoryRaw(0, &scratch, 1);
@@ -420,6 +440,10 @@ Status MB85RC::probe() {
 Status MB85RC::recover() {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
 
   const bool startedOffline = (_driverState == DriverState::OFFLINE);
@@ -467,6 +491,10 @@ Status MB85RC::readByte(uint32_t address, uint8_t& value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
   if (!_isValidAddress(address)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity", address);
   }
@@ -477,6 +505,10 @@ Status MB85RC::readByte(uint32_t address, uint8_t& value) {
 Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
@@ -513,6 +545,10 @@ Status MB85RC::writeByte(uint32_t address, uint8_t value) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
   if (!_isValidAddress(address)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity", address);
   }
@@ -531,6 +567,11 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
 
   if (!_initialized) {
     result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return result;
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    result.status = busy;
     return result;
   }
   if (buf == nullptr || len == 0) {
@@ -585,6 +626,11 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
     result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
     return result;
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    result.status = busy;
+    return result;
+  }
   if (len == 0) {
     result.status = Status::Error(Err::INVALID_PARAM, "Fill length must be > 0");
     return result;
@@ -636,6 +682,10 @@ Status MB85RC::readDeviceId(DeviceId& id) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
   if (_variant != nullptr && !_variant->hasDeviceId) {
     return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
   }
@@ -646,6 +696,10 @@ Status MB85RC::readDeviceId(DeviceId& id) {
 Status MB85RC::readDeviceIdRaw(DeviceIdRaw& raw) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
   if (_variant != nullptr && !_variant->hasDeviceId) {
     return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
@@ -661,6 +715,10 @@ Status MB85RC::readCurrentAddress(uint8_t& value) {
 Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
   }
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid current-address buffer");
@@ -721,6 +779,11 @@ VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* exp
 
   if (!_initialized) {
     result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return result;
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    result.status = busy;
     return result;
   }
   if (expected == nullptr || len == 0) {
@@ -862,6 +925,66 @@ Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
 }
 
 // ===========================================================================
+// Poll-Chunked Transfer API
+// ===========================================================================
+
+Status MB85RC::requestRead(uint32_t address, uint8_t* data, size_t length) {
+  return _requestTransfer(TransferKind::READ, address, data, nullptr, 0, length);
+}
+
+Status MB85RC::requestWrite(uint32_t address, const uint8_t* data, size_t length) {
+  return _requestTransfer(TransferKind::WRITE, address, nullptr, data, 0, length);
+}
+
+Status MB85RC::requestFill(uint32_t address, uint8_t value, size_t length) {
+  return _requestTransfer(TransferKind::FILL, address, nullptr, nullptr, value, length);
+}
+
+Status MB85RC::requestVerify(uint32_t address, const uint8_t* data, size_t length) {
+  return _requestTransfer(TransferKind::VERIFY, address, nullptr, data, 0, length);
+}
+
+Status MB85RC::pollTransfer(uint32_t nowMs, uint8_t maxInstructions) {
+  _advanceWakeState(nowMs);
+  if (!_transferBusy()) {
+    return _transfer.status;
+  }
+  if (maxInstructions == 0U) {
+    return _transfer.status;
+  }
+
+  uint8_t budget = maxInstructions;
+  if (budget > MAX_TRANSFER_INSTRUCTIONS_PER_POLL) {
+    budget = MAX_TRANSFER_INSTRUCTIONS_PER_POLL;
+  }
+
+  while (budget > 0U && _transferBusy()) {
+    Status st = _pollTransferInstruction();
+    if (st.inProgress()) {
+      _transfer.status = st;
+      return st;
+    }
+    if (!st.ok()) {
+      _clearTransfer(st);
+      return st;
+    }
+    if (_transfer.offset >= _transfer.length) {
+      _clearTransfer(Status::Ok());
+      return Status::Ok();
+    }
+    --budget;
+  }
+
+  return _transfer.status;
+}
+
+void MB85RC::cancelTransfer() {
+  if (_transferBusy()) {
+    _clearTransfer(Status::Error(Err::BUSY, "Transfer cancelled"));
+  }
+}
+
+// ===========================================================================
 // Transport Wrappers
 // ===========================================================================
 
@@ -978,6 +1101,136 @@ Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& tra
 // ===========================================================================
 // Internal Helpers
 // ===========================================================================
+
+bool MB85RC::_transferBusy() const {
+  return _transfer.kind != TransferKind::NONE;
+}
+
+Status MB85RC::_ensureNoTransferActive() const {
+  if (_transferBusy()) {
+    return Status::Error(Err::BUSY, "Transfer in progress");
+  }
+  return Status::Ok();
+}
+
+void MB85RC::_clearTransfer(const Status& status) {
+  _transfer = TransferJob{};
+  _transfer.status = status;
+}
+
+Status MB85RC::_requestTransfer(TransferKind kind, uint32_t address, uint8_t* data,
+                                const uint8_t* constData, uint8_t fillValue,
+                                size_t length) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+  }
+  if (_transferBusy()) {
+    return Status::Error(Err::BUSY, "Transfer in progress");
+  }
+  if (length == 0U) {
+    return Status::Error(Err::INVALID_PARAM, "Transfer length must be > 0");
+  }
+  if ((kind == TransferKind::READ && data == nullptr) ||
+      ((kind == TransferKind::WRITE || kind == TransferKind::VERIFY) &&
+       constData == nullptr)) {
+    return Status::Error(Err::INVALID_PARAM, "Invalid transfer buffer");
+  }
+  if (!_fitsRange(address, length)) {
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                         "Transfer range exceeds active capacity",
+                         static_cast<int32_t>(address));
+  }
+
+  _transfer = TransferJob{};
+  _transfer.kind = kind;
+  _transfer.address = address;
+  _transfer.data = data;
+  _transfer.constData = constData;
+  _transfer.fillValue = fillValue;
+  _transfer.length = length;
+  _transfer.offset = 0;
+  _transfer.status = Status::Error(Err::IN_PROGRESS, "Transfer in progress");
+  return Status::Ok();
+}
+
+Status MB85RC::_pollTransferInstruction() {
+  if (!_transferBusy()) {
+    return _transfer.status;
+  }
+  if (_transfer.offset >= _transfer.length) {
+    return Status::Ok();
+  }
+
+  const uint32_t chunkAddress = _transfer.address + static_cast<uint32_t>(_transfer.offset);
+  size_t chunk = _transfer.length - _transfer.offset;
+
+  switch (_transfer.kind) {
+    case TransferKind::READ:
+      if (chunk > cmd::MAX_READ_CHUNK) {
+        chunk = cmd::MAX_READ_CHUNK;
+      }
+      {
+        Status st = _readMemory(chunkAddress, _transfer.data + _transfer.offset, chunk);
+        if (st.ok()) {
+          _transfer.offset += chunk;
+        }
+        return st;
+      }
+
+    case TransferKind::WRITE:
+      if (chunk > cmd::MAX_WRITE_CHUNK) {
+        chunk = cmd::MAX_WRITE_CHUNK;
+      }
+      {
+        Status st = _writeMemory(chunkAddress, _transfer.constData + _transfer.offset, chunk);
+        if (st.ok()) {
+          _transfer.offset += chunk;
+        }
+        return st;
+      }
+
+    case TransferKind::FILL:
+      if (chunk > FILL_CHUNK_SIZE) {
+        chunk = FILL_CHUNK_SIZE;
+      }
+      {
+        uint8_t fillBuf[FILL_CHUNK_SIZE];
+        std::memset(fillBuf, _transfer.fillValue, chunk);
+        Status st = _writeMemory(chunkAddress, fillBuf, chunk);
+        if (st.ok()) {
+          _transfer.offset += chunk;
+        }
+        return st;
+      }
+
+    case TransferKind::VERIFY:
+      if (chunk > cmd::MAX_READ_CHUNK) {
+        chunk = cmd::MAX_READ_CHUNK;
+      }
+      {
+        uint8_t readBuf[cmd::MAX_READ_CHUNK];
+        Status st = _readMemory(chunkAddress, readBuf, chunk);
+        if (!st.ok()) {
+          return st;
+        }
+
+        for (size_t i = 0; i < chunk; ++i) {
+          if (readBuf[i] != _transfer.constData[_transfer.offset + i]) {
+            const size_t mismatch = _transfer.offset + i;
+            _transfer.offset = mismatch;
+            return Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                                 static_cast<int32_t>(mismatch));
+          }
+        }
+        _transfer.offset += chunk;
+        return Status::Ok();
+      }
+
+    case TransferKind::NONE:
+    default:
+      return Status::Ok();
+  }
+}
 
 Status MB85RC::_readMemory(uint32_t address, uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {

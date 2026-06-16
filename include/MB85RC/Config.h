@@ -122,11 +122,12 @@ struct Config {
   uint16_t sleepRecoveryUs = cmd::SLEEP_RECOVERY_US; ///< Must be 0 or >= active variant tREC
   /// Expected runtime variant.
   ///
-  /// The default preserves the pre-2.0 MB85RC256V behavior for existing
-  /// applications. New integrations should select `AUTO` for Device-ID-capable
-  /// variants, or an explicit part number when a fixed BOM is expected.
-  /// Select `MB85RC16V` explicitly because that variant has no Device ID command.
-  DeviceVariant expectedVariant = DeviceVariant::MB85RC256V;
+  /// The default is `AUTO` so Device-ID-capable parts select their active
+  /// capacity from the device identifier instead of silently assuming 256V.
+  /// Production fixed-BOM integrations should set the exact part number so
+  /// unexpected substitutions fail early. Select `MB85RC16V` explicitly because
+  /// that variant has no Device ID command and cannot be discovered by `AUTO`.
+  DeviceVariant expectedVariant = DeviceVariant::AUTO;
 
   // === Health Tracking ===
   uint8_t offlineThreshold = 5;          ///< Consecutive failures before OFFLINE state
