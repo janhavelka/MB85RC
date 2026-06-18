@@ -50,13 +50,21 @@ struct DeviceIdRaw {
 /// The snapshot is cache-only and never performs bus traffic. Use it from
 /// diagnostics, status views, and examples when an application needs to display
 /// the selected runtime variant and active capacity without disturbing health
-/// counters.
+/// counters. It also carries cached health counters and last-error state so
+/// diagnostics do not need a separate bus-touching query.
 struct SettingsSnapshot {
   bool initialized = false;       ///< True after begin() succeeds and before end()
   DriverState state = DriverState::UNINIT; ///< Current lifecycle/health state.
+  bool online = false;            ///< True when normal operations are allowed (READY/DEGRADED).
   uint8_t i2cAddress = cmd::DEFAULT_ADDRESS; ///< Active 7-bit I2C address.
   uint32_t i2cTimeoutMs = 0;      ///< Configured per-transaction I2C timeout.
   uint8_t offlineThreshold = 0;   ///< Consecutive failures required to enter OFFLINE.
+  uint32_t lastOkMs = 0;          ///< Last successful tracked I2C timestamp.
+  uint32_t lastErrorMs = 0;       ///< Last failed tracked I2C timestamp.
+  Status lastError = Status::Ok(); ///< Most recent tracked I2C/semantic error.
+  uint8_t consecutiveFailures = 0; ///< Consecutive tracked failures since last success.
+  uint32_t totalFailures = 0;     ///< Lifetime tracked failure count.
+  uint32_t totalSuccess = 0;      ///< Lifetime tracked success count.
   bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
   DeviceVariant expectedVariant = DeviceVariant::AUTO; ///< Configured variant expectation.
   DeviceVariant activeVariant = DeviceVariant::AUTO; ///< Active runtime variant after begin().
@@ -75,7 +83,7 @@ struct SettingsSnapshot {
   SleepState sleepState = SleepState::AWAKE; ///< Current tracked Sleep state.
   uint32_t sleepWakeReadyMs = 0;   ///< Millisecond deadline for WAKING -> AWAKE.
   uint16_t sleepRecoveryUs = 0;    ///< Datasheet tREC contract for active variant.
-  bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer.
+  bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer; false after conservative invalidation.
   uint32_t currentAddress = 0;    ///< Next byte address for Current Address Read.
 };
 
@@ -441,7 +449,8 @@ public:
   // =========================================================================
   
   /// Read the 3-byte Device ID from the device.
-  /// Uses the reserved I2C addresses 0xF8/0xF9.
+  /// Uses the reserved I2C addresses 0xF8/0xF9. The read phase must NACK the
+  /// final ID byte and STOP; ACK after byte 3 may repeat the ID stream.
   /// Returns INVALID_PARAM when the active variant has no Device ID command.
   /// @param id Output Device ID fields
   /// @return Status::Ok() on success

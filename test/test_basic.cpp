@@ -615,9 +615,16 @@ void test_get_settings_before_begin_reports_defaults() {
   TEST_ASSERT_FALSE(settings.initialized);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
                           static_cast<uint8_t>(settings.state));
+  TEST_ASSERT_FALSE(settings.online);
   TEST_ASSERT_EQUAL_HEX8(cmd::DEFAULT_ADDRESS, settings.i2cAddress);
   TEST_ASSERT_EQUAL_UINT32(50u, settings.i2cTimeoutMs);
   TEST_ASSERT_EQUAL_UINT8(5u, settings.offlineThreshold);
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.lastOkMs);
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.lastErrorMs);
+  TEST_ASSERT_TRUE(settings.lastError.ok());
+  TEST_ASSERT_EQUAL_UINT8(0u, settings.consecutiveFailures);
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.totalFailures);
+  TEST_ASSERT_EQUAL_UINT32(0u, settings.totalSuccess);
   TEST_ASSERT_FALSE(settings.hasNowMsHook);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(settings.expectedVariant));
@@ -1045,9 +1052,16 @@ void test_get_settings_returns_runtime_snapshot() {
   TEST_ASSERT_TRUE(snap.initialized);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
                           static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_TRUE(snap.online);
   TEST_ASSERT_EQUAL_HEX8(0x50, snap.i2cAddress);
   TEST_ASSERT_EQUAL_UINT32(10u, snap.i2cTimeoutMs);
   TEST_ASSERT_EQUAL_UINT8(1u, snap.offlineThreshold);
+  TEST_ASSERT_EQUAL_UINT32(dev.lastOkMs(), snap.lastOkMs);
+  TEST_ASSERT_EQUAL_UINT32(dev.lastErrorMs(), snap.lastErrorMs);
+  TEST_ASSERT_TRUE(snap.lastError.ok());
+  TEST_ASSERT_EQUAL_UINT8(dev.consecutiveFailures(), snap.consecutiveFailures);
+  TEST_ASSERT_EQUAL_UINT32(dev.totalFailures(), snap.totalFailures);
+  TEST_ASSERT_EQUAL_UINT32(dev.totalSuccess(), snap.totalSuccess);
   TEST_ASSERT_TRUE(snap.hasNowMsHook);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
                           static_cast<uint8_t>(snap.expectedVariant));
@@ -1070,6 +1084,31 @@ void test_get_settings_returns_runtime_snapshot() {
   TEST_ASSERT_EQUAL_UINT16(0u, snap.sleepRecoveryUs);
   TEST_ASSERT_TRUE(snap.currentAddressKnown);
   TEST_ASSERT_EQUAL_HEX32(0x0011, snap.currentAddress);
+}
+
+void test_get_settings_is_bus_silent_after_begin_and_memory_traffic() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010, 0x5A).ok());
+
+  const uint32_t readsBefore = bus.readCalls;
+  const uint32_t writesBefore = bus.writeCalls;
+  const uint32_t specialsBefore = bus.specialCalls;
+  const uint32_t trafficBefore = busTraffic(bus);
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  const SettingsSnapshot byValue = dev.getSettings();
+
+  TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(specialsBefore, bus.specialCalls);
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  TEST_ASSERT_EQUAL_UINT32(dev.lastOkMs(), snap.lastOkMs);
+  TEST_ASSERT_EQUAL_UINT32(dev.totalSuccess(), snap.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(snap.totalSuccess, byValue.totalSuccess);
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
 }
 
 // ===========================================================================
@@ -3609,6 +3648,7 @@ int main() {
   RUN_TEST(test_end_transitions_to_uninit);
   RUN_TEST(test_now_ms_missing_callback_keeps_health_timestamps_zero);
   RUN_TEST(test_get_settings_returns_runtime_snapshot);
+  RUN_TEST(test_get_settings_is_bus_silent_after_begin_and_memory_traffic);
 
   // Probe
   RUN_TEST(test_probe_failure_does_not_update_health);

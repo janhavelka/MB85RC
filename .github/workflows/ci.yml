@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     tags:
@@ -73,6 +74,9 @@ jobs:
       - name: Check generated version header
         run: python scripts/generate_version.py check
 
+      - name: Check release metadata consistency
+        run: python tools/check_metadata_consistency.py
+
       - name: Enforce core timing guard
         run: python tools/check_core_timing_guard.py
 
@@ -129,5 +133,22 @@ jobs:
       - name: Enforce ESP-IDF example contract
         run: python tools/check_idf_example_contract.py
 
+      - name: Check release metadata consistency
+        run: python tools/check_metadata_consistency.py
+
       - name: Validate library package
         run: pio pkg pack
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen
+
+      - name: Build Doxygen documentation
+        run: doxygen Doxyfile

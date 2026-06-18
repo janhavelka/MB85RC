@@ -64,7 +64,7 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
 enum class I2cSpecialOp : uint8_t {
   HIGH_SPEED_WRITE,      ///< HS master code, expected NACK, then a write transaction.
   HIGH_SPEED_WRITE_READ, ///< HS master code, expected NACK, then a write/read transaction.
-  ENTER_SLEEP,           ///< F8h + device address word + repeated-start 86h.
+  ENTER_SLEEP,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
   WAKE_FROM_SLEEP        ///< Device address wake stimulus; ACK may be indeterminate.
 };
 
@@ -73,7 +73,9 @@ enum class I2cSpecialOp : uint8_t {
 /// For High-speed operations, the callback must consume the expected NACK from
 /// the `0000 1XXX` master-code byte internally and return OK only when the
 /// complete HS-prefixed transaction succeeds. Generic I2C NACKs must remain
-/// failures outside that narrow prefix.
+/// failures outside that narrow prefix. For Sleep command address words, the
+/// R/W bit is don't-care; for MB85RC1MT, A16 is also don't-care in that command
+/// form.
 struct I2cSpecialTransfer {
   uint8_t i2cAddress = cmd::DEFAULT_ADDRESS; ///< Active/encoded 7-bit device address.
   uint8_t hsMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT; ///< Raw 8-bit HS master code.

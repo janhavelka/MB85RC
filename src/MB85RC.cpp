@@ -250,9 +250,16 @@ void MB85RC::end() {
 Status MB85RC::getSettings(SettingsSnapshot& out) const {
   out.initialized = _initialized;
   out.state = _driverState;
+  out.online = isOnline();
   out.i2cAddress = _config.i2cAddress;
   out.i2cTimeoutMs = _config.i2cTimeoutMs;
   out.offlineThreshold = _config.offlineThreshold;
+  out.lastOkMs = _lastOkMs;
+  out.lastErrorMs = _lastErrorMs;
+  out.lastError = _lastError;
+  out.consecutiveFailures = _consecutiveFailures;
+  out.totalFailures = _totalFailures;
+  out.totalSuccess = _totalSuccess;
   out.hasNowMsHook = (_config.nowMs != nullptr);
   out.expectedVariant = _config.expectedVariant;
   out.activeVariant = _activeVariantEnum();

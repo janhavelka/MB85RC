@@ -7,6 +7,8 @@ Use this checklist before tagging and publishing a release.
 - Regenerate and check `include/MB85RC/Version.h` with
   `python scripts/generate_version.py` and
   `python scripts/generate_version.py check`.
+- Check package/release metadata consistency with
+  `python tools/check_metadata_consistency.py`.
 - Run native tests: `python -m platformio test -e native`.
 - Run Arduino ESP32 builds: `python -m platformio run -e esp32s3dev` and
   `python -m platformio run -e esp32s2dev`.

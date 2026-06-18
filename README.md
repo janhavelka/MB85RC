@@ -14,7 +14,7 @@ Released library version: `v3.0.0`
 - Current-address read support for the documented internal address-pointer flow, including multi-byte helper coverage
 - Device ID verification on `begin()` where supported (`Manufacturer ID = 0x00A`, variant-specific Product ID), with memory-probe presence checks for no-Device-ID variants
 - Raw Device ID access where available and verify/compare helpers for diagnostics
-- Runtime settings snapshot API for examples and diagnostics
+- Runtime settings snapshot API for bus-silent examples and diagnostics
 - Manual recovery that records transport failures and Device ID mismatches in health tracking
 
 ## Production Readiness Summary
@@ -353,7 +353,7 @@ known successful addressed read/write by the same instance.
 - `Status recover()` - manual driver-state recovery attempt; application-owned bus recovery remains outside the core
 - `Status readDeviceId(DeviceId& out)` - read manufacturer, product, and density fields where supported
 - `Status readDeviceIdRaw(DeviceIdRaw& out)` - read the raw 3-byte Device ID payload where supported
-- `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime state without I2C
+- `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime/health state without I2C
 - `SettingsSnapshot getSettings() const` - value-returning snapshot helper for diagnostics
 
 ### State And Health
@@ -371,6 +371,12 @@ known successful addressed read/write by the same instance.
 - `uint8_t consecutiveFailures() const`
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
+
+`SettingsSnapshot` is a cache-only view. It includes initialized/state/online
+status, I2C configuration, health counters and last error, active variant and
+Device ID fields, Sleep mode state, and conservative current-address tracking.
+Calling either `getSettings()` overload must not probe the device or change
+health counters.
 
 ## Supported Runtime Variants
 
@@ -550,6 +556,7 @@ python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_idf_example_contract.py
 python scripts/generate_version.py check
+python tools/check_metadata_consistency.py
 python -m platformio run -e esp32s3dev
 python -m platformio run -e esp32s2dev
 python -m platformio pkg pack
