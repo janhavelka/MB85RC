@@ -13,6 +13,8 @@ Use this checklist before tagging and publishing a release.
 - Run Arduino ESP32 builds: `python -m platformio run -e esp32s3dev` and
   `python -m platformio run -e esp32s2dev`.
 - Run guard scripts:
+  `python tools/hil_runner.py --parser-self-test`,
+  `python tools/hil_runner.py --dry-run --port COM27 --baud 115200 --timeout-s 5 --strict --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --soak-duration-s 28800`,
   `python tools/check_core_timing_guard.py`,
   `python tools/check_cli_contract.py`, and
   `python tools/check_idf_example_contract.py`.
@@ -26,4 +28,7 @@ Use this checklist before tagging and publishing a release.
   only intended release changes and no generated artifacts.
 - Tag the release only after PR CI is reviewed.
 - Keep hardware-validation matrix rows pending unless actual board logs and
-  evidence are recorded.
+  evidence are recorded. Production HIL evidence must use strict mode, the
+  required variant/product/capacity gates, zero FAIL, zero UNKNOWN, final READY
+  health, zero total failures, zero target resets/reconnects, and documented
+  heap thresholds.

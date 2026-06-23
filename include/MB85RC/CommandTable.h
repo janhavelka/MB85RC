@@ -251,5 +251,11 @@ static constexpr size_t MAX_WRITE_CHUNK = 126;
 /// Maximum bytes per single read transaction.
 static constexpr size_t MAX_READ_CHUNK = 128;
 
+/// Maximum bytes per single fill transaction.
+static constexpr size_t MAX_FILL_CHUNK = 64;
+
+/// Maximum staged transfer chunks executed by one pollTransfer() call.
+static constexpr uint8_t MAX_TRANSFER_INSTRUCTIONS_PER_POLL = 8;
+
 }  // namespace cmd
 }  // namespace MB85RC

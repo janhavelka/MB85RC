@@ -13,10 +13,10 @@ namespace MB85RC {
 
 /// @brief Driver state for health monitoring.
 enum class DriverState : uint8_t {
-  UNINIT,    ///< begin() not called or end() called
-  READY,     ///< Operational, consecutiveFailures == 0
-  DEGRADED,  ///< 1 <= consecutiveFailures < offlineThreshold
-  OFFLINE    ///< consecutiveFailures >= offlineThreshold
+  UNINIT = 0,   ///< begin() not called or end() called
+  READY = 1,    ///< Operational, consecutiveFailures == 0
+  DEGRADED = 2, ///< 1 <= consecutiveFailures < offlineThreshold
+  OFFLINE = 3   ///< consecutiveFailures >= offlineThreshold
 };
 
 /// @brief Device Sleep power-state tracked by the driver.
@@ -25,9 +25,9 @@ enum class DriverState : uint8_t {
 /// stimulus has been sent and the caller must allow the datasheet recovery time
 /// before memory or Device ID access.
 enum class SleepState : uint8_t {
-  AWAKE,   ///< Normal access is allowed.
-  ASLEEP,  ///< Sleep command accepted; call wake()/wakeFromSleep().
-  WAKING   ///< Wake stimulus sent; wait tREC and call tick().
+  AWAKE = 0,  ///< Normal access is allowed.
+  ASLEEP = 1, ///< Sleep command accepted; call wake()/wakeFromSleep().
+  WAKING = 2  ///< Wake stimulus sent; wait tREC and call tick().
 };
 
 /// @brief Device ID fields parsed from 3-byte read.
@@ -63,8 +63,8 @@ struct SettingsSnapshot {
   uint32_t lastErrorMs = 0;       ///< Last failed tracked I2C timestamp.
   Status lastError = Status::Ok(); ///< Most recent tracked I2C/semantic error.
   uint8_t consecutiveFailures = 0; ///< Consecutive tracked failures since last success.
-  uint32_t totalFailures = 0;     ///< Lifetime tracked failure count.
-  uint32_t totalSuccess = 0;      ///< Lifetime tracked success count.
+  uint32_t totalFailures = 0;     ///< Lifetime tracked failure count; wraps at uint32_t max.
+  uint32_t totalSuccess = 0;      ///< Lifetime tracked success count; wraps at uint32_t max.
   bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
   DeviceVariant expectedVariant = DeviceVariant::AUTO; ///< Configured variant expectation.
   DeviceVariant activeVariant = DeviceVariant::AUTO; ///< Active runtime variant after begin().
@@ -161,8 +161,10 @@ public:
   
   /// Process bounded maintenance work (call regularly from loop).
   ///
-  /// This hook performs no async I2C work and adds no FRAM write delay. It uses
-  /// caller-supplied time to advance Sleep wake recovery from WAKING to AWAKE.
+  /// This hook performs no I2C work, delay, retry, allocation, or health update.
+  /// It only uses caller-supplied time to advance Sleep wake recovery from
+  /// WAKING to AWAKE. For variants without Sleep support, including MB85RC256V,
+  /// this is a practical no-op.
   /// @param nowMs Current timestamp in milliseconds.
   void tick(uint32_t nowMs);
   
@@ -555,7 +557,8 @@ public:
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Output buffer that must remain valid until completion/cancel.
   /// @param length Number of bytes to read.
-  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active,
+  /// driver is OFFLINE, or Sleep state blocks memory I2C.
   Status requestRead(uint32_t address, uint8_t* data, size_t length);
 
   /// Queue a staged explicit-address write transfer.
@@ -566,7 +569,8 @@ public:
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Source buffer that must remain valid until completion/cancel.
   /// @param length Number of bytes to write.
-  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active,
+  /// driver is OFFLINE, or Sleep state blocks memory I2C.
   Status requestWrite(uint32_t address, const uint8_t* data, size_t length);
 
   /// Queue a staged explicit-address fill transfer.
@@ -578,7 +582,8 @@ public:
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte.
   /// @param length Number of bytes to fill.
-  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active,
+  /// driver is OFFLINE, or Sleep state blocks memory I2C.
   Status requestFill(uint32_t address, uint8_t value, size_t length);
 
   /// Queue a staged explicit-address readback verification transfer.
@@ -589,15 +594,18 @@ public:
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Expected bytes that must remain valid until completion/cancel.
   /// @param length Number of bytes to verify.
-  /// @return Status::Ok() when queued, BUSY if another transfer is active.
+  /// @return Status::Ok() when queued, BUSY if another transfer is active,
+  /// driver is OFFLINE, or Sleep state blocks memory I2C.
   Status requestVerify(uint32_t address, const uint8_t* data, size_t length);
 
   /// Execute bounded work for a queued transfer.
   ///
   /// A random-read chunk, sequential-write chunk, or verify readback chunk is
   /// one instruction. `maxInstructions == 0` performs no I2C and returns the
-  /// current transfer status. Device ID and current-address reads remain
-  /// single-instruction synchronous diagnostics outside this staged API.
+  /// current transfer status. Values above
+  /// cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL are clamped. Device ID and
+  /// current-address reads remain single-instruction synchronous diagnostics
+  /// outside this staged API.
   /// @param nowMs Current timestamp in milliseconds for Sleep wake advancement.
   /// @param maxInstructions Maximum transfer chunks to execute this poll.
   /// @return IN_PROGRESS while queued work remains, OK on completion, or error.
@@ -728,6 +736,9 @@ private:
 
   /// Return OK only when public bus access is allowed by Sleep state.
   Status _ensureAwakeForI2c();
+
+  /// Return OK only when a staged transfer may be queued without I2C traffic.
+  Status _canQueueTransfer();
 
   /// Advance WAKING -> AWAKE when the caller-supplied time reaches the deadline.
   void _advanceWakeState(uint32_t nowMs);

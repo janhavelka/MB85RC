@@ -16,7 +16,9 @@
 #include <driver/gpio.h>
 #include <driver/i2c_master.h>
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_rom_sys.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -34,6 +36,8 @@ static constexpr size_t CLI_DATA_MAX = 64U;
 static constexpr uint32_t DEFAULT_STRESS_COUNT = 10U;
 static constexpr uint32_t MAX_STRESS_COUNT = 1000U;
 static constexpr uint32_t RW_SUITE_ADDR = 0x0010U;
+static constexpr uint32_t XFER_DEMO_ADDR = 0x0100U;
+static constexpr size_t XFER_DEMO_LEN = 640U;
 
 struct NativeBus {
   i2c_master_bus_handle_t bus = nullptr;
@@ -552,8 +556,9 @@ void printHelp() {
   puts("  current / cur [len] | id | idraw | variants | size");
   puts("  hs | hs support | hs enter");
   puts("  sleep | sleep support | sleep enter | sleep wake");
-  puts("  drv | iface_reset | probe | recover | verbose [0|1]");
+  puts("  drv | heap | iface_reset | probe | recover | verbose [0|1]");
   puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
+  puts("  xfer_demo | xfer_demo!");
   puts("  stress_mix [N] | stress_mix! [N] | randbench [N] | randbench! [N]");
   puts("  typed_demo | typed_demo!");
 }
@@ -589,6 +594,13 @@ void printDrv() {
          sleepStateName(snap.sleepState),
          static_cast<unsigned>(snap.sleepRecoveryUs),
          static_cast<unsigned long>(snap.sleepWakeReadyMs));
+}
+
+void printHeapTelemetry() {
+  printf("heap: free=%lu min_free=%lu largest=%lu\n",
+         static_cast<unsigned long>(esp_get_free_heap_size()),
+         static_cast<unsigned long>(esp_get_minimum_free_heap_size()),
+         static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
 }
 
 void printHighSpeedSupport() {
@@ -954,6 +966,153 @@ void runRwSuite() {
   printStatus("rw_suite restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
+MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
+  if (len == 0U || chunkSize == 0U) {
+    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer bounds");
+  }
+  const uint32_t expectedChunks =
+      static_cast<uint32_t>((len + chunkSize - 1U) / chunkSize);
+  const uint32_t pollLimit = expectedChunks + 3U;
+  for (uint32_t i = 0; i < pollLimit; ++i) {
+    MB85RC::Status st = gFram.pollTransfer(nowMs(nullptr), 1);
+    if (st.inProgress()) {
+      continue;
+    }
+    return st;
+  }
+  gFram.cancelTransfer();
+  return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
+}
+
+void printXferCheck(const char* name, bool ok, const char* note = "") {
+  printf("xfer_demo %s: %s", name, ok ? "PASS" : "FAIL");
+  if (note != nullptr && note[0] != '\0') {
+    printf(" (%s)", note);
+  }
+  putchar('\n');
+}
+
+void runXferDemo() {
+  uint32_t pass = 0;
+  uint32_t fail = 0;
+  auto check = [&](const char* name, bool ok, const char* note = "") {
+    printXferCheck(name, ok, note);
+    if (ok) {
+      ++pass;
+    } else {
+      ++fail;
+    }
+  };
+  auto checkStatus = [&](const char* name, MB85RC::Status st) {
+    check(name, st.ok(), st.ok() ? "" : st.msg);
+    if (!st.ok()) {
+      printStatus(name, st);
+    }
+  };
+
+  const uint32_t addr =
+      rangeFits(XFER_DEMO_ADDR, static_cast<uint32_t>(XFER_DEMO_LEN)) ? XFER_DEMO_ADDR : 0U;
+  const size_t len = rangeFits(addr, static_cast<uint32_t>(XFER_DEMO_LEN))
+                         ? XFER_DEMO_LEN
+                         : static_cast<size_t>(gFram.capacityBytes());
+  if (len == 0U || !rangeFits(addr, static_cast<uint32_t>(len))) {
+    check("select scratch range", false, "active capacity is zero");
+    printf("xfer_demo_result pass=%lu fail=%lu\n",
+           static_cast<unsigned long>(pass),
+           static_cast<unsigned long>(fail));
+    return;
+  }
+
+  static uint8_t original[XFER_DEMO_LEN] = {};
+  static uint8_t readBack[XFER_DEMO_LEN] = {};
+  static uint8_t pattern[XFER_DEMO_LEN] = {};
+  static uint8_t fillExpected[XFER_DEMO_LEN] = {};
+  for (size_t i = 0; i < len; ++i) {
+    pattern[i] = static_cast<uint8_t>(0x40U + ((i * 19U) & 0x7FU));
+    fillExpected[i] = 0x5AU;
+  }
+
+  MB85RC::Status st = gFram.read(addr, original, len);
+  checkStatus("backup", st);
+  if (!st.ok()) {
+    printf("xfer_demo_result pass=%lu fail=%lu\n",
+           static_cast<unsigned long>(pass),
+           static_cast<unsigned long>(fail));
+    return;
+  }
+
+  st = gFram.requestRead(addr, readBack, len);
+  checkStatus("requestRead", st);
+  if (st.ok()) {
+    MB85RC::Status zeroBudget = gFram.pollTransfer(nowMs(nullptr), 0);
+    check("zeroBudgetInProgress", zeroBudget.inProgress(), zeroBudget.msg);
+    uint8_t tmp = 0;
+    MB85RC::Status busy = gFram.readByte(addr, tmp);
+    check("busyDuringTransfer", busy.code == MB85RC::Err::BUSY, busy.msg);
+    MB85RC::Status budgetTwo = gFram.pollTransfer(nowMs(nullptr), 2);
+    check("poll budget 2 executes two chunks", budgetTwo.inProgress(),
+          budgetTwo.inProgress() ? "" : budgetTwo.msg);
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollRead", st);
+    check("readMatchesBackup", st.ok() && memcmp(readBack, original, len) == 0);
+  }
+
+  st = gFram.requestWrite(addr, pattern, len);
+  checkStatus("requestWrite", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    checkStatus("pollWrite", st);
+  }
+
+  st = gFram.requestVerify(addr, pattern, len);
+  checkStatus("requestVerifyWrite", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyWrite", st);
+  }
+
+  st = gFram.requestFill(addr, 0x5AU, len);
+  checkStatus("requestFill", st);
+  if (st.ok()) {
+    const bool highBudgetShouldRemainActive =
+        len > (static_cast<size_t>(MB85RC::cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL) *
+               static_cast<size_t>(MB85RC::cmd::MAX_FILL_CHUNK));
+    MB85RC::Status highBudget = gFram.pollTransfer(nowMs(nullptr), 255);
+    check("poll high budget clamps to 8 chunks",
+          highBudgetShouldRemainActive ? highBudget.inProgress() : highBudget.ok(),
+          highBudget.msg);
+    st = highBudget.inProgress()
+             ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
+             : highBudget;
+    checkStatus("pollFill", st);
+  }
+
+  st = gFram.requestVerify(addr, fillExpected, len);
+  checkStatus("requestVerifyFill", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyFill", st);
+  }
+
+  st = gFram.requestWrite(addr, original, len);
+  checkStatus("requestRestore", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    checkStatus("pollRestore", st);
+  }
+
+  st = gFram.requestVerify(addr, original, len);
+  checkStatus("requestVerifyRestore", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyRestore", st);
+  }
+
+  printf("xfer_demo_result pass=%lu fail=%lu\n",
+         static_cast<unsigned long>(pass),
+         static_cast<unsigned long>(fail));
+}
+
 void runRandBench(uint32_t count) {
   if (count == 0U || count > MAX_STRESS_COUNT) {
     printf("randbench count must be 1..%lu in this IDF example\n",
@@ -1042,6 +1201,8 @@ void handleCommand(char* line) {
   } else if (strcmp(full, "drv") == 0 || strcmp(full, "cfg") == 0 ||
              strcmp(full, "settings") == 0) {
     printDrv();
+  } else if (strcmp(full, "heap") == 0) {
+    printHeapTelemetry();
   } else if (strcmp(full, "id") == 0) {
     MB85RC::DeviceId id;
     MB85RC::Status st = gFram.readDeviceId(id);
@@ -1212,6 +1373,12 @@ void handleCommand(char* line) {
                               "rw_suite!");
   } else if (strcmp(full, "rw_suite!") == 0) {
     runRwSuite();
+  } else if (strcmp(full, "xfer_demo") == 0) {
+    printConfirmationRequired(full,
+                              "Would run poll-chunked read/write/fill/verify operations in a scratch FRAM range.",
+                              "xfer_demo!");
+  } else if (strcmp(full, "xfer_demo!") == 0) {
+    runXferDemo();
   } else if (strcmp(full, "stress") == 0 || strncmp(full, "stress ", 7) == 0) {
     char confirmed[32];
     if (strncmp(full, "stress ", 7) == 0) {

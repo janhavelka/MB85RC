@@ -17,12 +17,12 @@ namespace MB85RC {
 /// select it explicitly when using that part.
 enum class DeviceVariant : uint8_t {
   AUTO = 0,       ///< Select a supported runtime variant from Device ID.
-  MB85RC256V,     ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
-  MB85RC64TA,     ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
-  MB85RC04V,      ///< Expect MB85RC04V, 512 bytes, Product ID 0x010.
-  MB85RC16V,      ///< Expect MB85RC16V, 2 KiB, no Device ID command.
-  MB85RC512T,     ///< Expect MB85RC512T, 64 KiB, Product ID 0x658.
-  MB85RC1MT       ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
+  MB85RC256V = 1, ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
+  MB85RC64TA = 2, ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
+  MB85RC04V = 3,  ///< Expect MB85RC04V, 512 bytes, Product ID 0x010.
+  MB85RC16V = 4,  ///< Expect MB85RC16V, 2 KiB, no Device ID command.
+  MB85RC512T = 5, ///< Expect MB85RC512T, 64 KiB, Product ID 0x658.
+  MB85RC1MT = 6   ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
 };
 
 /// I2C write callback signature.
@@ -62,10 +62,10 @@ using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t tx
 /// the active variant documents the feature and the application supplied
 /// Config::i2cSpecial.
 enum class I2cSpecialOp : uint8_t {
-  HIGH_SPEED_WRITE,      ///< HS master code, expected NACK, then a write transaction.
-  HIGH_SPEED_WRITE_READ, ///< HS master code, expected NACK, then a write/read transaction.
-  ENTER_SLEEP,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
-  WAKE_FROM_SLEEP        ///< Device address wake stimulus; ACK may be indeterminate.
+  HIGH_SPEED_WRITE = 0,      ///< HS master code, expected NACK, then a write transaction.
+  HIGH_SPEED_WRITE_READ = 1, ///< HS master code, expected NACK, then a write/read transaction.
+  ENTER_SLEEP = 2,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
+  WAKE_FROM_SLEEP = 3        ///< Device address wake stimulus; ACK may be indeterminate.
 };
 
 /// @brief Parameters for optional special I2C operations.
@@ -99,6 +99,15 @@ using I2cSpecialFn = Status (*)(I2cSpecialOp op, const I2cSpecialTransfer& trans
 /// @return Current monotonic milliseconds
 using NowMsFn = uint32_t (*)(void* user);
 
+/// Minimum accepted per-transaction timeout passed to injected I2C callbacks.
+static constexpr uint32_t MIN_I2C_TIMEOUT_MS = 1UL;
+
+/// Default per-transaction timeout passed to injected I2C callbacks.
+static constexpr uint32_t DEFAULT_I2C_TIMEOUT_MS = 50UL;
+
+/// Maximum accepted per-transaction timeout passed to injected I2C callbacks.
+static constexpr uint32_t MAX_I2C_TIMEOUT_MS = 1000UL;
+
 /// @brief Configuration for MB85RC driver.
 struct Config {
   // === I2C Transport (required) ===
@@ -114,12 +123,13 @@ struct Config {
   // === Device Settings ===
   /// Base 7-bit I2C address.
   ///
-  /// Valid values are `0x50`-`0x57`. For A2/A1/A0 variants this is the strapped
-  /// device address. Small-density variants can use low address bits as memory
-  /// address bits; the driver derives per-transaction addresses from this base
-  /// and the active variant's address model.
+  /// This is the board strap base address, not a memory-bank encoded
+  /// transaction address. Common values remain `0x50`-`0x57`, but variants that
+  /// encode memory address bits into the I2C address accept only unambiguous
+  /// bases: `MB85RC04V` and `MB85RC1MT` use even bases `0x50`, `0x52`, `0x54`,
+  /// or `0x56`; `MB85RC16V` uses only `0x50`.
   uint8_t i2cAddress = 0x50;
-  uint32_t i2cTimeoutMs = 50;            ///< I2C transaction timeout in ms
+  uint32_t i2cTimeoutMs = DEFAULT_I2C_TIMEOUT_MS; ///< Callback deadline in `MIN_I2C_TIMEOUT_MS..MAX_I2C_TIMEOUT_MS`
   uint8_t highSpeedMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT; ///< Raw `0000 1XXX` HS code
   uint16_t sleepRecoveryUs = cmd::SLEEP_RECOVERY_US; ///< Must be 0 or >= active variant tREC
   /// Expected runtime variant.

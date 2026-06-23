@@ -1,0 +1,5 @@
+HIL functional summary: PASS=26 FAIL=0 UNKNOWN=0
+HIL soak summary: PASS duration=28800.2s pass=53191 fail=0 unknown=30
+Transcript: C:\Users\Honza\Documents\Projects\MB85RC\docs\reports\hil-runner-COM27-20260622-8h-transcript.txt
+JSON: C:\Users\Honza\Documents\Projects\MB85RC\docs\reports\hil-runner-COM27-20260622-8h.json
+Markdown: C:\Users\Honza\Documents\Projects\MB85RC\docs\reports\hil-runner-COM27-20260622-8h.md

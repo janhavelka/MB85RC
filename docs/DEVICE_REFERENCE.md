@@ -48,6 +48,11 @@ voltage, temperature, and package decisions.
   support up to four devices on one bus, while `MB85RC64TA`, `MB85RC256V`, and
   `MB85RC512T` support up to eight. `MB85RC16V` uses address bits in the device
   address rather than external device-select pins.
+- Driver configuration uses the board strap base address, not a memory-bank
+  encoded transaction address. `MB85RC64TA`, `MB85RC256V`, and `MB85RC512T`
+  accept `0x50`-`0x57`; `MB85RC04V` and `MB85RC1MT` accept only even bases
+  `0x50`, `0x52`, `0x54`, and `0x56`; `MB85RC16V` accepts only `0x50` in this
+  repository's local datasheet model.
 - Do not change address pins or `WP` during an I2C transaction.
 
 ## Electrical And AC Timing
@@ -117,8 +122,9 @@ records this state contract but does not insert a hidden delay.
 - Select the exact variant profile for density, supply range, address-pin
   layout, memory-address format, supported maximum bus speed, and HS/Sleep
   capability.
-- Configure the I2C target address from the board strap and the active
-  variant's address table.
+- Configure the I2C target address from the board strap base and the active
+  variant's address table. Let the driver derive per-transaction addresses for
+  variants that encode upper memory bits in the I2C address.
 - Keep `WP` low/open for write tests, or treat write success as transport
   acceptance only when `WP` may be high externally.
 - Use random explicit-address reads for public production reads instead of

@@ -53,6 +53,7 @@ MANDATORY_COMMANDS = [
     "sleep support",
     "sleep enter",
     "sleep wake",
+    "heap",
     "drv",
     "iface_reset",
     "probe",
@@ -62,6 +63,7 @@ MANDATORY_COMMANDS = [
     "stress_mix",
     "selftest",
     "rw_suite",
+    "xfer_demo",
     "randbench",
     "typed_demo",
 ]

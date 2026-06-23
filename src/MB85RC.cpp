@@ -12,8 +12,6 @@ namespace MB85RC {
 namespace {
 
 static constexpr size_t MAX_WRITE_BUF = cmd::MAX_WRITE_CHUNK + cmd::ADDRESS_BYTES;
-static constexpr size_t FILL_CHUNK_SIZE = 64;
-static constexpr uint8_t MAX_TRANSFER_INSTRUCTIONS_PER_POLL = 8;
 
 void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
@@ -83,6 +81,58 @@ bool isValidHighSpeedMasterCode(uint8_t value) {
 
 bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
   return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
+}
+
+int32_t detailFromU32(uint32_t value) {
+  if (value > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+    return std::numeric_limits<int32_t>::max();
+  }
+  return static_cast<int32_t>(value);
+}
+
+Status busyStatus(BusyDetail detail, const char* message) {
+  return Status::Error(Err::BUSY, message, static_cast<int32_t>(detail));
+}
+
+bool isBaseAddressValidForVariant(uint8_t address, const cmd::VariantInfo& variant) {
+  switch (variant.addressModel) {
+    case cmd::AddressModel::TWO_BYTE_ADDRESS_PINS:
+      return address >= cmd::MIN_ADDRESS && address <= cmd::MAX_ADDRESS;
+    case cmd::AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+    case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      return address >= cmd::MIN_ADDRESS && address <= cmd::MAX_ADDRESS &&
+             ((address & 0x01U) == 0U);
+    case cmd::AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+      return address == cmd::DEFAULT_ADDRESS;
+    default:
+      return false;
+  }
+}
+
+Status validateBaseAddressForVariant(uint8_t address, const cmd::VariantInfo& variant) {
+  if (isBaseAddressValidForVariant(address, variant)) {
+    return Status::Ok();
+  }
+  return Status::Error(Err::INVALID_CONFIG,
+                       "I2C address must be base strap for active variant",
+                       address);
+}
+
+bool shouldTrackHealthFailure(Err code) {
+  switch (code) {
+    case Err::OK:
+    case Err::IN_PROGRESS:
+    case Err::NOT_INITIALIZED:
+    case Err::INVALID_CONFIG:
+    case Err::INVALID_PARAM:
+    case Err::WRITE_PROTECTED:
+    case Err::BUSY:
+    case Err::VERIFY_MISMATCH:
+    case Err::UNSUPPORTED:
+      return false;
+    default:
+      return true;
+  }
 }
 
 class ScopedOfflineI2cAllowance {
@@ -155,11 +205,14 @@ Status MB85RC::begin(const Config& config) {
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
   }
-  if (config.i2cTimeoutMs == 0) {
-    return Status::Error(Err::INVALID_CONFIG, "I2C timeout must be > 0");
+  if (config.i2cTimeoutMs < MIN_I2C_TIMEOUT_MS ||
+      config.i2cTimeoutMs > MAX_I2C_TIMEOUT_MS) {
+    return Status::Error(Err::INVALID_CONFIG, "I2C timeout outside supported range",
+                         detailFromU32(config.i2cTimeoutMs));
   }
   if (config.i2cAddress < cmd::MIN_ADDRESS || config.i2cAddress > cmd::MAX_ADDRESS) {
-    return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address (must be 0x50-0x57)");
+    return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address (must be 0x50-0x57)",
+                         config.i2cAddress);
   }
   if (!isValidHighSpeedMasterCode(config.highSpeedMasterCode)) {
     return Status::Error(Err::INVALID_CONFIG, "High-speed master code must be 0x08-0x0F");
@@ -171,6 +224,12 @@ Status MB85RC::begin(const Config& config) {
   const cmd::VariantInfo* explicitVariant = variantForExpected(config.expectedVariant);
   if (explicitVariant != nullptr && !isSupportedRuntimeVariant(*explicitVariant)) {
     return Status::Error(Err::INVALID_CONFIG, "Expected variant not supported by driver");
+  }
+  if (explicitVariant != nullptr) {
+    Status addressStatus = validateBaseAddressForVariant(config.i2cAddress, *explicitVariant);
+    if (!addressStatus.ok()) {
+      return addressStatus;
+    }
   }
   if (config.sleepRecoveryUs != 0U && explicitVariant != nullptr &&
       explicitVariant->supportsSleepMode &&
@@ -206,6 +265,10 @@ Status MB85RC::begin(const Config& config) {
     if (!st.ok()) {
       return resetAfterFailedBegin(st);
     }
+    st = validateBaseAddressForVariant(_config.i2cAddress, *_variant);
+    if (!st.ok()) {
+      return resetAfterFailedBegin(st);
+    }
     if (_config.sleepRecoveryUs != 0U && _variant != nullptr &&
         _variant->supportsSleepMode &&
         _config.sleepRecoveryUs < _variant->sleepRecoveryUs) {
@@ -222,8 +285,7 @@ Status MB85RC::begin(const Config& config) {
 
 void MB85RC::tick(uint32_t nowMs) {
   _advanceWakeState(nowMs);
-  // FRAM has no write delays or async operations.
-  // Reserved for future use (e.g., periodic health checks).
+  // No I2C, delay, retry, allocation, or health update is allowed here.
 }
 
 void MB85RC::end() {
@@ -356,10 +418,10 @@ Status MB85RC::enterSleep() {
     return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
   }
   if (_sleepState == SleepState::ASLEEP) {
-    return Status::Error(Err::BUSY, "Device is already asleep");
+    return busyStatus(BusyDetail::ALREADY_ASLEEP, "Device is already asleep");
   }
   if (_sleepState == SleepState::WAKING) {
-    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+    return busyStatus(BusyDetail::WAKING, "Sleep wake recovery pending");
   }
 
   I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
@@ -393,7 +455,7 @@ Status MB85RC::wake() {
     return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
   }
   if (_sleepState == SleepState::WAKING) {
-    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+    return busyStatus(BusyDetail::WAKING, "Sleep wake recovery pending");
   }
 
   I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
@@ -649,15 +711,15 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
     return result;
   }
 
-  uint8_t chunk[FILL_CHUNK_SIZE];
+  uint8_t chunk[cmd::MAX_FILL_CHUNK];
   std::memset(chunk, value, sizeof(chunk));
 
   size_t remaining = len;
   size_t offset = 0;
   while (remaining > 0) {
     size_t toWrite = remaining;
-    if (toWrite > FILL_CHUNK_SIZE) {
-      toWrite = FILL_CHUNK_SIZE;
+    if (toWrite > cmd::MAX_FILL_CHUNK) {
+      toWrite = cmd::MAX_FILL_CHUNK;
     }
 
     uint32_t addr = address + static_cast<uint32_t>(offset);
@@ -961,8 +1023,8 @@ Status MB85RC::pollTransfer(uint32_t nowMs, uint8_t maxInstructions) {
   }
 
   uint8_t budget = maxInstructions;
-  if (budget > MAX_TRANSFER_INSTRUCTIONS_PER_POLL) {
-    budget = MAX_TRANSFER_INSTRUCTIONS_PER_POLL;
+  if (budget > cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL) {
+    budget = cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL;
   }
 
   while (budget > 0U && _transferBusy()) {
@@ -987,7 +1049,7 @@ Status MB85RC::pollTransfer(uint32_t nowMs, uint8_t maxInstructions) {
 
 void MB85RC::cancelTransfer() {
   if (_transferBusy()) {
-    _clearTransfer(Status::Error(Err::BUSY, "Transfer cancelled"));
+    _clearTransfer(busyStatus(BusyDetail::TRANSFER_CANCELLED, "Transfer cancelled"));
   }
 }
 
@@ -1049,7 +1111,7 @@ Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
 Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                         uint8_t* rxBuf, size_t rxLen) {
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
   }
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
@@ -1074,7 +1136,7 @@ Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
 
 Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len) {
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
   }
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
@@ -1094,7 +1156,7 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
 
 Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& transfer) {
   if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return Status::Error(Err::BUSY, "Driver is offline; call recover()");
+    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
   }
 
   Status st = _i2cSpecialRaw(op, transfer);
@@ -1115,9 +1177,16 @@ bool MB85RC::_transferBusy() const {
 
 Status MB85RC::_ensureNoTransferActive() const {
   if (_transferBusy()) {
-    return Status::Error(Err::BUSY, "Transfer in progress");
+    return busyStatus(BusyDetail::TRANSFER_ACTIVE, "Transfer in progress");
   }
   return Status::Ok();
+}
+
+Status MB85RC::_canQueueTransfer() {
+  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
+    return busyStatus(BusyDetail::OFFLINE, "Driver offline until recover()");
+  }
+  return _ensureAwakeForI2c();
 }
 
 void MB85RC::_clearTransfer(const Status& status) {
@@ -1132,7 +1201,11 @@ Status MB85RC::_requestTransfer(TransferKind kind, uint32_t address, uint8_t* da
     return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
   }
   if (_transferBusy()) {
-    return Status::Error(Err::BUSY, "Transfer in progress");
+    return busyStatus(BusyDetail::TRANSFER_ACTIVE, "Transfer in progress");
+  }
+  Status ready = _canQueueTransfer();
+  if (!ready.ok()) {
+    return ready;
   }
   if (length == 0U) {
     return Status::Error(Err::INVALID_PARAM, "Transfer length must be > 0");
@@ -1197,11 +1270,11 @@ Status MB85RC::_pollTransferInstruction() {
       }
 
     case TransferKind::FILL:
-      if (chunk > FILL_CHUNK_SIZE) {
-        chunk = FILL_CHUNK_SIZE;
+      if (chunk > cmd::MAX_FILL_CHUNK) {
+        chunk = cmd::MAX_FILL_CHUNK;
       }
       {
-        uint8_t fillBuf[FILL_CHUNK_SIZE];
+        uint8_t fillBuf[cmd::MAX_FILL_CHUNK];
         std::memset(fillBuf, _transfer.fillValue, chunk);
         Status st = _writeMemory(chunkAddress, fillBuf, chunk);
         if (st.ok()) {
@@ -1531,10 +1604,10 @@ Status MB85RC::_ensureAwakeForI2c() {
     _advanceWakeState(_nowMs());
   }
   if (_sleepState == SleepState::ASLEEP) {
-    return Status::Error(Err::BUSY, "Device is asleep; call wake()");
+    return busyStatus(BusyDetail::ASLEEP, "Device is asleep; call wake()");
   }
   if (_sleepState == SleepState::WAKING) {
-    return Status::Error(Err::BUSY, "Sleep wake recovery pending");
+    return busyStatus(BusyDetail::WAKING, "Sleep wake recovery pending");
   }
   return Status::Ok();
 }
@@ -1585,24 +1658,23 @@ Status MB85RC::_updateHealth(const Status& st) {
   }
 
   const uint32_t now = _nowMs();
-  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
   const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
 
   if (st.ok()) {
     _lastOkMs = now;
-    if (_totalSuccess < maxU32) {
-      _totalSuccess++;
-    }
+    _totalSuccess++;
     _consecutiveFailures = 0;
     _driverState = DriverState::READY;
     return st;
   }
 
+  if (!shouldTrackHealthFailure(st.code)) {
+    return st;
+  }
+
   _lastError = st;
   _lastErrorMs = now;
-  if (_totalFailures < maxU32) {
-    _totalFailures++;
-  }
+  _totalFailures++;
   if (_consecutiveFailures < maxU8) {
     _consecutiveFailures++;
   }
@@ -1617,19 +1689,16 @@ Status MB85RC::_updateHealth(const Status& st) {
 }
 
 Status MB85RC::_recordFailure(const Status& st) {
-  if (!_initialized || st.ok() || st.inProgress()) {
+  if (!_initialized || st.ok() || st.inProgress() || !shouldTrackHealthFailure(st.code)) {
     return st;
   }
 
   const uint32_t now = _nowMs();
-  const uint32_t maxU32 = std::numeric_limits<uint32_t>::max();
   const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
 
   _lastError = st;
   _lastErrorMs = now;
-  if (_totalFailures < maxU32) {
-    _totalFailures++;
-  }
+  _totalFailures++;
   if (_consecutiveFailures < maxU8) {
     _consecutiveFailures++;
   }

@@ -25,6 +25,10 @@ FORBIDDEN_TOKENS = [
 REQUIRED_NATIVE_TOKENS = [
     'extern "C" void app_main(void)',
     "driver/i2c_master.h",
+    "esp_get_free_heap_size",
+    "esp_get_minimum_free_heap_size",
+    "heap_caps_get_largest_free_block",
+    "MALLOC_CAP_DEFAULT",
     "esp_timer_get_time",
     "vTaskDelay",
     "fgets",
@@ -57,6 +61,7 @@ REQUIRED_CONFIRMATION_TOKENS = [
     "stress!",
     "stress_mix!",
     "rw_suite!",
+    "xfer_demo!",
     "randbench!",
     "typed_demo!",
     "Confirmation required because this command changes FRAM contents.",

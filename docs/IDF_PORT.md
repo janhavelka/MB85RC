@@ -10,6 +10,9 @@ resources:
 - entry point: `app_main()`
 - I2C: `driver/i2c_master.h`
 - timing hook: `esp_timer_get_time()` through `Config::nowMs`
+- heap telemetry: `esp_get_free_heap_size()`,
+  `esp_get_minimum_free_heap_size()`, and
+  `heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)`
 - CLI loop delay: `vTaskDelay()`
 - command input: fixed C buffers and `fgets()`
 
@@ -27,6 +30,7 @@ The native IDF CLI exposes the same driver-facing workflows as the Arduino CLI:
 - addressed read, dump/hexdump, text, strings, CRC, and verify commands
 - current-address reads for diagnostics
 - HS/Sleep support, entry/wake, and driver diagnostics
+- heap telemetry with `heap`
 - stress, selftest, random benchmark, and typed demo commands
 
 Destructive FRAM commands require explicit confirmation forms:
@@ -35,6 +39,7 @@ Destructive FRAM commands require explicit confirmation forms:
 - `fill! <addr> <value> <len>`
 - `selftest!`
 - `rw_suite!`
+- `xfer_demo!`
 - `stress! [N]`
 - `stress_mix! [N]`
 - `randbench! [N]`

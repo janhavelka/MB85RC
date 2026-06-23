@@ -9,25 +9,35 @@ namespace MB85RC {
 /// @brief Error codes for all MB85RC operations.
 enum class Err : uint8_t {
   OK = 0,                    ///< Operation successful
-  NOT_INITIALIZED,           ///< begin() not called
-  INVALID_CONFIG,            ///< Invalid configuration parameter
-  I2C_ERROR,                 ///< I2C communication failure
-  TIMEOUT,                   ///< Core-owned deadline timed out (not an I2C transport timeout)
-  INVALID_PARAM,             ///< Invalid parameter value
-  DEVICE_NOT_FOUND,          ///< Device not responding on I2C bus
-  DEVICE_ID_MISMATCH,        ///< Device ID does not match expected/active variant
-  ADDRESS_OUT_OF_RANGE,      ///< Memory address/range exceeds active variant capacity
-  WRITE_PROTECTED,           ///< Application/transport-reported protection; WP-high writes may still ACK
-  BUSY,                      ///< Device is busy or driver is latched OFFLINE until recover()
-  IN_PROGRESS,               ///< Operation queued / in progress
+  NOT_INITIALIZED = 1,       ///< begin() not called
+  INVALID_CONFIG = 2,        ///< Invalid configuration parameter
+  I2C_ERROR = 3,             ///< I2C communication failure
+  TIMEOUT = 4,               ///< Core-owned deadline timed out (not an I2C transport timeout)
+  INVALID_PARAM = 5,         ///< Invalid parameter value
+  DEVICE_NOT_FOUND = 6,      ///< Reserved compatibility code; core preserves transport NACK/timeout details
+  DEVICE_ID_MISMATCH = 7,    ///< Device ID does not match expected/active variant
+  ADDRESS_OUT_OF_RANGE = 8,  ///< Memory address/range exceeds active variant capacity
+  WRITE_PROTECTED = 9,       ///< Application/transport-reported protection; WP-high writes may still ACK
+  BUSY = 10,                 ///< Device is busy or driver is latched OFFLINE until recover()
+  IN_PROGRESS = 11,          ///< Operation queued / in progress
 
   // I2C transport details (append-only to preserve existing values)
-  I2C_NACK_ADDR,             ///< I2C address not acknowledged
-  I2C_NACK_DATA,             ///< I2C data byte not acknowledged
-  I2C_TIMEOUT,               ///< I2C transport transaction timeout
-  I2C_BUS,                   ///< I2C bus error (arbitration lost, etc.)
-  VERIFY_MISMATCH,           ///< Readback verification did not match expected data
-  UNSUPPORTED                ///< Operation is not supported by the active variant/transport
+  I2C_NACK_ADDR = 12,        ///< I2C address not acknowledged
+  I2C_NACK_DATA = 13,        ///< I2C data byte not acknowledged
+  I2C_TIMEOUT = 14,          ///< I2C transport transaction timeout
+  I2C_BUS = 15,              ///< I2C bus error (arbitration lost, etc.)
+  VERIFY_MISMATCH = 16,      ///< Readback verification did not match expected data
+  UNSUPPORTED = 17           ///< Operation is not supported by the active variant/transport
+};
+
+/// @brief Machine-readable Status::detail values used with Err::BUSY.
+enum class BusyDetail : int32_t {
+  OFFLINE = 1,             ///< Driver is OFFLINE until recover() succeeds.
+  TRANSFER_ACTIVE = 2,     ///< A staged transfer is already active.
+  ASLEEP = 3,              ///< Device is asleep; call wake().
+  WAKING = 4,              ///< Sleep wake recovery deadline has not elapsed.
+  ALREADY_ASLEEP = 5,      ///< Sleep entry requested while already asleep.
+  TRANSFER_CANCELLED = 6   ///< Active staged transfer was cancelled.
 };
 
 /// @brief Status structure returned by all fallible operations.
