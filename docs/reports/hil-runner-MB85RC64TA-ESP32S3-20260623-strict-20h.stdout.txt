@@ -1,0 +1,8 @@
+HIL functional summary: PASS=29 FAIL=0 UNKNOWN=0
+HIL soak summary: UNKNOWN duration=72000.2s pass=142816 fail=0 unknown=69
+HIL strict gate: FAIL
+  - soak UNKNOWN count is 69
+  - soak status is UNKNOWN
+Transcript: docs\reports\hil-runner-MB85RC64TA-ESP32S3-20260623-strict-20h-transcript.txt
+JSON: docs\reports\hil-runner-MB85RC64TA-ESP32S3-20260623-strict-20h.json
+Markdown: docs\reports\hil-runner-MB85RC64TA-ESP32S3-20260623-strict-20h.md
