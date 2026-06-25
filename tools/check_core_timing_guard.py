@@ -11,27 +11,54 @@ SCAN_DIRS = ("src", "include")
 VALID_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
 
 FORBIDDEN_CALLS = {
+    "delay": re.compile(r"\bdelay\s*\("),
     "millis": re.compile(r"\bmillis\s*\("),
     "micros": re.compile(r"\bmicros\s*\("),
     "esp_timer_get_time": re.compile(r"\besp_timer_get_time\s*\("),
     "delayMicroseconds": re.compile(r"\bdelayMicroseconds\s*\("),
+    "vTaskDelay": re.compile(r"\bvTaskDelay\s*\("),
+    "sleep_for": re.compile(r"\bsleep_for\s*\("),
+    "usleep": re.compile(r"\busleep\s*\("),
+    "nanosleep": re.compile(r"\bnanosleep\s*\("),
+    "Sleep": re.compile(r"\bSleep\s*\("),
+    "esp_rom_delay_us": re.compile(r"\besp_rom_delay_us\s*\("),
+    "ets_delay_us": re.compile(r"\bets_delay_us\s*\("),
     "yield": re.compile(r"\byield\s*\("),
 }
 
-INCLUDE_ARDUINO_RE = re.compile(r'^\s*#\s*include\s*[<\"]Arduino\.h[>\"]', re.MULTILINE)
-INCLUDE_IDF_RE = re.compile(r'^\s*#\s*include\s*[<\"]esp_timer\.h[>\"]', re.MULTILINE)
+FORBIDDEN_FRAMEWORK_INCLUDE_RE = re.compile(
+    r'^\s*#\s*include\s*[<\"]'
+    r'(?P<header>'
+    r'Arduino\.h|Wire\.h|WString\.h|HardwareSerial\.h|'
+    r'esp_[^>\"]+\.h|driver/[^>\"]+|freertos/[^>\"]+|hal/[^>\"]+|soc/[^>\"]+|'
+    r'sdkconfig\.h'
+    r')[>\"]',
+    re.MULTILINE,
+)
+FORBIDDEN_FRAMEWORK_TOKENS = {
+    "Arduino String": re.compile(r"\bString\b"),
+    "Serial": re.compile(r"\bSerial\b"),
+    "TwoWire": re.compile(r"\bTwoWire\b"),
+    "Wire": re.compile(r"\bWire\b"),
+    "ESP_LOG": re.compile(r"\bESP_LOG[EDIWV]?\s*\("),
+    "ESP_ERROR_CHECK": re.compile(r"\bESP_ERROR_CHECK\s*\("),
+    "FreeRTOS task API": re.compile(r"\b(?:xTask|vTask|ulTask|uxTask)\w*\s*\("),
+    "FreeRTOS semaphore API": re.compile(r"\b(?:xSemaphore|vSemaphore)\w*\s*\("),
+}
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 
 ALLOWED_CALL_COUNTS: Dict[str, Dict[str, int]] = {}
-ALLOWED_INCLUDE_COUNTS: Dict[str, int] = {}
+
+
+def strip_comments(text: str) -> str:
+    text = BLOCK_COMMENT_RE.sub("", text)
+    return LINE_COMMENT_RE.sub("", text)
 
 
 def strip_non_code(text: str) -> str:
-    text = BLOCK_COMMENT_RE.sub("", text)
-    text = LINE_COMMENT_RE.sub("", text)
-    return STRING_RE.sub('""', text)
+    return STRING_RE.sub('""', strip_comments(text))
 
 
 def collect_sources() -> list[pathlib.Path]:
@@ -48,11 +75,13 @@ def collect_sources() -> list[pathlib.Path]:
 
 def main() -> int:
     observed_calls: Dict[str, Dict[str, int]] = {}
-    observed_includes: Dict[str, int] = {}
+    observed_includes: Dict[str, list[str]] = {}
+    observed_tokens: Dict[str, Dict[str, int]] = {}
 
     for path in collect_sources():
         rel = path.relative_to(ROOT).as_posix()
         raw = path.read_text(encoding="utf-8", errors="replace")
+        commentless = strip_comments(raw)
         code = strip_non_code(raw)
 
         call_counts: Dict[str, int] = {}
@@ -63,9 +92,20 @@ def main() -> int:
         if call_counts:
             observed_calls[rel] = call_counts
 
-        include_count = len(INCLUDE_ARDUINO_RE.findall(raw)) + len(INCLUDE_IDF_RE.findall(raw))
-        if include_count > 0:
-            observed_includes[rel] = include_count
+        includes = [
+            match.group("header")
+            for match in FORBIDDEN_FRAMEWORK_INCLUDE_RE.finditer(commentless)
+        ]
+        if includes:
+            observed_includes[rel] = includes
+
+        token_counts: Dict[str, int] = {}
+        for token_name, pattern in FORBIDDEN_FRAMEWORK_TOKENS.items():
+            count = len(pattern.findall(code))
+            if count > 0:
+                token_counts[token_name] = count
+        if token_counts:
+            observed_tokens[rel] = token_counts
 
     errors: list[str] = []
 
@@ -93,19 +133,11 @@ def main() -> int:
         if unexpected_calls:
             errors.append(f"unexpected timing call types in {rel}: {sorted(unexpected_calls)}")
 
-    for rel, count in observed_includes.items():
-        exp = ALLOWED_INCLUDE_COUNTS.get(rel, 0)
-        if count != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={count}, expected={exp}"
-            )
+    for rel, includes in observed_includes.items():
+        errors.append(f"forbidden framework include in core/public file: {rel} -> {includes}")
 
-    for rel, exp in ALLOWED_INCLUDE_COUNTS.items():
-        obs = observed_includes.get(rel, 0)
-        if obs != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={obs}, expected={exp}"
-            )
+    for rel, counts in observed_tokens.items():
+        errors.append(f"forbidden framework token in core/public file: {rel} -> {counts}")
 
     if errors:
         print("Core timing guard FAILED:")

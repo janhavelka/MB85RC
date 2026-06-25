@@ -70,29 +70,40 @@ struct VariantInfo {
   AddressModel addressModel;     ///< Addressing model used by memory transactions.
   bool uses256vAccessFormat;     ///< True when the 256V two-byte linear access format applies.
   bool supportedByDriver;        ///< True when runtime memory operations are implemented/tested.
-  bool highSpeedMode;            ///< True when the variant documents I2C high-speed mode.
-  bool sleepMode;                ///< True when the variant documents sleep mode.
+  bool highSpeedMode;            ///< Legacy alias for supportsHighSpeedMode.
+  bool sleepMode;                ///< Legacy alias for supportsSleepMode.
+  bool supportsHighSpeedMode;    ///< True when the variant documents I2C High-speed mode.
+  bool supportsSleepMode;        ///< True when the variant documents Sleep mode.
+  uint32_t maxNormalBusHz;       ///< Maximum normal-mode I2C bus rate from local datasheets.
+  uint32_t maxHighSpeedBusHz;    ///< Maximum HS-mode bus rate, or 0 when unsupported.
+  uint16_t sleepRecoveryUs;      ///< Sleep wake recovery time tREC, or 0 when unsupported.
 };
 
 /// @brief Known MB85RC-family variants referenced by local datasheets.
 ///
 /// Only entries marked `supportedByDriver` are accepted for runtime memory
-/// access. Optional High Speed and Sleep capability flags are descriptive; the
-/// reusable driver intentionally leaves those bus-level sequences to the
-/// application-owned transport.
+/// access. Optional High Speed and Sleep capability flags gate the core APIs,
+/// but the reusable driver still does not own the I2C controller clock. HS
+/// clock changes, bus locking, and wake-delay policy remain application-owned.
 static constexpr VariantInfo KNOWN_VARIANTS[] = {
   {"MB85RC04V", 512UL, PRODUCT_ID_MB85RC04V, 0x00, true,
-   AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true, false, false},
+   AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true, false, false,
+   false, false, 1000000UL, 0UL, 0U},
   {"MB85RC16V", 2048UL, 0x000, 0x00, false,
-   AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, true, false, false},
+   AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, true, false, false,
+   false, false, 1000000UL, 0UL, 0U},
   {"MB85RC64TA", 8192UL, PRODUCT_ID_MB85RC64TA, 0x03, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true},
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true,
+   true, true, 1000000UL, 3400000UL, 400U},
   {"MB85RC256V", 32768UL, PRODUCT_ID, DENSITY_CODE, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, false, false},
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, false, false,
+   false, false, 1000000UL, 0UL, 0U},
   {"MB85RC512T", 65536UL, PRODUCT_ID_MB85RC512T, 0x06, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true},
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true,
+   true, true, 1000000UL, 3400000UL, 400U},
   {"MB85RC1MT", 131072UL, PRODUCT_ID_MB85RC1MT, 0x07, true,
-   AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS, false, true, true, true},
+   AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS, false, true, true, true,
+   true, true, 1000000UL, 3400000UL, 400U},
 };
 
 /// @brief Number of entries in KNOWN_VARIANTS.
@@ -139,6 +150,37 @@ static constexpr uint8_t DEVICE_ID_ADDR_R = 0xF9;
 
 /// Number of Device ID bytes returned
 static constexpr uint8_t DEVICE_ID_LEN = 3;
+
+// ============================================================================
+// Optional High-Speed / Sleep Protocol
+// ============================================================================
+
+/// Minimum raw 8-bit High-speed master code (`0000 1XXX`).
+static constexpr uint8_t HIGH_SPEED_MASTER_CODE_MIN = 0x08;
+
+/// Maximum raw 8-bit High-speed master code (`0000 1XXX`).
+static constexpr uint8_t HIGH_SPEED_MASTER_CODE_MAX = 0x0F;
+
+/// Default raw 8-bit High-speed master code used by Config.
+static constexpr uint8_t HIGH_SPEED_MASTER_CODE_DEFAULT = 0x08;
+
+/// Maximum documented High-speed-mode bus rate for capable local variants.
+static constexpr uint32_t HIGH_SPEED_BUS_HZ = 3400000UL;
+
+/// Maximum documented normal-mode bus rate for supported local variants.
+static constexpr uint32_t NORMAL_BUS_HZ = 1000000UL;
+
+/// Reserved 8-bit Device ID/Sleep command byte used for Sleep entry phase 1.
+static constexpr uint8_t SLEEP_RESERVED_ADDR_W = 0xF8;
+
+/// Reserved 8-bit Sleep command byte used after the repeated START.
+static constexpr uint8_t SLEEP_ENTRY_COMMAND = 0x86;
+
+/// Documented internal-regulator recovery time after Sleep wake.
+static constexpr uint16_t SLEEP_RECOVERY_US = 400U;
+
+/// Conservative millisecond gate for the driver state machine.
+static constexpr uint32_t SLEEP_RECOVERY_MS = 1UL;
 
 // ============================================================================
 // Memory Layout
@@ -208,6 +250,12 @@ static constexpr size_t MAX_WRITE_CHUNK = 126;
 
 /// Maximum bytes per single read transaction.
 static constexpr size_t MAX_READ_CHUNK = 128;
+
+/// Maximum bytes per single fill transaction.
+static constexpr size_t MAX_FILL_CHUNK = 64;
+
+/// Maximum staged transfer chunks executed by one pollTransfer() call.
+static constexpr uint8_t MAX_TRANSFER_INSTRUCTIONS_PER_POLL = 8;
 
 }  // namespace cmd
 }  // namespace MB85RC

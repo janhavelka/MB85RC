@@ -1,6 +1,10 @@
 /**
  * @file main.cpp
- * @brief Native ESP-IDF bring-up CLI for MB85RC-family FRAM devices.
+ * @brief Native ESP-IDF diagnostic bring-up CLI for MB85RC-family FRAM devices.
+ *
+ * This example owns its I2C master bus and uses blocking console input. It is a
+ * diagnostic bring-up tool, not a production shared-bus manager or scheduler
+ * template.
  */
 
 #include <ctype.h>
@@ -12,7 +16,9 @@
 #include <driver/gpio.h>
 #include <driver/i2c_master.h>
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_rom_sys.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -30,6 +36,8 @@ static constexpr size_t CLI_DATA_MAX = 64U;
 static constexpr uint32_t DEFAULT_STRESS_COUNT = 10U;
 static constexpr uint32_t MAX_STRESS_COUNT = 1000U;
 static constexpr uint32_t RW_SUITE_ADDR = 0x0010U;
+static constexpr uint32_t XFER_DEMO_ADDR = 0x0100U;
+static constexpr size_t XFER_DEMO_LEN = 640U;
 
 struct NativeBus {
   i2c_master_bus_handle_t bus = nullptr;
@@ -62,7 +70,23 @@ MB85RC::Status mapI2c(esp_err_t err, const char* msg) {
   if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
     return MB85RC::Status::Error(MB85RC::Err::I2C_NACK_ADDR, msg, err);
   }
+  if (err == ESP_FAIL) {
+    return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
+  }
   return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
+}
+
+const char* sleepStateName(MB85RC::SleepState state) {
+  switch (state) {
+    case MB85RC::SleepState::AWAKE:
+      return "AWAKE";
+    case MB85RC::SleepState::ASLEEP:
+      return "ASLEEP";
+    case MB85RC::SleepState::WAKING:
+      return "WAKING";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) {
@@ -71,6 +95,231 @@ esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) 
   dev.device_address = addr;
   dev.scl_speed_hz = bus.freqHz;
   return i2c_master_bus_add_device(bus.bus, &dev, out);
+}
+
+esp_err_t transmitReceiveWithManualAddress(NativeBus& bus, uint8_t addr,
+                                           const uint8_t* tx, size_t txLen,
+                                           uint8_t* rx, size_t rxLen,
+                                           uint32_t timeoutMs) {
+  if (tx == nullptr || txLen == 0U || rx == nullptr || rxLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  i2c_device_config_t devCfg = {};
+  devCfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  devCfg.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+  devCfg.scl_speed_hz = bus.freqHz;
+
+  i2c_master_dev_handle_t dev = nullptr;
+  esp_err_t err = i2c_master_bus_add_device(bus.bus, &devCfg, &dev);
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  uint8_t writeAddress = static_cast<uint8_t>(addr << 1);
+  uint8_t readAddress = static_cast<uint8_t>((addr << 1) | 0x01U);
+  i2c_operation_job_t ops[8] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &writeAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = const_cast<uint8_t*>(tx);
+  ops[op].write.total_bytes = txLen;
+  ++op;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &readAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  if (rxLen > 1U) {
+    ops[op].command = I2C_MASTER_CMD_READ;
+    ops[op].read.ack_value = I2C_ACK_VAL;
+    ops[op].read.data = rx;
+    ops[op].read.total_bytes = rxLen - 1U;
+    ++op;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_READ;
+  ops[op].read.ack_value = I2C_NACK_VAL;
+  ops[op].read.data = rx + (rxLen - 1U);
+  ops[op].read.total_bytes = 1U;
+  ++op;
+
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  err = i2c_master_execute_defined_operations(dev, ops, op, timeoutArg(timeoutMs));
+  (void)i2c_master_bus_rm_device(dev);
+  return err;
+}
+
+esp_err_t executeRawOperations(NativeBus& bus, i2c_operation_job_t* ops, size_t opCount,
+                               uint32_t timeoutMs) {
+  i2c_device_config_t devCfg = {};
+  devCfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  devCfg.device_address = I2C_DEVICE_ADDRESS_NOT_USED;
+  devCfg.scl_speed_hz = bus.freqHz;
+
+  i2c_master_dev_handle_t dev = nullptr;
+  esp_err_t err = i2c_master_bus_add_device(bus.bus, &devCfg, &dev);
+  if (err == ESP_OK) {
+    err = i2c_master_execute_defined_operations(dev, ops, opCount, timeoutArg(timeoutMs));
+  }
+  if (dev != nullptr) {
+    (void)i2c_master_bus_rm_device(dev);
+  }
+  return err;
+}
+
+esp_err_t highSpeedWrite(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                         uint32_t timeoutMs) {
+  if (transfer.txData == nullptr || transfer.txLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  uint8_t hsMasterCode = transfer.hsMasterCode;
+  uint8_t writeAddress = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  i2c_operation_job_t ops[6] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &hsMasterCode;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &writeAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = const_cast<uint8_t*>(transfer.txData);
+  ops[op].write.total_bytes = transfer.txLen;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t highSpeedWriteRead(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                             uint32_t timeoutMs) {
+  if ((transfer.txLen > 0U && transfer.txData == nullptr) ||
+      (transfer.rxLen > 0U && transfer.rxData == nullptr) ||
+      transfer.rxLen == 0U) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  uint8_t hsMasterCode = transfer.hsMasterCode;
+  uint8_t writeAddress = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  uint8_t readAddress = static_cast<uint8_t>((transfer.i2cAddress << 1) | 0x01U);
+  i2c_operation_job_t ops[10] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &hsMasterCode;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+
+  if (transfer.txLen > 0U) {
+    ops[op].command = I2C_MASTER_CMD_WRITE;
+    ops[op].write.ack_check = true;
+    ops[op].write.data = &writeAddress;
+    ops[op].write.total_bytes = 1U;
+    ++op;
+    ops[op].command = I2C_MASTER_CMD_WRITE;
+    ops[op].write.ack_check = true;
+    ops[op].write.data = const_cast<uint8_t*>(transfer.txData);
+    ops[op].write.total_bytes = transfer.txLen;
+    ++op;
+    ops[op++].command = I2C_MASTER_CMD_START;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &readAddress;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+
+  if (transfer.rxLen > 1U) {
+    ops[op].command = I2C_MASTER_CMD_READ;
+    ops[op].read.ack_value = I2C_ACK_VAL;
+    ops[op].read.data = transfer.rxData;
+    ops[op].read.total_bytes = transfer.rxLen - 1U;
+    ++op;
+  }
+
+  ops[op].command = I2C_MASTER_CMD_READ;
+  ops[op].read.ack_value = I2C_NACK_VAL;
+  ops[op].read.data = transfer.rxData + (transfer.rxLen - 1U);
+  ops[op].read.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t enterSleepRaw(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                        uint32_t timeoutMs) {
+  uint8_t reserved = MB85RC::cmd::SLEEP_RESERVED_ADDR_W;
+  uint8_t deviceWord = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  uint8_t sleepCommand = MB85RC::cmd::SLEEP_ENTRY_COMMAND;
+  i2c_operation_job_t ops[6] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &reserved;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &deviceWord;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = true;
+  ops[op].write.data = &sleepCommand;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
+}
+
+esp_err_t wakeRaw(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
+                  uint32_t timeoutMs) {
+  uint8_t deviceWord = static_cast<uint8_t>(transfer.i2cAddress << 1);
+  i2c_operation_job_t ops[3] = {};
+  size_t op = 0U;
+
+  ops[op++].command = I2C_MASTER_CMD_START;
+  ops[op].command = I2C_MASTER_CMD_WRITE;
+  ops[op].write.ack_check = false;
+  ops[op].write.data = &deviceWord;
+  ops[op].write.total_bytes = 1U;
+  ++op;
+  ops[op++].command = I2C_MASTER_CMD_STOP;
+
+  return executeRawOperations(bus, ops, op, timeoutMs);
 }
 
 MB85RC::Status i2cWrite(uint8_t addr, const uint8_t* data, size_t len,
@@ -97,6 +346,13 @@ MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
   if (bus == nullptr || bus->bus == nullptr) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
   }
+
+  if (addr == 0x7CU && txLen > 0U && rxLen > 0U) {
+    esp_err_t manualErr = transmitReceiveWithManualAddress(*bus, addr, tx, txLen, rx, rxLen,
+                                                           timeoutMs);
+    return mapI2c(manualErr, "I2C manual-address write-read failed");
+  }
+
   i2c_master_dev_handle_t dev = nullptr;
   esp_err_t err = addDevice(*bus, addr, &dev);
   if (err == ESP_OK) {
@@ -110,6 +366,39 @@ MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
     (void)i2c_master_bus_rm_device(dev);
   }
   return mapI2c(err, "I2C write-read failed");
+}
+
+MB85RC::Status i2cSpecial(MB85RC::I2cSpecialOp op,
+                          const MB85RC::I2cSpecialTransfer& transfer,
+                          uint32_t timeoutMs, void* user) {
+  NativeBus* bus = static_cast<NativeBus*>(user);
+  if (bus == nullptr || bus->bus == nullptr) {
+    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
+  }
+
+  esp_err_t err = ESP_ERR_INVALID_ARG;
+  const char* context = "I2C special operation failed";
+  switch (op) {
+    case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE:
+      context = "I2C high-speed write failed";
+      err = highSpeedWrite(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE_READ:
+      context = "I2C high-speed write-read failed";
+      err = highSpeedWriteRead(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::ENTER_SLEEP:
+      context = "I2C sleep entry failed";
+      err = enterSleepRaw(*bus, transfer, timeoutMs);
+      break;
+    case MB85RC::I2cSpecialOp::WAKE_FROM_SLEEP:
+      context = "I2C sleep wake failed";
+      err = wakeRaw(*bus, transfer, timeoutMs);
+      break;
+    default:
+      return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Unknown special op");
+  }
+  return mapI2c(err, context);
 }
 
 bool initBus() {
@@ -249,9 +538,11 @@ void formatWriteConfirmation(uint32_t addr, const uint8_t* data, size_t dataLen,
 void beginDriver() {
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
+  gCfg.i2cSpecial = i2cSpecial;
   gCfg.i2cUser = &gBus;
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
+  gCfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
   printStatus("begin", gFram.begin(gCfg));
 }
 
@@ -263,12 +554,20 @@ void printHelp() {
   puts("  write <addr> <byte> [byte...] | write! <addr> <byte> [byte...]");
   puts("  fill <addr> <value> <len> | fill! <addr> <value> <len>");
   puts("  current / cur [len] | id | idraw | variants | size");
-  puts("  drv | iface_reset | probe | recover | verbose [0|1]");
+  puts("  hs | hs support | hs enter");
+  puts("  sleep | sleep support | sleep enter | sleep wake");
+  puts("  drv | heap | iface_reset | probe | recover | verbose [0|1]");
   puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
-  puts("  stress_mix [N] | randbench [N] | typed_demo");
+  puts("  xfer_demo | xfer_demo!");
+  puts("  stress_mix [N] | stress_mix! [N] | randbench [N] | randbench! [N]");
+  puts("  typed_demo | typed_demo!");
 }
 
 void scanBus() {
+  if (gBus.bus == nullptr) {
+    puts("I2C scan: bus not initialized");
+    return;
+  }
   puts("I2C scan:");
   for (uint8_t addr = 0x08U; addr <= 0x77U; ++addr) {
     if (i2c_master_probe(gBus.bus, addr, timeoutArg(I2C_TIMEOUT_MS)) == ESP_OK) {
@@ -286,6 +585,87 @@ void printDrv() {
          static_cast<unsigned long>(gFram.totalSuccess()),
          static_cast<unsigned long>(gFram.totalFailures()),
          static_cast<unsigned>(gFram.consecutiveFailures()));
+  printf("hs_support=%s hs_enabled=%s normal_hz=%lu hs_hz=%lu sleep_support=%s sleep_state=%s tREC_us=%u wake_ready_ms=%lu\n",
+         snap.highSpeedModeSupported ? "yes" : "no",
+         snap.highSpeedModeEnabled ? "yes" : "no",
+         static_cast<unsigned long>(snap.maxNormalBusHz),
+         static_cast<unsigned long>(snap.maxHighSpeedBusHz),
+         snap.sleepModeSupported ? "yes" : "no",
+         sleepStateName(snap.sleepState),
+         static_cast<unsigned>(snap.sleepRecoveryUs),
+         static_cast<unsigned long>(snap.sleepWakeReadyMs));
+}
+
+void printHeapTelemetry() {
+  printf("heap: free=%lu min_free=%lu largest=%lu\n",
+         static_cast<unsigned long>(esp_get_free_heap_size()),
+         static_cast<unsigned long>(esp_get_minimum_free_heap_size()),
+         static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)));
+}
+
+void printHighSpeedSupport() {
+  MB85RC::SettingsSnapshot snap = gFram.getSettings();
+  puts("High-speed mode:");
+  printf("  Active variant: %s\n", snap.variantName);
+  printf("  Support: %s\n", snap.highSpeedModeSupported ? "yes" : "no");
+  printf("  Enabled: %s\n", snap.highSpeedModeEnabled ? "yes" : "no");
+  printf("  Default HS master code: 0x%02X\n", MB85RC::cmd::HIGH_SPEED_MASTER_CODE_DEFAULT);
+  puts("  Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock");
+  printf("  Diagnostic bus clock: %lu Hz; this example emits the HS prefix but does not prove 3.4 MHz operation\n",
+         static_cast<unsigned long>(gBus.freqHz));
+  puts("  App action: application bus manager must configure/operate the bus at 3.4 MHz after HS entry");
+  puts("  Note: STOP exits high-speed mode; enabled driver transfers send the HS prefix per transaction");
+  puts("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleHighSpeedCommand(const char* full) {
+  printHighSpeedSupport();
+  if (strcmp(full, "hs") == 0 || strcmp(full, "hs support") == 0) {
+    return;
+  }
+  if (strcmp(full, "hs enter") == 0) {
+    MB85RC::Status st = gFram.enterHighSpeedMode();
+    printStatus("hs enter", st);
+    if (st.ok()) {
+      puts("High-speed transfer mode requested; entry prefix is sent with each memory transfer.");
+    }
+    return;
+  }
+  puts("Usage: hs | hs support | hs enter");
+}
+
+void printSleepSupport() {
+  MB85RC::SettingsSnapshot snap = gFram.getSettings();
+  puts("Sleep mode:");
+  printf("  Active variant: %s\n", snap.variantName);
+  printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
+  printf("  State: %s\n", sleepStateName(snap.sleepState));
+  puts("  Entry: F8h + active device address word + repeated-start 86h");
+  puts("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
+  puts("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
+  puts("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleSleepCommand(const char* full) {
+  printSleepSupport();
+  if (strcmp(full, "sleep") == 0 || strcmp(full, "sleep support") == 0) {
+    return;
+  }
+  if (strcmp(full, "sleep enter") == 0) {
+    printStatus("sleep enter", gFram.enterSleep());
+    return;
+  }
+  if (strcmp(full, "sleep wake") == 0) {
+    MB85RC::Status st = gFram.wake();
+    printStatus("sleep wake", st);
+    if (st.ok()) {
+      vTaskDelay(pdMS_TO_TICKS(MB85RC::cmd::SLEEP_RECOVERY_MS));
+      gFram.tick(nowMs(nullptr));
+      printStatus("recover after sleep wake", gFram.recover());
+    }
+    return;
+  }
+  puts("Usage: sleep | sleep support | sleep enter | sleep wake");
 }
 
 void dumpMemory(uint32_t addr, uint32_t len) {
@@ -460,11 +840,16 @@ void verifyMemory(uint32_t addr, const uint8_t* expected, size_t len) {
 void printVariants() {
   for (size_t i = 0; i < MB85RC::cmd::VARIANT_COUNT; ++i) {
     const MB85RC::cmd::VariantInfo& v = MB85RC::cmd::KNOWN_VARIANTS[i];
-    printf("%s bytes=%lu device_id=%s supported=%s\n",
+    printf("%s bytes=%lu device_id=%s supported=%s hs=%s sleep=%s normal_hz=%lu hs_hz=%lu tREC_us=%u\n",
            v.name,
            static_cast<unsigned long>(v.memoryBytes),
            v.hasDeviceId ? "yes" : "no",
-           v.supportedByDriver ? "yes" : "no");
+           v.supportedByDriver ? "yes" : "no",
+           v.supportsHighSpeedMode ? "yes" : "no",
+           v.supportsSleepMode ? "yes" : "no",
+           static_cast<unsigned long>(v.maxNormalBusHz),
+           static_cast<unsigned long>(v.maxHighSpeedBusHz),
+           static_cast<unsigned>(v.sleepRecoveryUs));
   }
 }
 
@@ -581,6 +966,153 @@ void runRwSuite() {
   printStatus("rw_suite restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
+MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
+  if (len == 0U || chunkSize == 0U) {
+    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer bounds");
+  }
+  const uint32_t expectedChunks =
+      static_cast<uint32_t>((len + chunkSize - 1U) / chunkSize);
+  const uint32_t pollLimit = expectedChunks + 3U;
+  for (uint32_t i = 0; i < pollLimit; ++i) {
+    MB85RC::Status st = gFram.pollTransfer(nowMs(nullptr), 1);
+    if (st.inProgress()) {
+      continue;
+    }
+    return st;
+  }
+  gFram.cancelTransfer();
+  return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
+}
+
+void printXferCheck(const char* name, bool ok, const char* note = "") {
+  printf("xfer_demo %s: %s", name, ok ? "PASS" : "FAIL");
+  if (note != nullptr && note[0] != '\0') {
+    printf(" (%s)", note);
+  }
+  putchar('\n');
+}
+
+void runXferDemo() {
+  uint32_t pass = 0;
+  uint32_t fail = 0;
+  auto check = [&](const char* name, bool ok, const char* note = "") {
+    printXferCheck(name, ok, note);
+    if (ok) {
+      ++pass;
+    } else {
+      ++fail;
+    }
+  };
+  auto checkStatus = [&](const char* name, MB85RC::Status st) {
+    check(name, st.ok(), st.ok() ? "" : st.msg);
+    if (!st.ok()) {
+      printStatus(name, st);
+    }
+  };
+
+  const uint32_t addr =
+      rangeFits(XFER_DEMO_ADDR, static_cast<uint32_t>(XFER_DEMO_LEN)) ? XFER_DEMO_ADDR : 0U;
+  const size_t len = rangeFits(addr, static_cast<uint32_t>(XFER_DEMO_LEN))
+                         ? XFER_DEMO_LEN
+                         : static_cast<size_t>(gFram.capacityBytes());
+  if (len == 0U || !rangeFits(addr, static_cast<uint32_t>(len))) {
+    check("select scratch range", false, "active capacity is zero");
+    printf("xfer_demo_result pass=%lu fail=%lu\n",
+           static_cast<unsigned long>(pass),
+           static_cast<unsigned long>(fail));
+    return;
+  }
+
+  static uint8_t original[XFER_DEMO_LEN] = {};
+  static uint8_t readBack[XFER_DEMO_LEN] = {};
+  static uint8_t pattern[XFER_DEMO_LEN] = {};
+  static uint8_t fillExpected[XFER_DEMO_LEN] = {};
+  for (size_t i = 0; i < len; ++i) {
+    pattern[i] = static_cast<uint8_t>(0x40U + ((i * 19U) & 0x7FU));
+    fillExpected[i] = 0x5AU;
+  }
+
+  MB85RC::Status st = gFram.read(addr, original, len);
+  checkStatus("backup", st);
+  if (!st.ok()) {
+    printf("xfer_demo_result pass=%lu fail=%lu\n",
+           static_cast<unsigned long>(pass),
+           static_cast<unsigned long>(fail));
+    return;
+  }
+
+  st = gFram.requestRead(addr, readBack, len);
+  checkStatus("requestRead", st);
+  if (st.ok()) {
+    MB85RC::Status zeroBudget = gFram.pollTransfer(nowMs(nullptr), 0);
+    check("zeroBudgetInProgress", zeroBudget.inProgress(), zeroBudget.msg);
+    uint8_t tmp = 0;
+    MB85RC::Status busy = gFram.readByte(addr, tmp);
+    check("busyDuringTransfer", busy.code == MB85RC::Err::BUSY, busy.msg);
+    MB85RC::Status budgetTwo = gFram.pollTransfer(nowMs(nullptr), 2);
+    check("poll budget 2 executes two chunks", budgetTwo.inProgress(),
+          budgetTwo.inProgress() ? "" : budgetTwo.msg);
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollRead", st);
+    check("readMatchesBackup", st.ok() && memcmp(readBack, original, len) == 0);
+  }
+
+  st = gFram.requestWrite(addr, pattern, len);
+  checkStatus("requestWrite", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    checkStatus("pollWrite", st);
+  }
+
+  st = gFram.requestVerify(addr, pattern, len);
+  checkStatus("requestVerifyWrite", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyWrite", st);
+  }
+
+  st = gFram.requestFill(addr, 0x5AU, len);
+  checkStatus("requestFill", st);
+  if (st.ok()) {
+    const bool highBudgetShouldRemainActive =
+        len > (static_cast<size_t>(MB85RC::cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL) *
+               static_cast<size_t>(MB85RC::cmd::MAX_FILL_CHUNK));
+    MB85RC::Status highBudget = gFram.pollTransfer(nowMs(nullptr), 255);
+    check("poll high budget clamps to 8 chunks",
+          highBudgetShouldRemainActive ? highBudget.inProgress() : highBudget.ok(),
+          highBudget.msg);
+    st = highBudget.inProgress()
+             ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
+             : highBudget;
+    checkStatus("pollFill", st);
+  }
+
+  st = gFram.requestVerify(addr, fillExpected, len);
+  checkStatus("requestVerifyFill", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyFill", st);
+  }
+
+  st = gFram.requestWrite(addr, original, len);
+  checkStatus("requestRestore", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    checkStatus("pollRestore", st);
+  }
+
+  st = gFram.requestVerify(addr, original, len);
+  checkStatus("requestVerifyRestore", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    checkStatus("pollVerifyRestore", st);
+  }
+
+  printf("xfer_demo_result pass=%lu fail=%lu\n",
+         static_cast<unsigned long>(pass),
+         static_cast<unsigned long>(fail));
+}
+
 void runRandBench(uint32_t count) {
   if (count == 0U || count > MAX_STRESS_COUNT) {
     printf("randbench count must be 1..%lu in this IDF example\n",
@@ -654,6 +1186,12 @@ void handleCommand(char* line) {
     printf("MB85RC %s %s\n", MB85RC::VERSION, MB85RC::VERSION_FULL);
   } else if (strcmp(full, "scan") == 0) {
     scanBus();
+  } else if (strcmp(full, "hs") == 0 || strcmp(full, "hs support") == 0 ||
+             strcmp(full, "hs enter") == 0) {
+    handleHighSpeedCommand(full);
+  } else if (strcmp(full, "sleep") == 0 || strcmp(full, "sleep support") == 0 ||
+             strcmp(full, "sleep enter") == 0 || strcmp(full, "sleep wake") == 0) {
+    handleSleepCommand(full);
   } else if (strcmp(full, "probe") == 0) {
     printStatus("probe", gFram.probe());
   } else if (strcmp(full, "recover") == 0) {
@@ -663,6 +1201,8 @@ void handleCommand(char* line) {
   } else if (strcmp(full, "drv") == 0 || strcmp(full, "cfg") == 0 ||
              strcmp(full, "settings") == 0) {
     printDrv();
+  } else if (strcmp(full, "heap") == 0) {
+    printHeapTelemetry();
   } else if (strcmp(full, "id") == 0) {
     MB85RC::DeviceId id;
     MB85RC::Status st = gFram.readDeviceId(id);
@@ -833,6 +1373,12 @@ void handleCommand(char* line) {
                               "rw_suite!");
   } else if (strcmp(full, "rw_suite!") == 0) {
     runRwSuite();
+  } else if (strcmp(full, "xfer_demo") == 0) {
+    printConfirmationRequired(full,
+                              "Would run poll-chunked read/write/fill/verify operations in a scratch FRAM range.",
+                              "xfer_demo!");
+  } else if (strcmp(full, "xfer_demo!") == 0) {
+    runXferDemo();
   } else if (strcmp(full, "stress") == 0 || strncmp(full, "stress ", 7) == 0) {
     char confirmed[32];
     if (strncmp(full, "stress ", 7) == 0) {
@@ -901,6 +1447,8 @@ extern "C" void app_main(void) {
   setvbuf(stdin, nullptr, _IONBF, 0);
   setvbuf(stdout, nullptr, _IONBF, 0);
   puts("\nMB85RC native ESP-IDF CLI");
+  puts("Diagnostic-only example: owns the I2C bus and blocks on console input.");
+  puts("Production systems should serialize shared-bus access in their own bus manager.");
   if (!initBus()) {
     puts("I2C init failed");
   }
@@ -909,6 +1457,9 @@ extern "C" void app_main(void) {
   char line[LINE_LEN] = {};
   while (true) {
     printf("> ");
+    // Blocking console input is acceptable here because tick() performs no
+    // async I2C or write-delay work. It only advances Sleep wake state from
+    // caller-supplied time. Do not copy this loop as a scheduler template.
     if (fgets(line, sizeof(line), stdin) != nullptr) {
       handleCommand(line);
     }

@@ -1,6 +1,8 @@
 /// @file main.cpp
-/// @brief Basic bringup example for supported MB85RC-family FRAM variants
+/// @brief Diagnostic bring-up CLI for supported MB85RC-family FRAM variants
 /// @note This is an EXAMPLE, not part of the library
+/// @note This CLI owns the example bus and is not a production shared-bus manager,
+///       scheduler template, or storage stack.
 
 #include <Arduino.h>
 #include <cstdlib>
@@ -45,11 +47,13 @@ static constexpr uint32_t RW_SUITE_ADDR = 0x0400;
 static constexpr uint32_t RW_SUITE_FILL_ADDR = 0x0460;
 static constexpr uint32_t TYPED_DEMO_ADDR = 0x0600;
 static constexpr uint32_t RANDOM_BENCH_ADDR = 0x2000;
+static constexpr uint32_t XFER_DEMO_ADDR = 0x0700;
 
 static constexpr size_t RW_SUITE_LEN = 64;
 static constexpr size_t RW_SUITE_FILL_LEN = 16;
 static constexpr size_t TYPED_DEMO_LEN = 28;
 static constexpr size_t RANDOM_BENCH_LEN = 1024;
+static constexpr size_t XFER_DEMO_LEN = 640;
 
 // ============================================================================
 // Helper Functions
@@ -88,6 +92,8 @@ const char* errToStr(MB85RC::Err err) {
     case Err::I2C_NACK_DATA:        return "I2C_NACK_DATA";
     case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
     case Err::I2C_BUS:              return "I2C_BUS";
+    case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
+    case Err::UNSUPPORTED:          return "UNSUPPORTED";
     default:                        return "UNKNOWN";
   }
 }
@@ -100,6 +106,16 @@ const char* stateToStr(MB85RC::DriverState st) {
     case DriverState::DEGRADED: return "DEGRADED";
     case DriverState::OFFLINE:  return "OFFLINE";
     default:                    return "UNKNOWN";
+  }
+}
+
+const char* sleepStateToStr(MB85RC::SleepState st) {
+  using namespace MB85RC;
+  switch (st) {
+    case SleepState::AWAKE:  return "AWAKE";
+    case SleepState::ASLEEP: return "ASLEEP";
+    case SleepState::WAKING: return "WAKING";
+    default:                 return "UNKNOWN";
   }
 }
 
@@ -158,11 +174,15 @@ void printVariantInfo(const MB85RC::cmd::VariantInfo& variant) {
   } else {
     Serial.println("  product=n/a  density=n/a");
   }
-  Serial.printf("    %s; runtime driver support=%s; HS=%s; sleep=%s\n",
+  Serial.printf("    %s; runtime driver support=%s; high-speed capability=%s; sleep capability=%s\n",
                 addressModelToStr(variant.addressModel),
                 variant.supportedByDriver ? "yes" : "no",
-                variant.highSpeedMode ? "yes" : "no",
-                variant.sleepMode ? "yes" : "no");
+                variant.supportsHighSpeedMode ? "yes" : "no",
+                variant.supportsSleepMode ? "yes" : "no");
+  Serial.printf("    max normal bus=%lu Hz; max high-speed bus=%lu Hz; sleep tREC=%u us\n",
+                static_cast<unsigned long>(variant.maxNormalBusHz),
+                static_cast<unsigned long>(variant.maxHighSpeedBusHz),
+                static_cast<unsigned>(variant.sleepRecoveryUs));
 }
 
 void printVariantCatalog() {
@@ -585,12 +605,96 @@ void printSettings() {
   Serial.printf("  Capacity: %lu bytes, max address 0x%04lX\n",
                 static_cast<unsigned long>(snap.capacityBytes),
                 static_cast<unsigned long>(snap.maxAddress));
+  Serial.printf("  Bus limits: normal=%lu Hz high-speed=%lu Hz\n",
+                static_cast<unsigned long>(snap.maxNormalBusHz),
+                static_cast<unsigned long>(snap.maxHighSpeedBusHz));
+  Serial.printf("  High-speed mode: support=%s enabled=%s\n",
+                snap.highSpeedModeSupported ? "yes" : "no",
+                snap.highSpeedModeEnabled ? "yes" : "no");
+  Serial.printf("  Sleep mode: support=%s state=%s tREC=%u us wakeReadyMs=%lu\n",
+                snap.sleepModeSupported ? "yes" : "no",
+                sleepStateToStr(snap.sleepState),
+                static_cast<unsigned>(snap.sleepRecoveryUs),
+                static_cast<unsigned long>(snap.sleepWakeReadyMs));
   Serial.println("  Cross-end bulk operations: rejected");
   if (snap.currentAddressKnown) {
     Serial.printf("  Current address: 0x%04lX\n", static_cast<unsigned long>(snap.currentAddress));
   } else {
     Serial.println("  Current address: unknown (needs successful memory read/write first)");
   }
+}
+
+void printHighSpeedSupport() {
+  MB85RC::SettingsSnapshot snap = device.getSettings();
+  Serial.println("High-speed mode:");
+  Serial.printf("  Active variant: %s\n", snap.variantName);
+  Serial.printf("  Support: %s\n", snap.highSpeedModeSupported ? "yes" : "no");
+  Serial.printf("  Enabled: %s\n", snap.highSpeedModeEnabled ? "yes" : "no");
+  Serial.println("  Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock");
+  Serial.println("  Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operation");
+  Serial.println("  App action: application bus manager must configure/operate the bus at 3.4 MHz after HS entry");
+  Serial.println("  Note: STOP exits high-speed mode; enabled driver transfers send the HS prefix per transaction");
+  Serial.println("  Arduino Wire diagnostic transport: raw HS master-code callback not installed");
+  Serial.println("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleHighSpeedCommand(const String& cmd) {
+  printHighSpeedSupport();
+  if (cmd == "hs" || cmd == "hs support") {
+    return;
+  }
+  if (cmd == "hs enter") {
+    MB85RC::Status st = device.enterHighSpeedMode();
+    printStatus(st);
+    if (st.ok()) {
+      LOGI("High-speed transfer mode requested; entry prefix is sent with each memory transfer.");
+    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  LOGW("Usage: hs | hs support | hs enter");
+}
+
+void printSleepSupport() {
+  MB85RC::SettingsSnapshot snap = device.getSettings();
+  Serial.println("Sleep mode:");
+  Serial.printf("  Active variant: %s\n", snap.variantName);
+  Serial.printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
+  Serial.printf("  State: %s\n", sleepStateToStr(snap.sleepState));
+  Serial.println("  Entry: F8h + active device address word + repeated-start 86h");
+  Serial.println("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
+  Serial.println("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
+  Serial.println("  Arduino Wire diagnostic transport: raw Sleep callback not installed");
+  Serial.println("  Hardware validation: not claimed by this diagnostic");
+}
+
+void handleSleepCommand(const String& cmd) {
+  printSleepSupport();
+  if (cmd == "sleep" || cmd == "sleep support") {
+    return;
+  }
+  if (cmd == "sleep enter") {
+    MB85RC::Status st = device.enterSleep();
+    printStatus(st);
+    if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  if (cmd == "sleep wake") {
+    MB85RC::Status st = device.wake();
+    printStatus(st);
+    if (st.ok()) {
+      delay(1);
+      device.tick(millis());
+      printCheckStatus("recover after sleep wake", device.recover());
+    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
+      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
+    }
+    return;
+  }
+  LOGW("Usage: sleep | sleep support | sleep enter | sleep wake");
 }
 
 void readRangeForDump(uint32_t address, uint32_t len) {
@@ -1084,7 +1188,7 @@ void runSelfTest() {
     report(name, SelftestOutcome::SKIP, note);
   };
 
-  Serial.println("=== MB85RC selftest (safe commands) ===");
+  Serial.println("=== MB85RC selftest (diagnostic commands) ===");
 
   const uint32_t succBefore = device.totalSuccess();
   const uint32_t failBefore = device.totalFailures();
@@ -1425,6 +1529,187 @@ void runReadWriteSuite() {
                 goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
 }
 
+struct XferDemoResult {
+  uint32_t pass = 0;
+  uint32_t fail = 0;
+};
+
+void reportXferDemoCheck(XferDemoResult& result, const char* name, bool ok, const char* note = "") {
+  Serial.printf("  [%s%s%s] %s",
+                LOG_COLOR_RESULT(ok),
+                ok ? "PASS" : "FAIL",
+                LOG_COLOR_RESET,
+                name);
+  if (note != nullptr && note[0] != '\0') {
+    Serial.printf(" - %s", note);
+  }
+  Serial.println();
+  if (ok) {
+    result.pass++;
+  } else {
+    result.fail++;
+  }
+}
+
+void reportXferDemoStatus(XferDemoResult& result, const char* name, const MB85RC::Status& st) {
+  reportXferDemoCheck(result, name, st.ok(), st.ok() ? "" : errToStr(st.code));
+}
+
+uint32_t stagedDemoAddress() {
+  const uint32_t capacity = device.capacityBytes();
+  if (capacity > XFER_DEMO_ADDR && XFER_DEMO_LEN <= (capacity - XFER_DEMO_ADDR)) {
+    return XFER_DEMO_ADDR;
+  }
+  return 0U;
+}
+
+size_t stagedDemoLength(uint32_t address) {
+  const uint32_t capacity = device.capacityBytes();
+  if (capacity == 0U || address >= capacity) {
+    return 0U;
+  }
+  const uint32_t remaining = capacity - address;
+  return (remaining > XFER_DEMO_LEN) ? XFER_DEMO_LEN : static_cast<size_t>(remaining);
+}
+
+MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
+  if (len == 0U || chunkSize == 0U) {
+    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer poll bounds");
+  }
+  const uint32_t expectedChunks =
+      static_cast<uint32_t>((len + chunkSize - 1U) / chunkSize);
+  const uint32_t pollLimit = expectedChunks + 3U;
+  for (uint32_t i = 0; i < pollLimit; ++i) {
+    MB85RC::Status st = device.pollTransfer(millis(), 1);
+    if (st.inProgress()) {
+      continue;
+    }
+    return st;
+  }
+  device.cancelTransfer();
+  return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
+}
+
+void printHeapTelemetry() {
+  Serial.printf("heap: free=%lu min_free=%lu largest=%lu\n",
+                static_cast<unsigned long>(ESP.getFreeHeap()),
+                static_cast<unsigned long>(ESP.getMinFreeHeap()),
+                static_cast<unsigned long>(ESP.getMaxAllocHeap()));
+}
+
+void runTransferDemo() {
+  XferDemoResult result;
+  Serial.println("=== Poll-Chunked Transfer Demo ===");
+
+  const uint32_t addr = stagedDemoAddress();
+  const size_t len = stagedDemoLength(addr);
+  if (len == 0U) {
+    reportXferDemoCheck(result, "select scratch range", false, "active capacity is zero");
+    Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
+                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+    return;
+  }
+
+  Serial.printf("  Scratch: 0x%04lX + %u\n",
+                static_cast<unsigned long>(addr),
+                static_cast<unsigned>(len));
+
+  static uint8_t original[XFER_DEMO_LEN] = {};
+  static uint8_t readBack[XFER_DEMO_LEN] = {};
+  static uint8_t pattern[XFER_DEMO_LEN] = {};
+  static uint8_t fillExpected[XFER_DEMO_LEN] = {};
+  for (size_t i = 0; i < len; ++i) {
+    pattern[i] = static_cast<uint8_t>(0x30U + ((i * 17U) & 0x7FU));
+    fillExpected[i] = 0x5AU;
+  }
+
+  MB85RC::Status st = device.read(addr, original, len);
+  reportXferDemoStatus(result, "backup staged scratch region", st);
+  if (!st.ok()) {
+    Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
+                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+    return;
+  }
+
+  st = device.requestRead(addr, readBack, len);
+  reportXferDemoStatus(result, "requestRead queues without I2C", st);
+  if (st.ok()) {
+    MB85RC::Status zeroBudget = device.pollTransfer(millis(), 0);
+    reportXferDemoCheck(result, "zero-budget poll remains in progress", zeroBudget.inProgress(),
+                        zeroBudget.inProgress() ? "" : errToStr(zeroBudget.code));
+    uint8_t tmp = 0;
+    MB85RC::Status busy = device.readByte(addr, tmp);
+    reportXferDemoCheck(result, "sync read rejected while transfer busy",
+                        busy.code == MB85RC::Err::BUSY,
+                        busy.ok() ? "" : errToStr(busy.code));
+    MB85RC::Status budgetTwo = device.pollTransfer(millis(), 2);
+    reportXferDemoCheck(result, "poll budget 2 executes two chunks",
+                        budgetTwo.inProgress(),
+                        budgetTwo.inProgress() ? "" : errToStr(budgetTwo.code));
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    reportXferDemoStatus(result, "poll read with one-instruction budget", st);
+    reportXferDemoCheck(result, "staged read bytes match backup",
+                        st.ok() && std::memcmp(readBack, original, len) == 0, "");
+  }
+
+  st = device.requestWrite(addr, pattern, len);
+  reportXferDemoStatus(result, "requestWrite staged pattern", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    reportXferDemoStatus(result, "poll write with one-instruction budget", st);
+  }
+
+  st = device.requestVerify(addr, pattern, len);
+  reportXferDemoStatus(result, "requestVerify staged pattern", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    reportXferDemoStatus(result, "poll verify staged pattern", st);
+  }
+
+  st = device.requestFill(addr, 0x5AU, len);
+  reportXferDemoStatus(result, "requestFill staged pattern", st);
+  if (st.ok()) {
+    const bool highBudgetShouldRemainActive =
+        len > (static_cast<size_t>(MB85RC::cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL) *
+               static_cast<size_t>(MB85RC::cmd::MAX_FILL_CHUNK));
+    MB85RC::Status highBudget = device.pollTransfer(millis(), 255);
+    reportXferDemoCheck(result, "poll high budget clamps to 8 chunks",
+                        highBudgetShouldRemainActive ? highBudget.inProgress() : highBudget.ok(),
+                        highBudget.msg);
+    st = highBudget.inProgress()
+             ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
+             : highBudget;
+    reportXferDemoStatus(result, "poll fill with one-instruction budget", st);
+  }
+
+  st = device.requestVerify(addr, fillExpected, len);
+  reportXferDemoStatus(result, "requestVerify staged fill", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    reportXferDemoStatus(result, "poll verify staged fill", st);
+  }
+
+  st = device.requestWrite(addr, original, len);
+  reportXferDemoStatus(result, "requestWrite restore backup", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    reportXferDemoStatus(result, "poll restore backup", st);
+  }
+
+  st = device.requestVerify(addr, original, len);
+  reportXferDemoStatus(result, "requestVerify restored bytes", st);
+  if (st.ok()) {
+    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    reportXferDemoStatus(result, "poll verify restored bytes", st);
+  }
+
+  Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
+                goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+}
+
 void runRandomBench(int count) {
   Serial.println("=== Random Access Benchmark ===");
   const uint32_t benchAddr = randomBenchAddress();
@@ -1643,8 +1928,14 @@ void printHelp() {
   cli::printHelpItem("idraw", "Read raw 3-byte Device ID payload");
   cli::printHelpItem("variants", "List known family variants and driver support");
   cli::printHelpItem("size", "Print active variant capacity");
+  cli::printHelpItem("hs / hs support", "Report active variant High-speed capability");
+  cli::printHelpItem("hs enter", "Enable HS-prefixed transfers if a raw special callback is configured");
+  cli::printHelpItem("sleep / sleep support", "Report active variant Sleep capability and tREC");
+  cli::printHelpItem("sleep enter", "Send Sleep entry sequence if a raw special callback is configured");
+  cli::printHelpItem("sleep wake", "Send wake stimulus, wait tREC, then recover if supported");
 
   cli::printHelpSection("Diagnostics");
+  cli::printHelpItem("heap", "Show example firmware heap telemetry");
   cli::printHelpItem("drv", "Show driver state and health");
   cli::printHelpItem("iface_reset", "Send 9 SCL pulses + STOP bus recovery sequence");
   cli::printHelpItem("probe", "Probe device (no health tracking)");
@@ -1652,8 +1943,9 @@ void printHelp() {
   cli::printHelpItem("verbose [0|1]", "Enable/disable verbose output");
   cli::printHelpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
   cli::printHelpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
-  cli::printHelpItem("selftest", "Run safe self-test report");
-  cli::printHelpItem("rw_suite", "Run a safe read/write/fill/verify suite and restore data");
+  cli::printHelpItem("selftest", "Run diagnostic self-test report with restore checks");
+  cli::printHelpItem("rw_suite", "Run read/write/fill/verify suite with best-effort restore");
+  cli::printHelpItem("xfer_demo", "Run poll-chunked transfer API demo with best-effort restore");
   cli::printHelpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
   cli::printHelpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
 }
@@ -1690,6 +1982,17 @@ void processCommand(const String& cmdLine) {
 
   if (cmd == "scan") {
     bus_diag::scan();
+    return;
+  }
+
+  if (cmd == "hs" || cmd == "hs support" || cmd == "hs enter") {
+    handleHighSpeedCommand(cmd);
+    return;
+  }
+
+  if (cmd == "sleep" || cmd == "sleep support" ||
+      cmd == "sleep enter" || cmd == "sleep wake") {
+    handleSleepCommand(cmd);
     return;
   }
 
@@ -2078,6 +2381,11 @@ void processCommand(const String& cmdLine) {
     return;
   }
 
+  if (cmd == "heap") {
+    printHeapTelemetry();
+    return;
+  }
+
   if (cmd == "drv") {
     printDriverHealth();
     return;
@@ -2134,6 +2442,11 @@ void processCommand(const String& cmdLine) {
 
   if (cmd == "rw_suite") {
     runReadWriteSuite();
+    return;
+  }
+
+  if (cmd == "xfer_demo") {
+    runTransferDemo();
     return;
   }
 

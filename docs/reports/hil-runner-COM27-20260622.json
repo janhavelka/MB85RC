@@ -1,0 +1,1424 @@
+{
+  "generated": "2026-06-22T20:52:47+02:00",
+  "port": "COM27",
+  "baud": 115200,
+  "profile": "arduino",
+  "timeout_s": 12.0,
+  "idle_timeout_s": 0.35,
+  "boot_prompt_detected": true,
+  "functional_results": [
+    {
+      "test_id": "HIL-001",
+      "area": "connectivity",
+      "command": "version",
+      "expected": "any: MB85RC library version | MB85RC ",
+      "observed": "=== Version Info === Example firmware build: Jun 22 2026 20:47:48 MB85RC library version: 3.0.0 MB85RC library full: 3.0.0 (e20c775, 2026-06-22 20:47:46, dirty) MB85RC library build: 2026-06-22 20:47:46 MB85RC library commit: e20c775 (di...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-002",
+      "area": "connectivity",
+      "command": "scan",
+      "expected": "any: Scan complete | I2C scan:",
+      "observed": "[I] Scanning I2C bus (timeout=50ms)... [I] 0 1 2 3 4 5 6 7 8 9 A B C D E F 00: -- -- -- -- -- -- -- -- 10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 30: -- -- -- -- -- -- -- -- --...",
+      "elapsed_s": 0.5,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-003",
+      "area": "state",
+      "command": "settings",
+      "expected": "any: === Settings === | state= + capacity=",
+      "observed": "=== Settings === Initialized: true State: READY I2C address: 0x50 I2C timeout: 50 ms Offline threshold: 5 nowMs hook: present Expected variant: AUTO Active variant: MB85RC64TA Device ID: manufacturer=0x00A product=0x358 density=0x03 Capa...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-004",
+      "area": "state",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 0 Total failures: 0 Success rate: 0.0% Last OK: never Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-005",
+      "area": "identity",
+      "command": "id",
+      "expected": "any: Device ID: + Manufacturer=0x | id: OK + manufacturer=0x",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-006",
+      "area": "identity",
+      "command": "idraw",
+      "expected": "any: Device ID raw: | idraw: OK",
+      "observed": "Device ID raw: 00 A3 58 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-007",
+      "area": "identity",
+      "command": "variants",
+      "expected": "any: Known MB85RC family variants: | MB85RC256V + bytes=",
+      "observed": "Known MB85RC family variants: MB85RC04V 512 bytes product=0x010 density=0x0 1-byte address, A8 in device address; runtime driver support=yes; high-speed capability=no; sleep capability=no max normal bus=1000000 Hz; max high-speed bus=0 H...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-008",
+      "area": "memory",
+      "command": "size",
+      "expected": "any: Active capacity: | capacity= + variant=",
+      "observed": "Active capacity: 8192 bytes (max address 0x1FFF, variant MB85RC64TA) Legacy MB85RC256V memorySize(): 32768 bytes >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-009",
+      "area": "diagnostics",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-010",
+      "area": "memory",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-011",
+      "area": "memory",
+      "command": "current 1",
+      "expected": "any: Current | current: OK | 0010: | 0x",
+      "observed": "0010: 00 |.| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-012",
+      "area": "memory",
+      "command": "text 0x0000 16",
+      "expected": "any: 0000: | \\x | text",
+      "observed": "0000: \"\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\" >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-013",
+      "area": "memory",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-014",
+      "area": "modes",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-015",
+      "area": "modes",
+      "command": "hs enter",
+      "expected": "any: High-speed mode: + Status: | High-speed mode: + hs enter:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-016",
+      "area": "modes",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-017",
+      "area": "modes",
+      "command": "sleep enter",
+      "expected": "any: Sleep mode: + Status: | Sleep mode: + sleep enter:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-018",
+      "area": "recovery",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 7 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 7610 ms) Last error...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-019",
+      "area": "validation",
+      "command": "definitely_not_a_command",
+      "expected": "any: Unknown command | Unknown command. Try 'help'.",
+      "observed": "[W] Unknown command: definitely_not_a_command >",
+      "elapsed_s": 0.3600000001024455,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-020",
+      "area": "validation",
+      "command": "read 0xFFFFFFFF 1",
+      "expected": "any: Range | Address out of range | outside active capacity | Usage:",
+      "observed": "[W] Usage: read / dump / hexdump <addr> [len] >",
+      "elapsed_s": 0.3899999998975545,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-021",
+      "area": "diagnostics",
+      "command": "selftest",
+      "expected": "any: Selftest result: | selftest_pattern=PASS",
+      "observed": "=== MB85RC selftest (diagnostic commands) === [PASS] probe responds [PASS] probe no-health-side-effects [PASS] readDeviceId [PASS] manufacturer ID = 0x00A [PASS] product ID matches active variant [PASS] density code matches active varian...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-022",
+      "area": "memory",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.3910000000614673,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-023",
+      "area": "staged",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.4059999999590218,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-024",
+      "area": "data",
+      "command": "typed_demo",
+      "expected": "any: Typed Value Demo | typed_demo restore: OK",
+      "observed": "=== Typed Value Demo === Storage format: explicit little-endian, fixed-width, no silent wrap. [PASS] write uint8 [PASS] write uint16 LE [PASS] write int32 LE [PASS] write uint64 LE [PASS] write float32 LE [PASS] write float64 LE [PASS] w...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-025",
+      "area": "timing",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7720 us avg=154.40 us/op rate=6476.68 ops/s throughput=6476.68 B/s rando...",
+      "elapsed_s": 0.4690000000409782,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "HIL-026",
+      "area": "state",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 206 Total failures: 0 Success rate: 100.0% Last OK: 375 ms ago (at 10383 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    }
+  ],
+  "soak_summary": {
+    "status": "PASS",
+    "start": "2026-06-22T20:51:47+02:00",
+    "end": "2026-06-22T20:52:47+02:00",
+    "duration_s": 60.03099999995902,
+    "command_counts": {
+      "drv": 11,
+      "id": 11,
+      "read 0x0000 16": 10,
+      "crc 0x0000 64": 10,
+      "probe": 10,
+      "recover": 10,
+      "hs support": 10,
+      "sleep support": 10,
+      "rw_suite": 10,
+      "xfer_demo": 10,
+      "randbench 50": 10
+    },
+    "pass_count": 112,
+    "fail_count": 0,
+    "unknown_count": 0,
+    "consecutive_failure_bursts": 0,
+    "worst_consecutive_failures": 0,
+    "min_latency_s": 0.3589999999385327,
+    "mean_latency_s": 0.4851160714419426,
+    "max_latency_s": 12.014999999897555,
+    "worst_read_latency_s": 0.375,
+    "recover_count": 10,
+    "reconnect_count": 0
+  },
+  "soak_results": [
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 206 Total failures: 0 Success rate: 100.0% Last OK: 748 ms ago (at 10383 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 210 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 13237 ms) Last er...",
+      "elapsed_s": 0.3600000001024455,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.3910000000614673,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.4059999999590218,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7722 us avg=154.44 us/op rate=6475.01 ops/s throughput=6475.01 B/s rando...",
+      "elapsed_s": 0.4690000000409782,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 365 Total failures: 0 Success rate: 100.0% Last OK: 421 ms ago (at 15470 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 369 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 17998 ms) Last er...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.40699999989010394,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7725 us avg=154.50 us/op rate=6472.49 ops/s throughput=6472.49 B/s rando...",
+      "elapsed_s": 0.45399999991059303,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 524 Total failures: 0 Success rate: 100.0% Last OK: 416 ms ago (at 20239 ms) Last error: never >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 528 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 22761 ms) Last er...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 12.014999999897555,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "Arduino Wire diagnostic transport: raw Sleep callback not installed Hardware validation: not claimed by this diagnostic > === Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] wr...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.4059999999590218,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7730 us avg=154.60 us/op rate=6468.31 ops/s throughput=6468.31 B/s rando...",
+      "elapsed_s": 0.46800000010989606,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 683 Total failures: 0 Success rate: 100.0% Last OK: 421 ms ago (at 36644 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.3600000001024455,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 687 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 39164 ms) Last er...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.3910000000614673,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7726 us avg=154.52 us/op rate=6471.65 ops/s throughput=6471.65 B/s rando...",
+      "elapsed_s": 0.4529999999795109,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 842 Total failures: 0 Success rate: 100.0% Last OK: 415 ms ago (at 41404 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 846 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 43919 ms) Last er...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.3910000000614673,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7730 us avg=154.60 us/op rate=6468.31 ops/s throughput=6468.31 B/s rando...",
+      "elapsed_s": 0.4529999999795109,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1001 Total failures: 0 Success rate: 100.0% Last OK: 418 ms ago (at 46154 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1005 Total failures: 0 Success rate: 100.0% Last OK: 1 ms ago (at 48671 ms) Last e...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.40600000019185245,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7728 us avg=154.56 us/op rate=6469.98 ops/s throughput=6469.98 B/s rando...",
+      "elapsed_s": 0.46899999980814755,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1160 Total failures: 0 Success rate: 100.0% Last OK: 420 ms ago (at 50908 ms) Last error: never >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1164 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 53428 ms) Last e...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.35999999986961484,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.40600000019185245,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7724 us avg=154.48 us/op rate=6473.33 ops/s throughput=6473.33 B/s rando...",
+      "elapsed_s": 0.46899999980814755,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1319 Total failures: 0 Success rate: 100.0% Last OK: 417 ms ago (at 55664 ms) Last error: never >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1323 Total failures: 0 Success rate: 100.0% Last OK: 1 ms ago (at 58177 ms) Last e...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39099999982863665,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7732 us avg=154.64 us/op rate=6466.63 ops/s throughput=6466.63 B/s rando...",
+      "elapsed_s": 0.46899999980814755,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1478 Total failures: 0 Success rate: 100.0% Last OK: 419 ms ago (at 60417 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1482 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 62925 ms) Last e...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.35999999986961484,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.40600000019185245,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7732 us avg=154.64 us/op rate=6466.63 ops/s throughput=6466.63 B/s rando...",
+      "elapsed_s": 0.4529999999795109,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1637 Total failures: 0 Success rate: 100.0% Last OK: 416 ms ago (at 65156 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-READ",
+      "area": "soak",
+      "command": "read 0x0000 16",
+      "expected": "any: 0000: | 0x000000:",
+      "observed": "0000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................| >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-CRC",
+      "area": "soak",
+      "command": "crc 0x0000 64",
+      "expected": "any: CRC32 | crc32=",
+      "observed": "CRC32[0x0000 + 64] = 0x758D6336 >",
+      "elapsed_s": 0.35900000017136335,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-PROBE",
+      "area": "soak",
+      "command": "probe",
+      "expected": "any: Status: + OK | probe: OK",
+      "observed": "[I] Probing device (no health tracking)... Status: OK (code=0, detail=0) Message: OK >",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RECOVER",
+      "area": "soak",
+      "command": "recover",
+      "expected": "any: Status: + OK | recover: OK",
+      "observed": "[I] Attempting recovery... Status: OK (code=0, detail=0) Message: OK === Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1641 Total failures: 0 Success rate: 100.0% Last OK: 0 ms ago (at 67667 ms) Last e...",
+      "elapsed_s": 0.3589999999385327,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-HS",
+      "area": "soak",
+      "command": "hs support",
+      "expected": "all: High-speed mode:, Support:",
+      "observed": "High-speed mode: Active variant: MB85RC64TA Support: yes Enabled: no Core bus clock: unchanged; MB85RC core does not change Wire/ESP-IDF I2C clock Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operat...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-SLEEP",
+      "area": "soak",
+      "command": "sleep support",
+      "expected": "all: Sleep mode:, Support:",
+      "observed": "Sleep mode: Active variant: MB85RC64TA Support: yes State: AWAKE Entry: F8h + active device address word + repeated-start 86h Wake: clock active device address word, wait tREC >= 400 us before access/recover Core sleep state: tracked sep...",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RW",
+      "area": "soak",
+      "command": "rw_suite",
+      "expected": "any: Read/write suite result: | rw_suite restore: OK",
+      "observed": "=== Read/Write Suite === [PASS] backup scratch region [PASS] backup fill region [PASS] backup tail region [PASS] write scratch pattern [PASS] verify scratch transaction [PASS] verify scratch contents [PASS] read scratch pattern [PASS] sc...",
+      "elapsed_s": 0.39000000013038516,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-XFER",
+      "area": "soak",
+      "command": "xfer_demo",
+      "expected": "any: Transfer demo result: | xfer_demo_result",
+      "observed": "=== Poll-Chunked Transfer Demo === Scratch: 0x0700 + 160 [PASS] backup staged scratch region [PASS] requestRead queues without I2C [PASS] zero-budget poll remains in progress [PASS] sync read rejected while transfer busy - BUSY [PASS] po...",
+      "elapsed_s": 0.3910000000614673,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-RAND",
+      "area": "soak",
+      "command": "randbench 50",
+      "expected": "any: Random Access Benchmark | randbench_ok=",
+      "observed": "[I] Starting random benchmark: 50 writes + 50 reads === Random Access Benchmark === Window: 0x1C00 + 1024 Final window verify: PASS random-write-byte ops=50 elapsed=7729 us avg=154.58 us/op rate=6469.14 ops/s throughput=6469.14 B/s rando...",
+      "elapsed_s": 0.4529999999795109,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-DRV",
+      "area": "soak",
+      "command": "drv",
+      "expected": "any: === Driver Health === | state= + initialized=",
+      "observed": "=== Driver Health === State: READY Online: yes Consecutive failures: 0 Total success: 1796 Total failures: 0 Success rate: 100.0% Last OK: 417 ms ago (at 69902 ms) Last error: never >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    },
+    {
+      "test_id": "SOAK-ID",
+      "area": "soak",
+      "command": "id",
+      "expected": "any: Device ID: | id: OK",
+      "observed": "Device ID: Manufacturer=0x00A Product=0x358 Density=0x03 Variant: MB85RC64TA (8192 bytes) Runtime driver support: yes; access format: 2-byte linear address >",
+      "elapsed_s": 0.375,
+      "status": "PASS",
+      "notes": ""
+    }
+  ],
+  "transcript_path": "C:\\Users\\Honza\\Documents\\Projects\\MB85RC\\docs\\reports\\hil-runner-COM27-20260622-transcript.txt"
+}

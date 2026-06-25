@@ -7,8 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Status::is(Err)` and explicit `Status` bool conversion convenience helpers
+  while preserving existing `ok()` and `inProgress()` calls.
+- Native tests for write/fill verify behavior when a later chunk times out
+  after an earlier prefix may already have been accepted by the transport.
+- Native all-variant exact-end and cross-end tests for synchronous bulk read,
+  write, fill, verify, write-verify, and fill-verify helpers.
+- Poll-chunked transfer API:
+  `requestRead()`, `requestWrite()`, `requestFill()`, `requestVerify()`,
+  `pollTransfer()`, `isTransferBusy()`, `getTransferStatus()`, and
+  `cancelTransfer()`.
+- Native transfer-budget tests for `maxInstructions` 1, 2, high-budget clamp,
+  exact-end/preflight rejection, active-transfer busy handling, verify
+  mismatch, and timeout-after-possible-write readback behavior.
+- Simplified `docs/` into maintained entry points plus `reference-pdfs/`,
+  merging extracted device notes and ESP-IDF implementation notes while removing
+  historical audit/extraction leftovers.
+
 ### Changed
 
+- `Config::expectedVariant` now defaults to `DeviceVariant::AUTO` so
+  Device-ID-capable parts select active capacity from readback. Fixed-BOM
+  production integrations should still set the exact expected variant.
+- Documented synchronous whole-range memory helpers as convenience APIs for
+  TunnelMonitor-style poll-budgeted integrations.
+- Documented timeout status policy and possible-write ambiguity after
+  transport timeouts.
+- Documented the staged transfer API as the recommended TunnelMonitor
+  integration path for preserving one or more bounded backend FRAM chunks per
+  scheduler poll.
+- Doxygen input now points only at maintained docs instead of audit reports or
+  generated extraction dumps.
+
+## [3.0.0] - 2026-06-08
+
+### Added
+
+- Variant-gated High-speed and Sleep APIs:
+  `supportsHighSpeedMode()`, `enterHighSpeedMode()`,
+  `exitHighSpeedMode()`, `setHighSpeedMode()`, `supportsSleepMode()`,
+  `enterSleep()`, `wake()`, and `wakeFromSleep()`.
+- Optional `Config::i2cSpecial` transport callback for HS-prefixed
+  transfers, Sleep entry, and Sleep wake stimulus without changing the
+  existing normal write/write-read callbacks.
+- Variant metadata fields for HS/Sleep capability, normal/HS bus limits, and
+  Sleep recovery time.
+- `WriteResult`, `writeDetailed()`, and `fillDetailed()` report requested bytes,
+  transport-accepted prefix length, first failed chunk offset, and completion
+  state for non-atomic bulk write/fill operations.
+- `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`,
+  and `Err::VERIFY_MISMATCH` support explicit readback verification when I2C
+  acceptance is not enough to prove persistence.
+- Native fake-bus coverage for partial write/fill chunk failures, WP-high
+  ACK-without-persistence behavior, and write/fill verify mismatch handling.
+- Native fake-bus coverage for HS/Sleep variant gating, special-transfer
+  routing, expected HS master-code NACK scoping, Sleep state transitions, and
+  wake recovery gating.
+- Pure ESP-IDF CI job configuration that builds `examples/espidf_basic` for
+  `esp32s2` and `esp32s3`.
+- Hardware-validation matrix covering supported variants, address straps,
+  WP behavior, High-speed/Sleep checks, pure ESP-IDF CLI, shared-bus behavior,
+  and soak testing.
+
+### Changed
+
+- Breaking: `MB85RC` copy and move construction/assignment are now explicitly
+  deleted. Applications should keep one driver instance per device and pass it
+  by reference or pointer.
+- Breaking for positional aggregate initialization: `Config` now contains
+  optional High-speed/Sleep transport fields. Prefer default construction and
+  named member assignment for stable configuration code.
+- Public docs now state the thread-safety, ISR-safety, and non-recursive
+  transport callback contracts.
+- Current-address tracking is invalidated more conservatively after failed or
+  diagnostic transactions that can disturb the device pointer.
+- Arduino and native ESP-IDF diagnostic CLIs now include `hs`, `hs support`,
+  `hs enter`, `sleep`, `sleep support`, `sleep enter`, and `sleep wake`
+  commands. Hardware validation remains pending for real HS/Sleep mode use.
 - ESP-IDF CLI destructive FRAM workflows now require explicit `!` confirmation
   forms (`write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`,
   `stress_mix!`, `randbench!`, and `typed_demo!`) and unconfirmed forms print
@@ -18,6 +95,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads instead of advertising them through a generic placeholder message.
 - ESP-IDF port docs now document the confirmation policy and pending hardware
   validation status.
+- Native ESP-IDF Device-ID access now uses a manual-address reserved-ID
+  transaction path instead of normal device-handle addressing for the reserved
+  `0xF8`/`0xF9` sequence.
+
+### Fixed
+
+- `begin()` and diagnostic `probe()` preserve original transport status codes
+  instead of wrapping them as `DEVICE_NOT_FOUND`.
+- Version and release metadata now consistently identify this hardening release
+  as `3.0.0`.
 
 ## [2.0.0] - 2026-05-20
 
@@ -30,8 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime diagnostics: `variantInfo()`, `variantName()`, `deviceId()`, `capacityBytes()`, `maxAddress()`, and expanded `SettingsSnapshot` fields.
 - Native tests for every explicit runtime variant, Device ID AUTO selection where supported, variant mismatches, address encoding, active-capacity bounds, current-address bounds, active-variant `probe()` / `recover()`, and no-Device-ID 16V diagnostics.
 - ESP-IDF component metadata and a native ESP-IDF `examples/espidf_basic` build of the full bring-up CLI command contract.
-- ESP-IDF port notes in `docs/IDF_PORT.md`.
-- ESP-IDF port implementation notes in `docs/IDF_PORT_IMPLEMENTATION.md`.
+- ESP-IDF port notes, now consolidated in `docs/IDF_PORT.md`.
 
 ### Changed
 
@@ -43,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `readDeviceId()` and `readDeviceIdRaw()` now return `INVALID_PARAM` when the active explicit variant has no Device ID command.
 - `library.json`, `idf_component.yml`, and README now describe the library as an MB85RC-family driver and include all supported runtime variants.
 - `library.json` now declares both `arduino` and `espidf` framework support.
-- Doxygen input now covers the ESP-IDF port notes, implementation notes, Arduino CLI source, and native IDF entry point.
+- Doxygen input now covers maintained docs, Arduino CLI source, and native IDF entry point.
 - The ESP-IDF example adapter now performs Device ID transactions on reserved address `0x7C` through ESP-IDF defined I2C operations with manual address bytes instead of relying on normal device-handle addressing for a reserved address.
 - `tools/check_idf_example_contract.py` now validates the native ESP-IDF boundary, command surface, required CMake dependencies, and core Device ID address construction.
 - ESP-IDF CLI parity is checked through repo-local command contracts; hardware validation remains pending until target hardware is available.
@@ -78,7 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documented validation behavior for null buffers, zero-length transfers, out-of-range addresses, and current-address tracking.
-- Reference documentation now uses human-readable vendor PDF names and separates compact chip notes from full PDF extractions under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
+- Reference documentation now keeps vendor PDFs and maintained compact device notes in `docs/`.
 - Explicit recovery bypass internals now use the shared `ScopedOfflineI2cAllowance` / `_reassertOfflineLatch()` procedure so failed recovery attempts that begin from `OFFLINE` keep the latch asserted.
 - Health behavior is now standardized on latched `OFFLINE`: normal public I2C operations return `BUSY` with `Driver is offline; call recover()` and do not touch I2C until `recover()` succeeds.
 
@@ -120,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/MB85RC/compare/v1.0.0...v1.1.0

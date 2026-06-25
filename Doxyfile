@@ -2,8 +2,8 @@
 # Generated and maintained for unified API documentation.
 
 PROJECT_NAME           = "MB85RC"
-PROJECT_NUMBER         = "2.0.0"
-PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for release 2.0.0"
+PROJECT_NUMBER         = "3.0.0"
+PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for release 3.0.0"
 OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO
@@ -31,10 +31,10 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs examples/common examples/01_basic_bringup_cli examples/espidf_basic
+INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs/README.md docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
-EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/extracted-md/* */docs/pdf-extracted-md/* */docs/_pdf_extracts/*
+EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*
 EXAMPLE_PATH           = examples/01_basic_bringup_cli examples/espidf_basic examples/common
 
 USE_MDFILE_AS_MAINPAGE = README.md

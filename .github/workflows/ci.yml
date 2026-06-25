@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     tags:
@@ -73,11 +74,34 @@ jobs:
       - name: Check generated version header
         run: python scripts/generate_version.py check
 
+      - name: Check release metadata consistency
+        run: python tools/check_metadata_consistency.py
+
       - name: Enforce core timing guard
         run: python tools/check_core_timing_guard.py
 
       - name: Run native tests
         run: pio test -e native
+
+  esp-idf-build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v6.0
+    strategy:
+      fail-fast: false
+      matrix:
+        idf_target:
+          - esp32s3
+          - esp32s2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show ESP-IDF version
+        run: idf.py --version
+
+      - name: Build ESP-IDF example for ${{ matrix.idf_target }}
+        run: idf.py -C examples/espidf_basic set-target ${{ matrix.idf_target }} build
 
   validate-library:
     runs-on: ubuntu-latest
@@ -106,5 +130,25 @@ jobs:
       - name: Enforce example CLI contract
         run: python tools/check_cli_contract.py
 
+      - name: Enforce ESP-IDF example contract
+        run: python tools/check_idf_example_contract.py
+
+      - name: Check release metadata consistency
+        run: python tools/check_metadata_consistency.py
+
       - name: Validate library package
         run: pio pkg pack
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen
+
+      - name: Build Doxygen documentation
+        run: doxygen Doxyfile
