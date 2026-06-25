@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [3.0.0] - 2026-06-25
+
 ### Added
 
 - `Status::is(Err)` and explicit `Status` bool conversion convenience helpers
@@ -25,26 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simplified `docs/` into maintained entry points plus `reference-pdfs/`,
   merging extracted device notes and ESP-IDF implementation notes while removing
   historical audit/extraction leftovers.
-
-### Changed
-
-- `Config::expectedVariant` now defaults to `DeviceVariant::AUTO` so
-  Device-ID-capable parts select active capacity from readback. Fixed-BOM
-  production integrations should still set the exact expected variant.
-- Documented synchronous whole-range memory helpers as convenience APIs for
-  TunnelMonitor-style poll-budgeted integrations.
-- Documented timeout status policy and possible-write ambiguity after
-  transport timeouts.
-- Documented the staged transfer API as the recommended TunnelMonitor
-  integration path for preserving one or more bounded backend FRAM chunks per
-  scheduler poll.
-- Doxygen input now points only at maintained docs instead of audit reports or
-  generated extraction dumps.
-
-## [3.0.0] - 2026-06-08
-
-### Added
-
 - Variant-gated High-speed and Sleep APIs:
   `supportsHighSpeedMode()`, `enterHighSpeedMode()`,
   `exitHighSpeedMode()`, `setHighSpeedMode()`, `supportsSleepMode()`,
@@ -73,6 +57,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `Config::expectedVariant` now defaults to `DeviceVariant::AUTO` so
+  Device-ID-capable parts select active capacity from readback. Fixed-BOM
+  production integrations should still set the exact expected variant.
+- Documented synchronous whole-range memory helpers as convenience APIs for
+  TunnelMonitor-style poll-budgeted integrations.
+- Documented timeout status policy and possible-write ambiguity after
+  transport timeouts.
+- Documented the staged transfer API as the recommended TunnelMonitor
+  integration path for preserving one or more bounded backend FRAM chunks per
+  scheduler poll.
+- Doxygen input now points only at maintained docs instead of audit reports or
+  generated extraction dumps.
+- Replaced bulky prompt-era HIL transcripts and runner dumps with a compact
+  `docs/reports/HIL_SUMMARY.md` evidence ledger.
 - Breaking: `MB85RC` copy and move construction/assignment are now explicitly
   deleted. Applications should keep one driver instance per device and pass it
   by reference or pointer.

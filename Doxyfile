@@ -31,7 +31,7 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs/README.md docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md
+INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md include docs/README.md docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md docs/reports/HIL_SUMMARY.md
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*

@@ -12,6 +12,7 @@ the public API comments, and the files listed here.
 | [DEVICE_REFERENCE.md](DEVICE_REFERENCE.md) | MB85RC-family variant, addressing, protocol, timing, WP, Device ID, High-speed, and Sleep notes used by the driver. |
 | [IDF_PORT.md](IDF_PORT.md) | Native ESP-IDF example boundary, command contract, and validation notes. |
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Release verification checklist before tagging or publishing. |
+| [reports/HIL_SUMMARY.md](reports/HIL_SUMMARY.md) | Compact retained HIL evidence summary after raw runner artifacts were pruned from the release tree. |
 
 ## Vendor References
 
