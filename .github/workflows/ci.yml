@@ -98,10 +98,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Show ESP-IDF version
-        run: idf.py --version
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py --version
 
       - name: Build ESP-IDF example for ${{ matrix.idf_target }}
-        run: idf.py -C examples/espidf_basic set-target ${{ matrix.idf_target }} build
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py -C examples/espidf_basic set-target ${{ matrix.idf_target }} build
 
   validate-library:
     runs-on: ubuntu-latest
