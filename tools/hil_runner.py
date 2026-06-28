@@ -233,9 +233,13 @@ def update_observations(observations: Observations, output: str, *, count_resets
     if match is not None:
         observations.manufacturer_id = int(match.group(1), 16)
 
-    match = PRODUCT_RE.search(clean)
-    if match is not None:
-        observations.product_id = int(match.group(1), 16)
+    for line in clean.splitlines():
+        if "Device ID" not in line and "manufacturer" not in line.lower():
+            continue
+        match = PRODUCT_RE.search(line)
+        if match is not None:
+            observations.product_id = int(match.group(1), 16)
+            break
 
     for pattern in VARIANT_PATTERNS:
         match = pattern.search(clean)
@@ -874,6 +878,17 @@ def parser_self_test() -> int:
     if observations.heap_baseline_free != 240000 or observations.heap_min_free_observed != 230000:
         ok = False
         print("parser self-test failed for observations: heap not parsed")
+    update_observations(
+        observations,
+        "Known MB85RC family variants:\n"
+        "MB85RC04V 512 bytes product=0x010 density=0x0\n"
+        "MB85RC256V 32768 bytes product=0x510 density=0x5\n"
+        "> ",
+        count_resets=True,
+    )
+    if observations.product_id != 0x510:
+        ok = False
+        print("parser self-test failed for observations: variant catalog overwrote active product")
     if count_target_resets("rst:0x1 (POWERON_RESET),boot:0x8\n> ") != 1:
         ok = False
         print("parser self-test failed for reset detection")
