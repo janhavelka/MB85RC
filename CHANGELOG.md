@@ -23,9 +23,20 @@ No unreleased changes.
   `requestRead()`, `requestWrite()`, `requestFill()`, `requestVerify()`,
   `pollTransfer()`, `isTransferBusy()`, `getTransferStatus()`, and
   `cancelTransfer()`.
+- Machine-readable `BusyDetail` values for `Err::BUSY` cases through
+  `Status::detail`.
+- Public timeout contract constants:
+  `MIN_I2C_TIMEOUT_MS`, `DEFAULT_I2C_TIMEOUT_MS`, and
+  `MAX_I2C_TIMEOUT_MS`.
+- Public staged-transfer limit constants:
+  `cmd::MAX_FILL_CHUNK` and `cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL`, matching
+  the existing `cmd::MAX_READ_CHUNK` and `cmd::MAX_WRITE_CHUNK` limits.
 - Native transfer-budget tests for `maxInstructions` 1, 2, high-budget clamp,
   exact-end/preflight rejection, active-transfer busy handling, verify
   mismatch, and timeout-after-possible-write readback behavior.
+- Native contract tests for enum numeric values, bounded I2C timeout config,
+  variant base-address validation, health-counter wrap behavior, request-time
+  staged-transfer preflight, and public `readDeviceIdRaw()` health tracking.
 - Simplified `docs/` into maintained entry points plus `reference-pdfs/`,
   merging extracted device notes and ESP-IDF implementation notes while removing
   historical audit/extraction leftovers.
@@ -54,6 +65,10 @@ No unreleased changes.
 - Hardware-validation matrix covering supported variants, address straps,
   WP behavior, High-speed/Sleep checks, pure ESP-IDF CLI, shared-bus behavior,
   and soak testing.
+- Arduino and native ESP-IDF `heap` CLI commands for HIL heap telemetry.
+- HIL runner strict production gates for required variant, product ID,
+  capacity, zero UNKNOWNs, final READY health, zero failures, no resets or
+  reconnects, and heap thresholds.
 
 ### Changed
 
@@ -67,6 +82,21 @@ No unreleased changes.
 - Documented the staged transfer API as the recommended TunnelMonitor
   integration path for preserving one or more bounded backend FRAM chunks per
   scheduler poll.
+- `Config::i2cTimeoutMs` is now bounded to
+  `MIN_I2C_TIMEOUT_MS..MAX_I2C_TIMEOUT_MS`; the configured value remains the
+  per-transaction deadline passed to injected transport callbacks.
+- `Config::i2cAddress` is now treated as the board's base strap address.
+  Variants that encode memory address bits in the transaction address reject
+  ambiguous base addresses during `begin()`.
+- Staged `request*()` APIs now reject OFFLINE, ASLEEP, WAKING, and active
+  transfer states before queuing work, without touching the bus.
+- `tick(uint32_t nowMs)` remains bus-silent and only advances cached Sleep wake
+  recovery state when the caller-supplied timestamp reaches the recovery
+  deadline.
+- Lifetime `totalSuccess()` and `totalFailures()` health counters now wrap
+  naturally as `uint32_t`; `consecutiveFailures()` remains saturating.
+- Public `readDeviceId()` and `readDeviceIdRaw()` remain health-tracked, while
+  diagnostic `probe()` remains raw and untracked.
 - Doxygen input now points only at maintained docs instead of audit reports or
   generated extraction dumps.
 - Replaced bulky prompt-era HIL transcripts and runner dumps with a compact
@@ -101,6 +131,13 @@ No unreleased changes.
 
 - `begin()` and diagnostic `probe()` preserve original transport status codes
   instead of wrapping them as `DEVICE_NOT_FOUND`.
+- The core no longer treats transport-reported `WRITE_PROTECTED` or
+  `VERIFY_MISMATCH` as I2C health failures.
+- ESP-IDF GitHub Actions container jobs now source the ESP-IDF export script
+  before invoking `idf.py`.
+- HIL runner active Product ID observation parsing now ignores product IDs from
+  the variant catalog, so strict `--require-product-id` gates use the active
+  device identity.
 - Version and release metadata now consistently identify this hardening release
   as `3.0.0`.
 
