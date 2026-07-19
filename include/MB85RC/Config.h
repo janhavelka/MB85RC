@@ -113,11 +113,11 @@ using I2cWriteReadFn = TransportResult (*)(uint8_t addr, const uint8_t* txData, 
 /// fixed variants that do not use these features, and required when AUTO needs
 /// identity selection. The core requests it only for a documented feature.
 enum class I2cSpecialOp : uint8_t {
-  READ_DEVICE_ID = 0,        ///< Reserved F8h/F9h Device ID sequence; not a normal 7-bit transfer.
-  HIGH_SPEED_WRITE = 1,      ///< HS master code, expected NACK, then a write transaction.
-  HIGH_SPEED_WRITE_READ = 2, ///< HS master code, expected NACK, then a write/read transaction.
-  ENTER_SLEEP = 3,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
-  WAKE_FROM_SLEEP = 4        ///< Device address wake stimulus; ACK may be indeterminate.
+  HIGH_SPEED_WRITE = 0,      ///< HS master code, expected NACK, then a write transaction.
+  HIGH_SPEED_WRITE_READ = 1, ///< HS master code, expected NACK, then a write/read transaction.
+  ENTER_SLEEP = 2,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
+  WAKE_FROM_SLEEP = 3,       ///< Device address wake stimulus; ACK may be indeterminate.
+  READ_DEVICE_ID = 4         ///< Reserved F8h/F9h Device ID sequence; not a normal 7-bit transfer.
 };
 
 /// @brief Parameters for optional special I2C operations.

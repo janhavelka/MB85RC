@@ -71,6 +71,8 @@ No unreleased changes.
 - Kept ESP-IDF invalid-response writes indeterminate when the backend cannot
   identify the NACKed byte, and corrected Wire buffer-short counts to report
   zero physical TX progress before `endTransmission()`.
+- Preserved the v3 numeric values of existing `I2cSpecialOp` members and
+  appended `READ_DEVICE_ID` without renumbering the public enum.
 
 ### Removed
 
@@ -310,7 +312,8 @@ No unreleased changes.
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1
