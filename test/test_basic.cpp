@@ -46,6 +46,8 @@ static_assert(static_cast<uint8_t>(Err::I2C_TIMEOUT) == 14);
 static_assert(static_cast<uint8_t>(Err::I2C_BUS) == 15);
 static_assert(static_cast<uint8_t>(Err::VERIFY_MISMATCH) == 16);
 static_assert(static_cast<uint8_t>(Err::UNSUPPORTED) == 17);
+static_assert(static_cast<uint8_t>(Err::NO_RESULT) == 18);
+static_assert(static_cast<uint8_t>(Err::CANCELLED) == 19);
 static_assert(static_cast<uint8_t>(DriverState::UNINIT) == 0);
 static_assert(static_cast<uint8_t>(DriverState::READY) == 1);
 static_assert(static_cast<uint8_t>(DriverState::DEGRADED) == 2);
@@ -53,6 +55,8 @@ static_assert(static_cast<uint8_t>(DriverState::OFFLINE) == 3);
 static_assert(static_cast<uint8_t>(SleepState::AWAKE) == 0);
 static_assert(static_cast<uint8_t>(SleepState::ASLEEP) == 1);
 static_assert(static_cast<uint8_t>(SleepState::WAKING) == 2);
+static_assert(static_cast<uint8_t>(SleepState::UNKNOWN) == 3);
+static_assert(static_cast<int32_t>(BusyDetail::SLEEP_STATE_UNKNOWN) == 9);
 static_assert(static_cast<uint8_t>(DeviceVariant::AUTO) == 0);
 static_assert(static_cast<uint8_t>(DeviceVariant::MB85RC256V) == 1);
 static_assert(static_cast<uint8_t>(DeviceVariant::MB85RC64TA) == 2);
@@ -3956,6 +3960,7 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 void test_example_transport_maps_wire_errors() {
   Wire._clearEndTransmissionResult();
   Wire._clearRequestFromOverride();
+  Wire._clearWriteReturnOverride();
 
   TEST_ASSERT_TRUE(transport::initWire(8, 9, 400000, 77));
   TEST_ASSERT_EQUAL_UINT32(77u, Wire.getTimeOut());
@@ -3982,7 +3987,16 @@ void test_example_transport_maps_wire_errors() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::BUS_ERROR),
                           static_cast<uint8_t>(st.code));
 
+  Wire._setWriteReturnOverride(0U);
+  st = transport::wireWrite(0x50, &byte, 1, 10, &Wire);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                          static_cast<uint8_t>(st.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+
   Wire._clearEndTransmissionResult();
+  Wire._clearWriteReturnOverride();
 }
 
 void test_example_transport_supports_read_only_transactions() {
@@ -4073,7 +4087,74 @@ void test_bind_rejects_small_and_clamps_large_transport_limits_without_io() {
   TEST_ASSERT_TRUE(dev.bind(cfg).ok());
   TEST_ASSERT_EQUAL_UINT32(MAX_TRANSPORT_RX_BYTES,
                            static_cast<uint32_t>(dev.maxReadDataBytes()));
+
+  cfg = makeConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  cfg.i2cSpecial = nullptr;
+  TEST_ASSERT_TRUE(dev.bind(cfg).is(Err::INVALID_CONFIG));
   TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+}
+
+void test_disabled_offline_threshold_failure_stays_degraded() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.offlineThreshold = 0U;
+  TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+
+  bus.customReadResultOnCall = 1U;
+  bus.customReadResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -401,
+                             WriteCommit::NOT_APPLICABLE);
+  uint8_t value = 0U;
+  Status st = dev.readOnce(0U, &value, 1U);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                          static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_EQUAL_UINT8(1U, dev.consecutiveFailures());
+  TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+
+  TEST_ASSERT_TRUE(dev.readOnce(0U, &value, 1U).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_one_byte_address_variants_accept_two_byte_tx_capacity() {
+  const DeviceVariant variants[] = {
+      DeviceVariant::MB85RC04V,
+      DeviceVariant::MB85RC16V,
+  };
+
+  for (DeviceVariant variant : variants) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = makeVariantConfig(bus, variant);
+    cfg.maxTxBytes = 1U;
+    TEST_ASSERT_TRUE(dev.bind(cfg).is(Err::INVALID_CONFIG));
+    TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+
+    cfg.maxTxBytes = 2U;
+    TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+    TEST_ASSERT_EQUAL_UINT32(1U,
+                             static_cast<uint32_t>(dev.maxWriteDataBytes()));
+    const uint8_t value = static_cast<uint8_t>(0xA0U +
+                                               static_cast<uint8_t>(variant));
+    TEST_ASSERT_TRUE(dev.writeOnce(0x0100U, &value, 1U).ok());
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
+    TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(bus.lastTxLen));
+    TEST_ASSERT_EQUAL_HEX32(0x0100U, bus.lastMemoryAddress);
+    TEST_ASSERT_EQUAL_HEX8(value, bus.mem[0x0100U]);
+
+    bus.customWriteResultOnCall = 2U;
+    bus.customWriteResult =
+        TransportResult::Error(TransportCode::NACK_DATA, -400,
+                               WriteCommit::NOT_COMMITTED, 1U, 0U);
+    WriteCommit commit = WriteCommit::INDETERMINATE;
+    TEST_ASSERT_TRUE(dev.writeOnce(0x0101U, &value, 1U, &commit)
+                         .is(Err::I2C_NACK_DATA));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                            static_cast<uint8_t>(commit));
+  }
 }
 
 void test_begin_failure_retains_binding_for_later_identity_attempt() {
@@ -4111,6 +4192,32 @@ void test_rebind_after_end_uses_new_nonowning_transport() {
   TEST_ASSERT_EQUAL_UINT32(1U, second.readCalls);
 }
 
+void test_bind_while_transfer_active_preserves_job_and_transport() {
+  FakeBus first;
+  FakeBus second;
+  MB85RC::MB85RC dev;
+  first.mem[0x10U] = 0xA6U;
+  second.mem[0x10U] = 0x5BU;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(first)).ok());
+
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.requestRead(0xA301U, 0x10U, &value, 1U).ok());
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(second)).is(Err::BUSY));
+  uint8_t oversized[MAX_TRANSPORT_RX_BYTES + 1U]{};
+  TEST_ASSERT_TRUE(dev.requestVerifiedWrite(0xA302U, 0U, oversized,
+                                            sizeof(oversized)).is(Err::BUSY));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(first));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(second));
+
+  TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA6U, value);
+  TEST_ASSERT_EQUAL_UINT32(1U, first.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(second));
+  TransferResult result;
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+  TEST_ASSERT_EQUAL_UINT32(0xA301U, result.requestId);
+}
+
 void test_device_id_uses_special_transport_and_timeout_detail() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -4130,6 +4237,96 @@ void test_device_id_uses_special_transport_and_timeout_detail() {
   TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
   TEST_ASSERT_EQUAL_INT32(0x4321, st.detail);
   TEST_ASSERT_FALSE(dev.lastError().msg == bus.specialError.msg);
+}
+
+void test_special_transport_short_completion_is_rejected() {
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = makeConfig(bus);
+    cfg.expectedVariant = DeviceVariant::AUTO;
+    TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+    bus.customSpecialResultOnCall = 1U;
+    bus.customSpecialResult = TransportResult::Ok(1U, 2U);
+
+    DeviceId id;
+    Status st = dev.readDeviceId(id);
+    TEST_ASSERT_TRUE(st.is(Err::I2C_ERROR));
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.specialCalls);
+    TEST_ASSERT_EQUAL_UINT32(0U, dev.capacityBytes());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                            static_cast<uint8_t>(dev.state()));
+
+    TEST_ASSERT_TRUE(dev.readDeviceId(id).ok());
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+                            static_cast<uint8_t>(id.variant));
+    TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC256V,
+                             dev.capacityBytes());
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+    TEST_ASSERT_TRUE(dev.setHighSpeedMode(true).ok());
+    bus.customSpecialResultOnCall = 1U;
+    bus.customSpecialResult = TransportResult::Ok(2U, 0U);
+    const uint8_t value = 0x5AU;
+    WriteCommit commit = WriteCommit::ACCEPTED;
+    Status st = dev.writeOnce(0x20U, &value, 1U, &commit);
+    TEST_ASSERT_TRUE(st.is(Err::I2C_ERROR));
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.specialCalls);
+    TEST_ASSERT_EQUAL_UINT32(0U, bus.writeCalls);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                            static_cast<uint8_t>(commit));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+    bus.customSpecialResultOnCall = 1U;
+    bus.customSpecialResult = TransportResult::Ok(1U, 0U);
+    Status st = dev.enterSleep();
+    TEST_ASSERT_TRUE(st.is(Err::I2C_ERROR));
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.specialCalls);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::UNKNOWN),
+                            static_cast<uint8_t>(dev.sleepState()));
+    uint8_t value = 0U;
+    TEST_ASSERT_TRUE(dev.readOnce(0U, &value, 1U).is(Err::BUSY));
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.specialCalls);
+    TEST_ASSERT_TRUE(dev.wake().ok());
+    TEST_ASSERT_EQUAL_UINT32(2U, bus.specialCalls);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::WAKING),
+                            static_cast<uint8_t>(dev.sleepState()));
+  }
+}
+
+void test_wake_transport_failure_marks_power_state_unknown_without_retry() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_EQUAL_UINT32(1U, bus.specialCalls);
+
+  bus.customSpecialResultOnCall = 2U;
+  bus.customSpecialResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -402,
+                             WriteCommit::NOT_APPLICABLE);
+  Status st = dev.wake();
+  TEST_ASSERT_TRUE(st.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT32(2U, bus.specialCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::UNKNOWN),
+                          static_cast<uint8_t>(dev.sleepState()));
+
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readOnce(0U, &value, 1U).is(Err::BUSY));
+  TEST_ASSERT_EQUAL_UINT32(2U, bus.specialCalls);
+
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  TEST_ASSERT_EQUAL_UINT32(3U, bus.specialCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::WAKING),
+                          static_cast<uint8_t>(dev.sleepState()));
 }
 
 void test_once_primitives_are_one_callback_for_1_and_124_bytes() {
@@ -4253,6 +4450,107 @@ void test_staged_budget_progress_and_terminal_result_are_retained() {
   TEST_ASSERT_TRUE(dev.takeTransferResult(progress).ok());
 }
 
+void test_staged_read_fill_verify_failures_preserve_terminal_provenance() {
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = make64TaConfig(bus);
+    cfg.maxRxBytes = 2U;
+    TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+    uint8_t data[5]{};
+    TEST_ASSERT_TRUE(dev.requestRead(0xA201U, 0x100U, data, sizeof(data)).ok());
+    TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).inProgress());
+    bus.customReadResultOnCall = 2U;
+    bus.customReadResult =
+        TransportResult::Error(TransportCode::BUS_ERROR, -610,
+                               WriteCommit::NOT_APPLICABLE);
+    TEST_ASSERT_TRUE(dev.pollTransfer(2U, 8U).is(Err::I2C_BUS));
+    TEST_ASSERT_EQUAL_UINT32(2U, bus.readCalls);
+
+    TransferResult result;
+    TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+    TEST_ASSERT_EQUAL_UINT32(0xA201U, result.requestId);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::READ),
+                            static_cast<uint8_t>(result.kind));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::FAILED),
+                            static_cast<uint8_t>(result.state));
+    TEST_ASSERT_TRUE(result.status.is(Err::I2C_BUS));
+    TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(result.bytesCompleted));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkOffset));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkLength));
+    TEST_ASSERT_TRUE(dev.takeTransferResult(result).is(Err::NO_RESULT));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = make64TaConfig(bus);
+    cfg.maxTxBytes = 4U;  // two address bytes plus two fill bytes
+    TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+    TEST_ASSERT_TRUE(dev.requestFill(0xA202U, 0x200U, 0x6DU, 5U).ok());
+    TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).inProgress());
+    bus.customWriteResultOnCall = 2U;
+    bus.customWriteResult =
+        TransportResult::Error(TransportCode::NACK_DATA, -611,
+                               WriteCommit::NOT_COMMITTED, 2U, 0U);
+    TEST_ASSERT_TRUE(dev.pollTransfer(2U, 8U).is(Err::I2C_NACK_DATA));
+    TEST_ASSERT_EQUAL_UINT32(2U, bus.writeCalls);
+
+    TransferResult result;
+    TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+    TEST_ASSERT_EQUAL_UINT32(0xA202U, result.requestId);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::FILL),
+                            static_cast<uint8_t>(result.kind));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::FAILED),
+                            static_cast<uint8_t>(result.state));
+    TEST_ASSERT_TRUE(result.status.is(Err::I2C_NACK_DATA));
+    TEST_ASSERT_TRUE(result.writeStatus.is(Err::I2C_NACK_DATA));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                            static_cast<uint8_t>(result.writeCommit));
+    TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(result.bytesCompleted));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkOffset));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkLength));
+  }
+
+  {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    Config cfg = make64TaConfig(bus);
+    cfg.maxRxBytes = 2U;
+    TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+    const uint8_t expected[5]{};
+    TEST_ASSERT_TRUE(
+        dev.requestVerify(0xA203U, 0x300U, expected, sizeof(expected)).ok());
+    TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).inProgress());
+    bus.customReadResultOnCall = 2U;
+    bus.customReadResult =
+        TransportResult::Error(TransportCode::TIMEOUT, -612,
+                               WriteCommit::NOT_APPLICABLE);
+    TEST_ASSERT_TRUE(dev.pollTransfer(2U, 8U).is(Err::I2C_TIMEOUT));
+    TEST_ASSERT_EQUAL_UINT32(2U, bus.readCalls);
+
+    TransferResult result;
+    TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+    TEST_ASSERT_EQUAL_UINT32(0xA203U, result.requestId);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::VERIFY),
+                            static_cast<uint8_t>(result.kind));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::FAILED),
+                            static_cast<uint8_t>(result.state));
+    TEST_ASSERT_TRUE(result.status.is(Err::I2C_TIMEOUT));
+    TEST_ASSERT_TRUE(result.verifyStatus.is(Err::I2C_TIMEOUT));
+    TEST_ASSERT_FALSE(result.match);
+    TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(result.bytesCompleted));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkOffset));
+    TEST_ASSERT_EQUAL_UINT32(2U,
+                             static_cast<uint32_t>(result.failedChunkLength));
+  }
+}
+
 void test_cancel_and_timeout_are_distinct_exactly_once_terminal_results() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -4356,6 +4654,71 @@ void test_verified_write_success_uses_different_polls_and_one_callback_budget() 
   TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkOffset));
   TEST_ASSERT_EQUAL_UINT32(sizeof(data),
                            static_cast<uint32_t>(result.failedChunkLength));
+}
+
+void test_verified_write_cancel_and_timeout_after_write_preserve_phase_evidence() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+  const uint8_t data[3] = {0x21U, 0x32U, 0x43U};
+
+  TEST_ASSERT_TRUE(dev.requestVerifiedWrite(8101U, 0x510U, data,
+                                            sizeof(data)).ok());
+  TransferResult result;
+  TEST_ASSERT_TRUE(dev.getTransferProgress(result).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::ACTIVE),
+                          static_cast<uint8_t>(result.state));
+  TEST_ASSERT_TRUE(result.status.inProgress());
+  TEST_ASSERT_TRUE(result.writeStatus.inProgress());
+  TEST_ASSERT_TRUE(result.verifyStatus.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+
+  TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).inProgress());
+  TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.readCalls);
+  TEST_ASSERT_TRUE(dev.getTransferProgress(result).ok());
+  TEST_ASSERT_TRUE(result.writeStatus.ok());
+  TEST_ASSERT_TRUE(result.verifyStatus.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.bytesCompleted));
+
+  const uint32_t trafficBeforeCancel = busTraffic(bus);
+  TEST_ASSERT_TRUE(dev.cancelTransfer(8101U).ok());
+  TEST_ASSERT_EQUAL_UINT32(trafficBeforeCancel, busTraffic(bus));
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::CANCELLED),
+                          static_cast<uint8_t>(result.state));
+  TEST_ASSERT_TRUE(result.status.is(Err::CANCELLED));
+  TEST_ASSERT_TRUE(result.writeStatus.ok());
+  TEST_ASSERT_TRUE(result.verifyStatus.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.bytesCompleted));
+
+  TEST_ASSERT_TRUE(dev.requestVerifiedWrite(8102U, 0x520U, data,
+                                            sizeof(data)).ok());
+  TEST_ASSERT_TRUE(dev.pollTransfer(2U, 1U).inProgress());
+  TEST_ASSERT_EQUAL_UINT32(2U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.readCalls);
+  const uint32_t trafficBeforeTimeout = busTraffic(bus);
+  TEST_ASSERT_TRUE(dev.timeoutTransfer(8102U).ok());
+  TEST_ASSERT_EQUAL_UINT32(trafficBeforeTimeout, busTraffic(bus));
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::TIMED_OUT),
+                          static_cast<uint8_t>(result.state));
+  TEST_ASSERT_TRUE(result.status.is(Err::TIMEOUT));
+  TEST_ASSERT_TRUE(result.writeStatus.ok());
+  TEST_ASSERT_TRUE(result.verifyStatus.inProgress());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.bytesCompleted));
 }
 
 void test_ambiguous_write_waits_zero_io_then_resumes_verify_only_no_replay() {
@@ -4558,16 +4921,16 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
   bus.customWriteResultOnCall = 1U;
   bus.customWriteResult =
       TransportResult::Error(TransportCode::TIMEOUT, -740,
-                             WriteCommit::NOT_COMMITTED, 1U, 0U);
+                             WriteCommit::NOT_COMMITTED, 2U, 0U);
   TEST_ASSERT_TRUE(dev.writeOnce(0x740U, data, sizeof(data), &commit)
                        .is(Err::I2C_TIMEOUT));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
                           static_cast<uint8_t>(commit));
 
   bus.customWriteResultOnCall = 2U;
   bus.customWriteResult =
       TransportResult::Error(TransportCode::TIMEOUT, -741,
-                             WriteCommit::ACCEPTED, 3U, 0U);
+                             WriteCommit::NOT_COMMITTED, 3U, 0U);
   TEST_ASSERT_TRUE(dev.writeOnce(0x740U, data, sizeof(data), &commit)
                        .is(Err::I2C_TIMEOUT));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
@@ -4576,15 +4939,24 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
   bus.customWriteResultOnCall = 3U;
   bus.customWriteResult =
       TransportResult::Error(TransportCode::TIMEOUT, -742,
+                             WriteCommit::ACCEPTED, 3U, 0U);
+  TEST_ASSERT_TRUE(dev.writeOnce(0x740U, data, sizeof(data), &commit)
+                       .is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(commit));
+
+  bus.customWriteResultOnCall = 4U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -743,
                              WriteCommit::ACCEPTED, 4U, 0U);
   TEST_ASSERT_TRUE(dev.writeOnce(0x740U, data, sizeof(data), &commit)
                        .is(Err::I2C_TIMEOUT));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
                           static_cast<uint8_t>(commit));
 
-  bus.customWriteResultOnCall = 4U;
+  bus.customWriteResultOnCall = 5U;
   bus.customWriteResult =
-      TransportResult::Error(TransportCode::TIMEOUT, -743,
+      TransportResult::Error(TransportCode::TIMEOUT, -744,
                              WriteCommit::ACCEPTED, 4U, 0U);
   WriteResult writeResult = dev.writeDetailed(0x750U, data, sizeof(data));
   TEST_ASSERT_TRUE(writeResult.status.is(Err::I2C_TIMEOUT));
@@ -4594,9 +4966,9 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
                           static_cast<uint8_t>(writeResult.writeCommit));
 
-  bus.customWriteResultOnCall = 5U;
+  bus.customWriteResultOnCall = 6U;
   bus.customWriteResult =
-      TransportResult::Error(TransportCode::TIMEOUT, -744,
+      TransportResult::Error(TransportCode::TIMEOUT, -745,
                              WriteCommit::ACCEPTED, 3U, 0U);
   WriteResult fillResult = dev.fillDetailed(0x760U, 0xA5U, 1U);
   TEST_ASSERT_TRUE(fillResult.status.is(Err::I2C_TIMEOUT));
@@ -4604,9 +4976,9 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
                            static_cast<uint32_t>(fillResult.bytesAccepted));
   TEST_ASSERT_TRUE(fillResult.complete);
 
-  bus.customWriteResultOnCall = 6U;
+  bus.customWriteResultOnCall = 7U;
   bus.customWriteResult =
-      TransportResult::Error(TransportCode::TIMEOUT, -745,
+      TransportResult::Error(TransportCode::TIMEOUT, -746,
                              WriteCommit::ACCEPTED, 4U, 0U);
   TEST_ASSERT_TRUE(dev.requestWrite(9601U, 0x770U, data, sizeof(data)).ok());
   TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).is(Err::I2C_TIMEOUT));
@@ -4617,9 +4989,9 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
                           static_cast<uint8_t>(transferResult.writeCommit));
 
-  bus.customWriteResultOnCall = 7U;
+  bus.customWriteResultOnCall = 8U;
   bus.customWriteResult =
-      TransportResult::Error(TransportCode::TIMEOUT, -746,
+      TransportResult::Error(TransportCode::TIMEOUT, -747,
                              WriteCommit::ACCEPTED, 4U, 0U);
   TEST_ASSERT_TRUE(
       dev.requestVerifiedWrite(9602U, 0x780U, data, sizeof(data)).ok());
@@ -4634,7 +5006,27 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
                           static_cast<uint8_t>(transferResult.writeCommit));
   TEST_ASSERT_TRUE(dev.cancelTransfer(9602U).ok());
   TEST_ASSERT_TRUE(dev.takeTransferResult(transferResult).ok());
-  TEST_ASSERT_EQUAL_UINT32(7U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(8U, bus.writeCalls);
+
+  bus.customWriteResultOnCall = 9U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::NACK_DATA, -748,
+                             WriteCommit::ACCEPTED, 4U, 0U);
+  TEST_ASSERT_TRUE(dev.writeOnce(0x790U, data, sizeof(data), &commit)
+                       .is(Err::I2C_NACK_DATA));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(commit));
+  TEST_ASSERT_EQUAL_UINT32(9U, bus.writeCalls);
+
+  bus.customWriteResultOnCall = 10U;
+  bus.customWriteResult =
+      TransportResult{static_cast<TransportCode>(0xFFU), -749,
+                      WriteCommit::ACCEPTED, 4U, 0U};
+  TEST_ASSERT_TRUE(dev.writeOnce(0x7A0U, data, sizeof(data), &commit)
+                       .is(Err::I2C_ERROR));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(commit));
+  TEST_ASSERT_EQUAL_UINT32(10U, bus.writeCalls);
 }
 
 void test_verified_write_rejects_unbound_with_zero_callbacks() {
@@ -4845,16 +5237,23 @@ int main() {
   // Passive owner and terminal transport hardening
   RUN_TEST(test_bind_is_zero_io_and_fixed_variant_is_immediately_usable);
   RUN_TEST(test_bind_rejects_small_and_clamps_large_transport_limits_without_io);
+  RUN_TEST(test_disabled_offline_threshold_failure_stays_degraded);
+  RUN_TEST(test_one_byte_address_variants_accept_two_byte_tx_capacity);
   RUN_TEST(test_begin_failure_retains_binding_for_later_identity_attempt);
   RUN_TEST(test_rebind_after_end_uses_new_nonowning_transport);
+  RUN_TEST(test_bind_while_transfer_active_preserves_job_and_transport);
   RUN_TEST(test_device_id_uses_special_transport_and_timeout_detail);
+  RUN_TEST(test_special_transport_short_completion_is_rejected);
+  RUN_TEST(test_wake_transport_failure_marks_power_state_unknown_without_retry);
   RUN_TEST(test_once_primitives_are_one_callback_for_1_and_124_bytes);
   RUN_TEST(test_once_preflight_errors_emit_zero_callbacks);
   RUN_TEST(test_short_and_invalid_terminal_results_rejected_without_replay);
   RUN_TEST(test_staged_budget_progress_and_terminal_result_are_retained);
+  RUN_TEST(test_staged_read_fill_verify_failures_preserve_terminal_provenance);
   RUN_TEST(test_cancel_and_timeout_are_distinct_exactly_once_terminal_results);
   RUN_TEST(test_request_identity_provenance_and_stale_result_prevention);
   RUN_TEST(test_verified_write_success_uses_different_polls_and_one_callback_budget);
+  RUN_TEST(test_verified_write_cancel_and_timeout_after_write_preserve_phase_evidence);
   RUN_TEST(test_ambiguous_write_waits_zero_io_then_resumes_verify_only_no_replay);
   RUN_TEST(test_ambiguous_write_mismatch_and_verify_failure_remain_truthful);
   RUN_TEST(test_waiting_verified_write_cancel_and_timeout_are_zero_io_distinct);

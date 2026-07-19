@@ -117,9 +117,10 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
   wire->beginTransmission(addr);
   size_t written = wire->write(data, len);
   if (written != len) {
+    // Bytes copied into Wire's software buffer have not reached the I2C bus.
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
-        MB85RC::WriteCommit::NOT_COMMITTED, written, 0U);
+        MB85RC::WriteCommit::NOT_COMMITTED, 0U, 0U);
   }
 
   uint8_t result = wire->endTransmission(true);  // Send STOP
@@ -164,9 +165,10 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     wire->beginTransmission(addr);
     size_t written = wire->write(tx, txLen);
     if (written != txLen) {
+      // No endTransmission() means no physical TX phase has started.
       return MB85RC::TransportResult::Error(
           MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
-          MB85RC::WriteCommit::NOT_APPLICABLE, written, 0U);
+          MB85RC::WriteCommit::NOT_APPLICABLE, 0U, 0U);
     }
 
     uint8_t result = wire->endTransmission(false);  // Repeated start

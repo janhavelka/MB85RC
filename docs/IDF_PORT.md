@@ -57,6 +57,11 @@ one completed physical attempt, exact TX/RX lengths, and conservative write
 commit knowledge; it performs no retry or bus recovery. The example calls
 zero-I/O `bind()` before scheduling the explicit identity read.
 
+ESP-IDF's transmit result does not identify which byte was NACKed. The example
+therefore maps an invalid-response/not-found result to a general transport I/O
+error and retains `WriteCommit::INDETERMINATE` once a memory write was issued;
+it never upgrades that outcome to `NOT_COMMITTED` or encourages a blind retry.
+
 This demonstrates the protocol path, but it does not prove real
 3.4 MHz operation or Sleep current on hardware until board validation is
 recorded.

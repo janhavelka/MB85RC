@@ -42,8 +42,15 @@ struct TransportResult {
   TransportCode code = TransportCode::IO_ERROR;
   int32_t detail = 0; ///< Transport-owned numeric detail; no borrowed text pointer.
   WriteCommit writeCommit = WriteCommit::INDETERMINATE;
-  size_t completedTxBytes = 0; ///< Bytes physically completed in the TX phase.
-  size_t completedRxBytes = 0; ///< Bytes physically completed in the RX phase.
+  /// Bytes completed in `txData`/the normal callback TX buffer. For memory
+  /// writes this count includes the one- or two-byte memory-address prefix;
+  /// `writeCommit` separately describes acceptance of the requested data.
+  /// Hidden special-operation envelope bytes (reserved Device-ID address,
+  /// High-speed master code, Sleep command framing) are not included.
+  size_t completedTxBytes = 0;
+  /// Bytes completed in `rxData`/the normal callback RX buffer. Hidden
+  /// special-operation envelope bytes are not included.
+  size_t completedRxBytes = 0;
 
   constexpr bool ok() const { return code == TransportCode::OK; }
 
@@ -71,7 +78,9 @@ struct TransportResult {
 /// @param user User context pointer passed through from Config
 /// `OK` means every requested byte was transferred and is normalized to
 /// `WriteCommit::ACCEPTED`. On failure, `writeCommit` must say whether none of
-/// the requested data was accepted or whether its effect is indeterminate.
+/// the requested memory data was accepted, all of it was accepted before a
+/// later controller/STOP error, or its effect is indeterminate. TX completion
+/// counts include memory-address prefix bytes when the core supplies them.
 /// The callback must not retry or recover the bus internally.
 /// @return Terminal result of this one physical transaction.
 using I2cWriteFn = TransportResult (*)(uint8_t addr, const uint8_t* data, size_t len,
@@ -98,11 +107,11 @@ using I2cWriteReadFn = TransportResult (*)(uint8_t addr, const uint8_t* txData, 
                                            uint8_t* rxData, size_t rxLen,
                                            uint32_t timeoutMs, void* user);
 
-/// @brief Optional bus-level operations that do not fit normal 7-bit callbacks.
+/// @brief Bus-level operations that do not fit normal 7-bit callbacks.
 ///
-/// These operations remain application-owned. The core requests them only when
-/// the configured/decoded variant documents the feature, or when AUTO needs
-/// identity selection, and the application supplied Config::i2cSpecial.
+/// These operations remain application-owned. The callback is optional for
+/// fixed variants that do not use these features, and required when AUTO needs
+/// identity selection. The core requests it only for a documented feature.
 enum class I2cSpecialOp : uint8_t {
   READ_DEVICE_ID = 0,        ///< Reserved F8h/F9h Device ID sequence; not a normal 7-bit transfer.
   HIGH_SPEED_WRITE = 1,      ///< HS master code, expected NACK, then a write transaction.
@@ -118,7 +127,9 @@ enum class I2cSpecialOp : uint8_t {
 /// complete HS-prefixed transaction succeeds. Generic I2C NACKs must remain
 /// failures outside that narrow prefix. For Sleep command address words, the
 /// R/W bit is don't-care; for MB85RC1MT, A16 is also don't-care in that command
-/// form.
+/// form. TransportResult completion counts cover only the `txData` and `rxData`
+/// buffers below. They exclude hidden reserved-address, High-speed master-code,
+/// Sleep-command, and wake-stimulus envelope bytes.
 struct I2cSpecialTransfer {
   uint8_t i2cAddress = cmd::DEFAULT_ADDRESS; ///< Active/encoded 7-bit device address.
   uint8_t hsMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT; ///< Raw 8-bit HS master code.
@@ -161,16 +172,22 @@ static constexpr size_t MAX_TRANSPORT_TX_BYTES = 128U;
 static constexpr size_t MAX_TRANSPORT_RX_BYTES = 128U;
 
 /// @brief Configuration for MB85RC driver.
+///
+/// `i2cUser`, `timeUser`, and the state they reference must remain valid until
+/// end() or until a later successful bind()/begin() replaces the configuration.
+/// A failed replacement leaves the previous binding intact. Callback
+/// invocations are synchronous and never outlive the public call that made
+/// them.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
   I2cWriteReadFn i2cWriteRead = nullptr; ///< I2C write-read function pointer
-  I2cSpecialFn i2cSpecial = nullptr;     ///< Optional Device-ID/HS/Sleep operation function
-  void* i2cUser = nullptr;               ///< User context for callbacks
+  I2cSpecialFn i2cSpecial = nullptr;     ///< Device-ID/HS/Sleep function; required for AUTO
+  void* i2cUser = nullptr;               ///< Context with the Config lifetime documented above
 
   // === Timing Hooks (optional) ===
   NowMsFn nowMs = nullptr;               ///< Optional monotonic ms source for health and Sleep wake gating
-  void* timeUser = nullptr;              ///< User context for timing hook
+  void* timeUser = nullptr;              ///< Timing context with the same required lifetime
 
   // === Device Settings ===
   /// Base 7-bit I2C address.
@@ -190,6 +207,7 @@ struct Config {
   ///
   /// The default is `AUTO` so Device-ID-capable parts select their active
   /// capacity from the device identifier instead of silently assuming 256V.
+  /// AUTO requires `i2cSpecial` because Device ID uses reserved-address framing.
   /// Production fixed-BOM integrations should set the exact part number so
   /// unexpected substitutions fail early. Select `MB85RC16V` explicitly because
   /// that variant has no Device ID command and cannot be discovered by `AUTO`.

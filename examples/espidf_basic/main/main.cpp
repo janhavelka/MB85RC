@@ -73,11 +73,10 @@ MB85RC::TransportResult mapI2c(
         MB85RC::WriteCommit::NOT_COMMITTED);
   }
   if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
+    // ESP-IDF does not report which transmitted byte was NACKed. Preserve an
+    // indeterminate memory-write effect instead of inventing address-NACK proof.
     return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::NACK_ADDRESS, err,
-        failureCommit == MB85RC::WriteCommit::INDETERMINATE
-            ? MB85RC::WriteCommit::NOT_COMMITTED
-            : failureCommit);
+        MB85RC::TransportCode::IO_ERROR, err, failureCommit);
   }
   if (err == ESP_FAIL) {
     return MB85RC::TransportResult::Error(

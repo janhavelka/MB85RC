@@ -136,8 +136,9 @@ void loop() {
 ```
 
 The default `expectedVariant` is `DeviceVariant::AUTO`. `bind()` is still
-bus-silent in that mode, but memory access remains unavailable until an explicit
-Device ID read selects a supported variant. Production fixed-BOM integrations
+bus-silent in that mode and requires `Config::i2cSpecial`; memory access remains
+unavailable until an explicit Device ID read selects a supported variant.
+Production fixed-BOM integrations
 should select the exact variant and validate its identity before publishing the
 device ready. `MB85RC16V` has no Device ID command and must be selected
 explicitly.
@@ -160,6 +161,10 @@ larger than the core's fixed 128-byte buffers are valid; active operations clamp
 to the smaller core limit. For a two-byte-address variant and
 `maxTxBytes = 126`, `maxWriteDataBytes()` is 124, matching a 124-byte owner
 payload plus its two address bytes.
+
+`Config::i2cUser`, `Config::timeUser`, and the state they reference must remain
+valid until `end()` or a later successful `bind()`/`begin()` replaces the
+configuration. A rejected replacement leaves the previous binding active.
 
 The example transport adapter maps Arduino `Wire` outcomes to terminal
 `TransportResult` values and keeps bus timeout ownership outside the library.
@@ -184,7 +189,12 @@ Callbacks return no queued/in-progress state, perform no hidden retry or bus
 recovery, and never recursively call the same driver. Failed-read buffers are
 unspecified. Failed writes report `WriteCommit::NOT_COMMITTED` only when the
 transport can prove no requested data was accepted; otherwise they report
-`INDETERMINATE`.
+`INDETERMINATE`. Completion counts cover the callback buffers, so memory-write
+TX counts include the one- or two-byte memory-address prefix. Special-operation
+counts cover only `I2cSpecialTransfer::txData`/`rxData`, not hidden Device-ID,
+High-speed, Sleep, or wake framing. A failed full `ACCEPTED` claim is valid only
+for a later timeout/bus/I/O error; a NACK contradicts full acceptance and is
+normalized conservatively.
 
 `MB85RC` instances are not internally thread-safe. Use one task, or serialize
 all public calls that can touch driver state or I2C. Public I2C APIs are not
@@ -245,8 +255,13 @@ pointers. One terminal result blocks replacement work until
 Whole-range synchronous helpers are intentionally allowed to use the same
 finite chunk formulas in one blocking call. Across the largest supported
 128 KiB part, their upper bound is therefore finite and derived from capacity,
-`W`, `R`, and `T`; `writeVerify()` uses at most `ceil(N/W) + ceil(N/R)`
-callbacks. Use these helpers only in startup, diagnostics, commissioning, or a
+`W`, `R`, and `T`. For length `N`, read/verify use at most `ceil(N/R)`
+callbacks, write uses `ceil(N/W)`, fill uses `ceil(N/min(W,64))`,
+`writeVerify()` uses `ceil(N/W) + ceil(N/R)`, and `fillVerify()` uses
+`ceil(N/min(W,64)) + ceil(N/R)`. The diagnostic
+`readCurrentAddress(buffer,N)` uses exactly `N` one-byte callbacks. Each bound
+therefore has worst-case transport occupancy equal to its callback count times
+`T`. Use these helpers only in startup, diagnostics, commissioning, or a
 maintenance window whose caller budget can tolerate that occupancy.
 
 Device ID is one explicit special callback. High-speed entry selection, Sleep
@@ -256,6 +271,10 @@ FRAM has no EEPROM-style program cycle, ACK polling, erase procedure, or
 automatic retry. Large destructive writes remain non-atomic, endurance remains
 the application's data-layout concern, and ambiguous effects must be verified
 before any repair write.
+
+Before an intentional maintenance rewrite, verify the desired bytes first and
+skip the write when they already match. This keeps rewrite policy explicit and
+avoids consuming endurance unnecessarily without adding hidden driver reads.
 
 ## High-Speed And Sleep Modes
 
@@ -280,7 +299,10 @@ device address word, repeated START, then `86h`. On success the driver marks the
 device asleep and invalidates current-address tracking. `wake()` sends the wake
 stimulus, then the application must wait `tREC >= 400 us` before access or
 `recover()`; the core records a conservative millisecond wake gate and inserts
-no hidden delay.
+no hidden delay. A timeout, bus/I/O error, or malformed completion during Sleep
+entry can leave the hardware effect ambiguous; the driver then reports
+`SleepState::UNKNOWN`, blocks normal I2C, and requires an explicit `wake()`.
+A failed wake remains `UNKNOWN`; a successful wake enters `WAKING` until tREC.
 
 ## Release 4.0.0 Highlights
 
@@ -349,7 +371,7 @@ construction plus named member assignment.
 
 ## Release 1.1.0 Highlights
 
-- Latched `OFFLINE` behavior keeps normal I2C operations off the bus until explicit `recover()` succeeds.
+- Historical 1.1.0 behavior latched `OFFLINE`; 4.0.0 supersedes that admission policy and keeps health observational.
 - Public MB85RC family variant metadata documents family address models.
 - Cross-library diagnostics have `driverState()` and a value-returning `getSettings()` overload.
 - Validation and recovery paths keep health counters aligned with transport failures and Device ID mismatches.
@@ -383,10 +405,10 @@ construction plus named member assignment.
 - `Status enterHighSpeedMode()` / `Status exitHighSpeedMode()` - enable or disable HS-prefixed memory/current-address transfers; the MCU bus clock remains application-owned.
 - `Status setHighSpeedMode(bool enabled)` - explicit form of the same HS transfer-mode toggle.
 - `bool supportsSleepMode() const` - true only for variants with local Sleep-mode datasheet support.
-- `SleepState sleepState() const` - `AWAKE`, `ASLEEP`, or `WAKING` separate from driver health.
+- `SleepState sleepState() const` - `AWAKE`, `ASLEEP`, `WAKING`, or ambiguity-safe `UNKNOWN`, separate from driver health.
 - `uint16_t sleepRecoveryUs() const` - active variant `tREC` contract in microseconds.
-- `Status enterSleep()` - send the Sleep entry sequence through `Config::i2cSpecial`.
-- `Status wake()` / `Status wakeFromSleep()` - send the wake stimulus and enter `WAKING`; call `tick()` after the recovery interval before normal access.
+- `Status enterSleep()` - send the Sleep entry sequence; ambiguous failure enters `UNKNOWN` and blocks normal access.
+- `Status wake()` / `Status wakeFromSleep()` - reconcile `ASLEEP`/`UNKNOWN`, send the wake stimulus, and enter `WAKING`; call `tick()` after the recovery interval before normal access.
 
 ### Memory Operations
 

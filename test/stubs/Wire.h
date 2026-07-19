@@ -14,11 +14,13 @@ public:
   
   void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; }
   size_t write(uint8_t data) { _txBuf[_txLen++] = data; return 1; }
-  size_t write(const uint8_t* data, size_t len) { 
-    for (size_t i = 0; i < len && _txLen < sizeof(_txBuf); i++) {
+  size_t write(const uint8_t* data, size_t len) {
+    size_t accepted = _writeReturnOverrideEnabled ? _writeReturnOverride : len;
+    if (accepted > len) accepted = len;
+    for (size_t i = 0; i < accepted && _txLen < sizeof(_txBuf); i++) {
       _txBuf[_txLen++] = data[i];
     }
-    return len;
+    return accepted;
   }
   uint8_t endTransmission(bool stop = true) { (void)stop; return _endTransmissionResult; }
   
@@ -56,6 +58,14 @@ public:
     _requestFromOverrideEnabled = false;
     _requestFromOverride = 0;
   }
+  void _setWriteReturnOverride(size_t len) {
+    _writeReturnOverrideEnabled = true;
+    _writeReturnOverride = len;
+  }
+  void _clearWriteReturnOverride() {
+    _writeReturnOverrideEnabled = false;
+    _writeReturnOverride = 0;
+  }
   
   uint8_t _addr = 0;
   uint8_t _txBuf[256] = {};
@@ -69,6 +79,8 @@ private:
   size_t _rxPos = 0;
   bool _requestFromOverrideEnabled = false;
   size_t _requestFromOverride = 0;
+  bool _writeReturnOverrideEnabled = false;
+  size_t _writeReturnOverride = 0;
 };
 
 extern TwoWire Wire;

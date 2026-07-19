@@ -78,6 +78,15 @@ REQUIRED_MODE_TOKENS = [
     "Hardware validation: not claimed by this diagnostic",
 ]
 
+REQUIRED_CONSERVATIVE_TRANSPORT_TOKENS = [
+    "ESP-IDF does not report which transmitted byte was NACKed",
+    "MB85RC::TransportCode::IO_ERROR, err, failureCommit",
+]
+
+FORBIDDEN_CONSERVATIVE_TRANSPORT_TOKENS = [
+    "failureCommit == MB85RC::WriteCommit::INDETERMINATE",
+]
+
 
 def fail(msg: str) -> None:
     print(f"IDF example contract FAILED: {msg}")
@@ -128,6 +137,12 @@ def main() -> int:
     for token in REQUIRED_MODE_TOKENS:
         if token not in text:
             fail(f"HS/Sleep native token missing: {token}")
+    for token in REQUIRED_CONSERVATIVE_TRANSPORT_TOKENS:
+        if token not in text:
+            fail(f"conservative transport token missing: {token}")
+    for token in FORBIDDEN_CONSERVATIVE_TRANSPORT_TOKENS:
+        if token in text:
+            fail(f"unsafe transport commit mapping present: {token}")
     for token in device_id_idf_tokens:
         if token not in text:
             fail(f"ESP-IDF Device ID manual-address token missing: {token}")

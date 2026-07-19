@@ -21,13 +21,15 @@ enum class DriverState : uint8_t {
 
 /// @brief Device Sleep power-state tracked by the driver.
 ///
-/// Sleep state is separate from DriverState health. `WAKING` means the wake
-/// stimulus has been sent and the caller must allow the datasheet recovery time
-/// before memory or Device ID access.
+/// Sleep state is separate from DriverState health. `UNKNOWN` means a failed
+/// Sleep command may have taken effect and normal I2C is blocked until wake()
+/// succeeds. `WAKING` means the wake stimulus has been sent and the caller must
+/// allow the datasheet recovery time before memory or Device ID access.
 enum class SleepState : uint8_t {
   AWAKE = 0,  ///< Normal access is allowed.
   ASLEEP = 1, ///< Sleep command accepted; call wake()/wakeFromSleep().
-  WAKING = 2  ///< Wake stimulus sent; wait tREC and call tick().
+  WAKING = 2, ///< Wake stimulus sent; wait tREC and call tick().
+  UNKNOWN = 3 ///< Sleep/wake effect is ambiguous; call wake() to reconcile.
 };
 
 /// @brief Device ID fields parsed from 3-byte read.
@@ -102,20 +104,21 @@ struct VerifyResult {
 
 /// @brief Detailed result for logical write/fill operations split into chunks.
 ///
-/// `bytesAccepted` counts bytes in chunks for which the injected I2C transport
-/// returned `Status::Ok()`. It is an accepted prefix, not proof that memory
-/// content changed; a hardware WP pin can allow ACK while preventing
-/// persistence. Use verifyDetailed(), writeVerify(), or fillVerify() when
-/// persistence matters.
+/// `bytesAccepted` counts the definitely transport-accepted prefix. Usually
+/// that is the prefix of chunks returning `Status::Ok()`, but it also includes
+/// a failed terminal result that proves its complete chunk was accepted. Thus
+/// `complete` can be true while `status` is non-OK. Acceptance is not proof that
+/// memory changed: hardware WP can allow ACK while preventing persistence. Use
+/// verifyDetailed(), writeVerify(), or fillVerify() when persistence matters.
 struct WriteResult {
   Status status = Status::Ok();   ///< Final transport/preflight status.
   uint32_t address = 0;           ///< Requested start address.
   size_t bytesRequested = 0;      ///< Bytes requested by caller.
-  size_t bytesAccepted = 0;       ///< Prefix accepted by successful I2C chunks.
+  size_t bytesAccepted = 0;       ///< Prefix definitely accepted by transport.
   size_t failedChunkOffset = 0;   ///< Offset of first failed chunk, or bytesRequested on success.
   size_t failedChunkLength = 0;   ///< Length of first failed chunk, or 0 on success.
   WriteCommit writeCommit = WriteCommit::NOT_APPLICABLE; ///< Failed/final chunk effect.
-  bool complete = false;          ///< True when all requested bytes were accepted.
+  bool complete = false;          ///< True when all bytes were accepted, even if status reports a later error.
 };
 
 /// @brief Detailed readback verification result.
@@ -456,6 +459,8 @@ public:
   /// FRAM writes are immediate - no write delay needed.
   /// Status::Ok() means the I2C write was accepted by the transport, not that
   /// persistence was verified when external WP may be asserted.
+  /// This compatibility convenience does not expose failed-write commit state;
+  /// use writeOnce() when that provenance is required.
   /// @param address Memory address within the active variant capacity.
   /// @param value Byte to write
   /// @return Status::Ok() on success
@@ -480,6 +485,9 @@ public:
   /// a later chunk can fail after earlier chunks were accepted by transport.
   /// A successful write means the bus transaction was accepted, not that data
   /// persistence was verified when external WP may be asserted.
+  /// This compatibility convenience returns only the first error. Use
+  /// writeDetailed() or requestWrite() when accepted-prefix and failed-chunk
+  /// provenance must remain observable.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Data buffer to write
   /// @param len Number of bytes to write
@@ -507,6 +515,9 @@ public:
   /// Large logical fills may be split into I2C chunks and are not atomic.
   /// Status::Ok() means all chunks were accepted by the transport, not that
   /// persistence was verified when external WP may be asserted.
+  /// This compatibility convenience returns only the first error. Use
+  /// fillDetailed() or requestFill() when accepted-prefix and failed-chunk
+  /// provenance must remain observable.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte
   /// @param len Number of bytes to fill
@@ -763,11 +774,13 @@ private:
   
   /// Raw I2C write (no health tracking)
   Status _i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len,
+                      size_t memoryAddressBytes,
                       WriteCommit* writeCommit = nullptr);
 
   /// Raw special I2C operation (no health tracking)
   Status _i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
-                        WriteCommit* writeCommit = nullptr);
+                        WriteCommit* writeCommit = nullptr,
+                        size_t memoryAddressBytes = 0U);
   
   /// Tracked I2C write-read to an explicit address (updates health)
   Status _i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
@@ -777,12 +790,9 @@ private:
   Status _i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
                               uint8_t* rxBuf, size_t rxLen);
   
-  /// Tracked I2C write (updates health)
-  Status _i2cWriteTracked(const uint8_t* buf, size_t len,
-                          WriteCommit* writeCommit = nullptr);
-
   /// Tracked I2C write to an explicit address (updates health)
   Status _i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len,
+                              size_t memoryAddressBytes,
                               WriteCommit* writeCommit = nullptr);
 
   /// Tracked special I2C operation (updates health)
@@ -792,7 +802,7 @@ private:
   /// Validate callback completion counts and map terminal transport codes.
   Status _mapTransportResult(const TransportResult& result,
                              size_t expectedTx, size_t expectedRx,
-                             bool memoryWrite,
+                             bool memoryWrite, size_t memoryAddressBytes,
                              WriteCommit* writeCommit = nullptr) const;
   
   // =========================================================================

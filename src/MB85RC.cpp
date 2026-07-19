@@ -169,6 +169,11 @@ Status MB85RC::bind(const Config& config) {
       variantForExpected(config.expectedVariant) == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
   }
+  if (config.expectedVariant == DeviceVariant::AUTO &&
+      config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG,
+                         "AUTO requires Device ID special transport");
+  }
   const cmd::VariantInfo* explicitVariant = variantForExpected(config.expectedVariant);
   if (explicitVariant != nullptr && !isSupportedRuntimeVariant(*explicitVariant)) {
     return Status::Error(Err::INVALID_CONFIG, "Expected variant not supported by driver");
@@ -218,7 +223,7 @@ Status MB85RC::bind(const Config& config) {
   _config = config;
   _variant = explicitVariant;
 
-  // Verify device identity via Device ID read (uses raw path — not yet initialized)
+  // Establish a passive binding. Identity and presence checks are explicit.
   _initialized = true;
   _driverState = DriverState::READY;
 
@@ -373,7 +378,7 @@ size_t MB85RC::maxReadDataBytes() const {
 
 Status MB85RC::setHighSpeedMode(bool enabled) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -398,7 +403,7 @@ Status MB85RC::setHighSpeedMode(bool enabled) {
 
 Status MB85RC::enterSleep() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -416,12 +421,19 @@ Status MB85RC::enterSleep() {
   if (_sleepState == SleepState::WAKING) {
     return busyStatus(BusyDetail::WAKING, "Sleep wake recovery pending");
   }
+  if (_sleepState == SleepState::UNKNOWN) {
+    return busyStatus(BusyDetail::SLEEP_STATE_UNKNOWN,
+                      "Sleep state unknown; call wake()");
+  }
 
   I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
   Status st = _i2cSpecialTracked(I2cSpecialOp::ENTER_SLEEP, transfer);
   _currentAddressKnown = false;
   _currentAddress = 0;
   if (!st.ok()) {
+    if (st.code != Err::I2C_NACK_ADDR && st.code != Err::I2C_NACK_DATA) {
+      _sleepState = SleepState::UNKNOWN;
+    }
     return st;
   }
 
@@ -432,7 +444,7 @@ Status MB85RC::enterSleep() {
 
 Status MB85RC::wake() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -456,6 +468,7 @@ Status MB85RC::wake() {
   _currentAddressKnown = false;
   _currentAddress = 0;
   if (!st.ok()) {
+    _sleepState = SleepState::UNKNOWN;
     return st;
   }
 
@@ -474,7 +487,7 @@ Status MB85RC::wake() {
 
 Status MB85RC::probe() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -509,7 +522,7 @@ Status MB85RC::probe() {
 
 Status MB85RC::recover() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -535,7 +548,7 @@ Status MB85RC::recover() {
 
 Status MB85RC::readByte(uint32_t address, uint8_t& value) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -568,7 +581,7 @@ Status MB85RC::readOnce(uint32_t address, uint8_t* buf, size_t len) {
 
 Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -607,7 +620,7 @@ Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
 
 Status MB85RC::writeByte(uint32_t address, uint8_t value) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -652,7 +665,7 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -716,7 +729,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -784,7 +797,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
 
 Status MB85RC::readDeviceId(DeviceId& id) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -832,7 +845,7 @@ Status MB85RC::readDeviceId(DeviceId& id) {
 
 Status MB85RC::readDeviceIdRaw(DeviceIdRaw& raw) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -857,7 +870,7 @@ Status MB85RC::readCurrentAddress(uint8_t& value) {
 
 Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -958,7 +971,7 @@ VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* exp
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -1150,14 +1163,6 @@ Status MB85RC::requestVerify(uint32_t requestId, uint32_t address,
 
 Status MB85RC::requestVerifiedWrite(uint32_t requestId, uint32_t address,
                                     const uint8_t* data, size_t length) {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
-  }
-  if (length == 0U || length > maxWriteDataBytes() ||
-      length > maxReadDataBytes()) {
-    return Status::Error(Err::INVALID_PARAM,
-                         "Verified write exceeds one-transaction limit");
-  }
   return _requestTransfer(requestId, TransferKind::VERIFIED_WRITE, address,
                           nullptr, data, 0, length);
 }
@@ -1297,10 +1302,11 @@ Status MB85RC::_i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen
   }
   const TransportResult result = _config.i2cWriteRead(
       addr, txBuf, txLen, rxBuf, rxLen, _config.i2cTimeoutMs, _config.i2cUser);
-  return _mapTransportResult(result, txLen, rxLen, false);
+  return _mapTransportResult(result, txLen, rxLen, false, 0U);
 }
 
 Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len,
+                            size_t memoryAddressBytes,
                             WriteCommit* writeCommit) {
   if (writeCommit != nullptr) {
     *writeCommit = WriteCommit::NOT_APPLICABLE;
@@ -1320,15 +1326,18 @@ Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len,
   }
   if (_highSpeedModeEnabled && addr >= cmd::MIN_ADDRESS && addr <= cmd::MAX_ADDRESS) {
     I2cSpecialTransfer transfer = _specialTransfer(addr, buf, len);
-    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE, transfer, writeCommit);
+    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE, transfer, writeCommit,
+                          memoryAddressBytes);
   }
   const TransportResult result = _config.i2cWrite(
       addr, buf, len, _config.i2cTimeoutMs, _config.i2cUser);
-  return _mapTransportResult(result, len, 0U, true, writeCommit);
+  return _mapTransportResult(result, len, 0U, true, memoryAddressBytes,
+                             writeCommit);
 }
 
 Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
-                              WriteCommit* writeCommit) {
+                              WriteCommit* writeCommit,
+                              size_t memoryAddressBytes) {
   if (_config.i2cSpecial == nullptr) {
     return Status::Error(Err::UNSUPPORTED, "Special I2C callback not set");
   }
@@ -1339,7 +1348,8 @@ Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfe
   const TransportResult result = _config.i2cSpecial(
       op, transfer, _config.i2cTimeoutMs, _config.i2cUser);
   return _mapTransportResult(result, transfer.txLen, transfer.rxLen,
-                             op == I2cSpecialOp::HIGH_SPEED_WRITE, writeCommit);
+                             op == I2cSpecialOp::HIGH_SPEED_WRITE,
+                             memoryAddressBytes, writeCommit);
 }
 
 Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
@@ -1366,12 +1376,8 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
   return _updateHealth(st);
 }
 
-Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len,
-                                WriteCommit* writeCommit) {
-  return _i2cWriteTrackedAddr(_config.i2cAddress, buf, len, writeCommit);
-}
-
 Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len,
+                                    size_t memoryAddressBytes,
                                     WriteCommit* writeCommit) {
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
@@ -1382,7 +1388,7 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
 
-  Status st = _i2cWriteRaw(addr, buf, len, writeCommit);
+  Status st = _i2cWriteRaw(addr, buf, len, memoryAddressBytes, writeCommit);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
@@ -1402,17 +1408,29 @@ Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op,
 
 Status MB85RC::_mapTransportResult(const TransportResult& result,
                                    size_t expectedTx, size_t expectedRx,
-                                   bool memoryWrite,
+                                   bool memoryWrite, size_t memoryAddressBytes,
                                    WriteCommit* writeCommit) const {
+  const bool knownFailureCode =
+      result.code == TransportCode::NACK_ADDRESS ||
+      result.code == TransportCode::NACK_DATA ||
+      result.code == TransportCode::TIMEOUT ||
+      result.code == TransportCode::BUS_ERROR ||
+      result.code == TransportCode::IO_ERROR;
+  const bool postAcceptanceFailure =
+      result.code == TransportCode::TIMEOUT ||
+      result.code == TransportCode::BUS_ERROR ||
+      result.code == TransportCode::IO_ERROR;
   if (writeCommit != nullptr) {
     if (!memoryWrite) {
       *writeCommit = WriteCommit::NOT_APPLICABLE;
     } else if (result.ok()) {
       *writeCommit = WriteCommit::ACCEPTED;
-    } else if (result.writeCommit == WriteCommit::NOT_COMMITTED &&
-               result.completedTxBytes == 0U) {
+    } else if (knownFailureCode &&
+               result.writeCommit == WriteCommit::NOT_COMMITTED &&
+               result.completedTxBytes <= memoryAddressBytes) {
       *writeCommit = WriteCommit::NOT_COMMITTED;
-    } else if (result.writeCommit == WriteCommit::ACCEPTED &&
+    } else if (postAcceptanceFailure &&
+               result.writeCommit == WriteCommit::ACCEPTED &&
                result.completedTxBytes == expectedTx) {
       *writeCommit = WriteCommit::ACCEPTED;
     } else if (result.writeCommit == WriteCommit::INDETERMINATE) {
@@ -1511,6 +1529,11 @@ Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
         kind == TransferKind::VERIFIED_WRITE) &&
        constData == nullptr)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid transfer buffer");
+  }
+  if (kind == TransferKind::VERIFIED_WRITE &&
+      (length > maxWriteDataBytes() || length > maxReadDataBytes())) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Verified write exceeds one-transaction limit");
   }
   if (!_fitsRange(address, length)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
@@ -1819,7 +1842,7 @@ Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len,
   }
   std::memcpy(&payload[enc.len], buf, len);
 
-  st = _i2cWriteTrackedAddr(enc.i2cAddress, payload, enc.len + len,
+  st = _i2cWriteTrackedAddr(enc.i2cAddress, payload, enc.len + len, enc.len,
                             writeCommit);
   if (st.ok()) {
     _setCurrentAddressAfterTransfer(address, len);
@@ -2016,6 +2039,10 @@ Status MB85RC::_ensureAwakeForI2c() {
   }
   if (_sleepState == SleepState::WAKING) {
     _advanceWakeState(_nowMs());
+  }
+  if (_sleepState == SleepState::UNKNOWN) {
+    return busyStatus(BusyDetail::SLEEP_STATE_UNKNOWN,
+                      "Sleep state unknown; call wake()");
   }
   if (_sleepState == SleepState::ASLEEP) {
     return busyStatus(BusyDetail::ASLEEP, "Device is asleep; call wake()");

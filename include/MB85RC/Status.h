@@ -41,7 +41,8 @@ enum class BusyDetail : int32_t {
   ALREADY_ASLEEP = 5,      ///< Sleep entry requested while already asleep.
   TRANSFER_CANCELLED = 6,  ///< Reserved legacy cancellation detail.
   RESULT_PENDING = 7,      ///< A terminal result must be consumed before another request.
-  REQUEST_ID_MISMATCH = 8  ///< Supplied request ID does not identify the active request.
+  REQUEST_ID_MISMATCH = 8, ///< Supplied request ID does not identify the active request.
+  SLEEP_STATE_UNKNOWN = 9  ///< Sleep entry/wake effect requires explicit wake reconciliation.
 };
 
 /// @brief Status structure returned by all fallible operations.

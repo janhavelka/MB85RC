@@ -43,6 +43,8 @@ No unreleased changes.
   owner-requested transport or claims bus-recovery authority.
 - Staged terminal progress and ambiguous write effects remain observable until
   explicitly consumed.
+- Ambiguous Sleep-entry and wake failures now enter `SleepState::UNKNOWN`, which
+  blocks normal access until an explicit successful wake is allowed to recover.
 - Examples use typed terminal callbacks, explicit Device ID special transport,
   passive binding, and retained staged-result consumption.
 - Public documentation distinguishes steady-state, multi-step runtime, and
@@ -61,6 +63,20 @@ No unreleased changes.
 - Preserved indeterminate failed-write evidence through cancel, timeout, and
   `end()`, and require a matching manufacturer before reporting an exact
   decoded variant.
+- Preserved proven `NOT_COMMITTED` results when only a one- or two-byte memory
+  address prefix completed, while normalizing contradictory NACK/full-acceptance
+  claims conservatively.
+- Rejected unusable `AUTO` bindings that omit the required Device-ID special
+  transport.
+- Kept ESP-IDF invalid-response writes indeterminate when the backend cannot
+  identify the NACKed byte, and corrected Wire buffer-short counts to report
+  zero physical TX progress before `endTransmission()`.
+
+### Removed
+
+- Breaking: removed redundant public `VariantInfo::highSpeedMode` and
+  `VariantInfo::sleepMode` fields; use `supportsHighSpeedMode` and
+  `supportsSleepMode` capability fields instead.
 
 ## [3.0.0] - 2026-06-25
 
