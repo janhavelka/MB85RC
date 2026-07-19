@@ -50,11 +50,20 @@ instead of writing memory.
 
 ## Transport Notes
 
-The native IDF transport implements normal write/write-read callbacks and the
-optional special callback for HS-prefixed transfers, Sleep entry, and Sleep wake
-stimulus. This demonstrates the protocol path, but it does not prove real
+The native IDF transport implements terminal `TransportResult` write/write-read
+callbacks and the special callback for the reserved Device ID sequence,
+HS-prefixed transfers, Sleep entry, and Sleep wake stimulus. Each callback maps
+one completed physical attempt, exact TX/RX lengths, and conservative write
+commit knowledge; it performs no retry or bus recovery. The example calls
+zero-I/O `bind()` before scheduling the explicit identity read.
+
+This demonstrates the protocol path, but it does not prove real
 3.4 MHz operation or Sleep current on hardware until board validation is
 recorded.
+
+The Device ID path uses the reserved `0x7C` controller sequence only inside
+`I2cSpecialOp::READ_DEVICE_ID`; normal scan/device transfers retain conventional
+7-bit policy.
 
 When `Config::nowMs` is null, core health timestamps remain `0`. The IDF
 example supplies `nowMs` from `esp_timer_get_time() / 1000`, intentionally

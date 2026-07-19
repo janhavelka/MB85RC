@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes.
 
+## [4.0.0] - 2026-07-19
+
+### Added
+
+- Zero-I/O `bind()` lifecycle for passive external-owner integrations.
+- Terminal transport types (`TransportResult`, `TransportCode`, and
+  `WriteCommit`) with exact completed lengths and conservative physical-effect
+  reporting.
+- Explicit `I2cSpecialOp::READ_DEVICE_ID` routing for the reserved F8/F9
+  protocol without weakening normal 7-bit address policy.
+- Pure `decodeDeviceId()` and exact decoded `DeviceId::variant` identity.
+- Configured TX/RX capabilities and active-variant
+  `maxWriteDataBytes()`/`maxReadDataBytes()` limits.
+- Exact one-transaction `readOnce()`, `writeOnce()`, and `verifyOnce()` APIs.
+- Request-qualified cooperative jobs whose results retain no caller-buffer
+  pointers, with exactly-once terminal consumption, cancellation,
+  owner-directed timeout, and write/readback reconciliation after an
+  indeterminate write.
+- Stable CI reference using PlatformIO 6.1.18 and pioarduino Espressif platform
+  54.03.20 while retaining broader ESP32-S2/S3 compatibility builds.
+
+### Changed
+
+- Breaking: injected normal and special I2C callbacks return terminal
+  `TransportResult` instead of general driver `Status`.
+- `begin()` now composes passive binding with one compatibility presence or
+  identity check and retains the valid binding after I/O/identity failure.
+- Invalid `bind()` requests leave an existing valid binding unchanged; declared
+  transport capabilities may exceed the fixed core buffers and are clamped by
+  each operation.
+- Driver health is observational only. DEGRADED/OFFLINE no longer suppresses
+  owner-requested transport or claims bus-recovery authority.
+- Staged terminal progress and ambiguous write effects remain observable until
+  explicitly consumed.
+- Examples use typed terminal callbacks, explicit Device ID special transport,
+  passive binding, and retained staged-result consumption.
+- Public documentation distinguishes steady-state, multi-step runtime, and
+  rare/maintenance operation bounds and scheduling suitability.
+
+### Fixed
+
+- Prevented a non-terminal callback status from replaying a staged write.
+- Corrected write-chunk terminology so configured TX capacity includes memory
+  address bytes and data capacity does not.
+- Removed callback-owned message pointers from durable diagnostic state.
+- Preserved partial progress and request provenance across failure,
+  cancellation, and timeout.
+- Counted a full `WriteCommit::ACCEPTED` error outcome in accepted-prefix
+  progress while retaining the transport error and failed-chunk evidence.
+- Preserved indeterminate failed-write evidence through cancel, timeout, and
+  `end()`, and require a matching manufacturer before reporting an exact
+  decoded variant.
+
 ## [3.0.0] - 2026-06-25
 
 ### Added

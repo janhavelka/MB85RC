@@ -10,7 +10,10 @@ Use this checklist before tagging and publishing a release.
 - Check package/release metadata consistency with
   `python tools/check_metadata_consistency.py`.
 - Run native tests: `python -m platformio test -e native`.
-- Run Arduino ESP32 builds: `python -m platformio run -e esp32s3dev` and
+- Run the stable Arduino reference build:
+  `python -m platformio run -e esp32s3dev_pinned` (PlatformIO 6.1.18 in CI,
+  pioarduino Espressif platform 54.03.20), then the broader compatibility
+  builds `python -m platformio run -e esp32s3dev` and
   `python -m platformio run -e esp32s2dev`.
 - Run guard scripts:
   `python tools/hil_runner.py --parser-self-test`,
@@ -24,9 +27,16 @@ Use this checklist before tagging and publishing a release.
   repository intentionally starts tracking it.
 - Review GitHub Actions results, including the configured pure ESP-IDF
   `esp32s2` and `esp32s3` jobs.
+- Confirm public docs and tests cover all operation classes: one-callback
+  steady state; request-qualified multi-step polling with owner deadline,
+  cancel/timeout, partial/indeterminate effects, and exactly-once result; and
+  explicitly budgeted rare/maintenance whole-range work.
 - Confirm `git status --short`, `git diff --stat`, and `git diff --check` show
   only intended release changes and no generated artifacts.
 - Tag the release only after PR CI is reviewed.
+- Treat the exact production BOM, immutable downstream dependency pin, target
+  firmware build, and hardware qualification as external release gates; never
+  infer them from native tests or generic-board examples.
 - Keep hardware-validation matrix rows pending unless actual board logs and
   evidence are recorded. Production HIL evidence must use strict mode, the
   required variant/product/capacity gates, zero FAIL, zero UNKNOWN, final READY
