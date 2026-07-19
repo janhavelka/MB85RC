@@ -2947,6 +2947,31 @@ void test_read_device_id_raw_failure_updates_health() {
                           static_cast<uint8_t>(dev.lastError().code));
 }
 
+void test_decode_device_id_reports_variant_only_for_exact_known_identity() {
+  DeviceIdRaw raw;
+  encodeDeviceId(cmd::PRODUCT_ID_MB85RC64TA, raw.bytes);
+
+  DeviceId id = MB85RC::MB85RC::decodeDeviceId(raw);
+  TEST_ASSERT_EQUAL_HEX16(cmd::MANUFACTURER_ID, id.manufacturerId);
+  TEST_ASSERT_EQUAL_HEX16(cmd::PRODUCT_ID_MB85RC64TA, id.productId);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC64TA),
+                          static_cast<uint8_t>(id.variant));
+
+  raw.bytes[0] = static_cast<uint8_t>(raw.bytes[0] | 0x10U);
+  id = MB85RC::MB85RC::decodeDeviceId(raw);
+  TEST_ASSERT_NOT_EQUAL(cmd::MANUFACTURER_ID, id.manufacturerId);
+  TEST_ASSERT_EQUAL_HEX16(cmd::PRODUCT_ID_MB85RC64TA, id.productId);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
+                          static_cast<uint8_t>(id.variant));
+
+  encodeDeviceId(0xABCU, raw.bytes);
+  id = MB85RC::MB85RC::decodeDeviceId(raw);
+  TEST_ASSERT_EQUAL_HEX16(cmd::MANUFACTURER_ID, id.manufacturerId);
+  TEST_ASSERT_EQUAL_HEX16(0xABCU, id.productId);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::AUTO),
+                          static_cast<uint8_t>(id.variant));
+}
+
 void test_variant_catalog_identifies_known_device_ids() {
   const cmd::VariantInfo* current = cmd::findVariantByProductId(cmd::PRODUCT_ID);
   TEST_ASSERT_NOT_NULL(current);
@@ -4313,6 +4338,24 @@ void test_verified_write_success_uses_different_polls_and_one_callback_budget() 
   TEST_ASSERT_TRUE(result.verifyStatus.ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::VERIFIED),
                           static_cast<uint8_t>(result.writeCommit));
+
+  bus.customReadResultOnCall = 2U;
+  bus.customReadResult =
+      TransportResult::Error(TransportCode::BUS_ERROR, -700,
+                             WriteCommit::NOT_APPLICABLE);
+  TEST_ASSERT_TRUE(dev.requestVerifiedWrite(8002U, 0x600U, data, sizeof(data)).ok());
+  TEST_ASSERT_TRUE(dev.pollTransfer(12U, 1U).inProgress());
+  Status st = dev.pollTransfer(13U, 1U);
+  TEST_ASSERT_TRUE(st.is(Err::I2C_BUS));
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+  TEST_ASSERT_EQUAL_UINT32(8002U, result.requestId);
+  TEST_ASSERT_TRUE(result.writeStatus.ok());
+  TEST_ASSERT_TRUE(result.verifyStatus.is(Err::I2C_BUS));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.failedChunkLength));
 }
 
 void test_ambiguous_write_waits_zero_io_then_resumes_verify_only_no_replay() {
@@ -4418,6 +4461,11 @@ void test_waiting_verified_write_cancel_and_timeout_are_zero_io_distinct() {
   TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::CANCELLED),
                           static_cast<uint8_t>(result.state));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(result.failedChunkLength));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_TRUE(result.writeStatus.is(Err::I2C_TIMEOUT));
 
   bus.customWriteResultOnCall = 2U;
   TEST_ASSERT_TRUE(dev.requestVerifiedWrite(9202U, 0x721U, &value, 1U).ok());
@@ -4429,6 +4477,11 @@ void test_waiting_verified_write_cancel_and_timeout_are_zero_io_distinct() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::TIMED_OUT),
                           static_cast<uint8_t>(result.state));
   TEST_ASSERT_TRUE(result.status.is(Err::TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(result.failedChunkLength));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_TRUE(result.writeStatus.is(Err::I2C_TIMEOUT));
 }
 
 void test_not_committed_verified_write_fails_terminally_without_reconciliation() {
@@ -4528,7 +4581,60 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
                        .is(Err::I2C_TIMEOUT));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
                           static_cast<uint8_t>(commit));
-  TEST_ASSERT_EQUAL_UINT32(3U, bus.writeCalls);
+
+  bus.customWriteResultOnCall = 4U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -743,
+                             WriteCommit::ACCEPTED, 4U, 0U);
+  WriteResult writeResult = dev.writeDetailed(0x750U, data, sizeof(data));
+  TEST_ASSERT_TRUE(writeResult.status.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(writeResult.bytesAccepted));
+  TEST_ASSERT_TRUE(writeResult.complete);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(writeResult.writeCommit));
+
+  bus.customWriteResultOnCall = 5U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -744,
+                             WriteCommit::ACCEPTED, 3U, 0U);
+  WriteResult fillResult = dev.fillDetailed(0x760U, 0xA5U, 1U);
+  TEST_ASSERT_TRUE(fillResult.status.is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT32(1U,
+                           static_cast<uint32_t>(fillResult.bytesAccepted));
+  TEST_ASSERT_TRUE(fillResult.complete);
+
+  bus.customWriteResultOnCall = 6U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -745,
+                             WriteCommit::ACCEPTED, 4U, 0U);
+  TEST_ASSERT_TRUE(dev.requestWrite(9601U, 0x770U, data, sizeof(data)).ok());
+  TEST_ASSERT_TRUE(dev.pollTransfer(1U, 1U).is(Err::I2C_TIMEOUT));
+  TransferResult transferResult;
+  TEST_ASSERT_TRUE(dev.takeTransferResult(transferResult).ok());
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(transferResult.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(transferResult.writeCommit));
+
+  bus.customWriteResultOnCall = 7U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -746,
+                             WriteCommit::ACCEPTED, 4U, 0U);
+  TEST_ASSERT_TRUE(
+      dev.requestVerifiedWrite(9602U, 0x780U, data, sizeof(data)).ok());
+  TEST_ASSERT_TRUE(dev.pollTransfer(2U, 1U).inProgress());
+  TEST_ASSERT_TRUE(dev.getTransferProgress(transferResult).ok());
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(TransferState::WAITING_FOR_RECONCILIATION),
+      static_cast<uint8_t>(transferResult.state));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(transferResult.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(transferResult.writeCommit));
+  TEST_ASSERT_TRUE(dev.cancelTransfer(9602U).ok());
+  TEST_ASSERT_TRUE(dev.takeTransferResult(transferResult).ok());
+  TEST_ASSERT_EQUAL_UINT32(7U, bus.writeCalls);
 }
 
 void test_verified_write_rejects_unbound_with_zero_callbacks() {
@@ -4676,6 +4782,7 @@ int main() {
   RUN_TEST(test_read_device_id);
   RUN_TEST(test_read_device_id_raw);
   RUN_TEST(test_read_device_id_raw_failure_updates_health);
+  RUN_TEST(test_decode_device_id_reports_variant_only_for_exact_known_identity);
   RUN_TEST(test_variant_catalog_identifies_known_device_ids);
   RUN_TEST(test_current_address_requires_prior_memory_access);
   RUN_TEST(test_current_address_tracks_memory_operations_and_settings);

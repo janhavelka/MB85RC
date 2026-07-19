@@ -169,9 +169,11 @@ struct TransferResult {
   size_t bytesCompleted = 0;          ///< Definite read/match/accepted prefix.
   size_t failedChunkOffset = 0;
   size_t failedChunkLength = 0;
+  /// Most recent/failed write chunk effect, or VERIFIED after reconciliation.
   WriteCommit writeCommit = WriteCommit::NOT_APPLICABLE;
-  Status writeStatus = Status::Ok();  ///< Original mapped write result.
-  Status verifyStatus = Status::Ok(); ///< Readback result, when attempted.
+  /// Most recent write result; original failed write for reconciliation.
+  Status writeStatus = Status::Ok();
+  Status verifyStatus = Status::Ok(); ///< Most recent readback result, when attempted.
   bool match = false;
   size_t mismatchOffset = 0;
   uint8_t expected = 0;
@@ -278,11 +280,12 @@ public:
   bool isOnline() const { return _initialized; }
 
   /// Get a copy of the active configuration.
-  /// @return Reference to the cached configuration supplied to begin().
+  /// @return Reference to the cached configuration supplied to bind()/begin().
   const Config& getConfig() const { return _config; }
 
-  /// Get the active runtime variant metadata, or nullptr before begin().
-  /// @return Active variant metadata, or nullptr when not selected.
+  /// Get active runtime variant metadata.
+  /// @return Fixed variant metadata after bind(), decoded metadata after AUTO
+  /// identity selection, or nullptr while AUTO remains unidentified/unbound.
   const cmd::VariantInfo* variantInfo() const { return _variant; }
 
   /// Get the active runtime variant name.
@@ -641,7 +644,8 @@ public:
   /// pollTransfer() to execute bounded random-read chunks. Each chunk carries
   /// its own memory address and counts as one instruction.
   /// @param address Starting memory address within the active variant capacity.
-  /// @param data Output buffer that must remain valid until completion/cancel.
+  /// @param data Output buffer that must remain valid until the request reaches
+  /// a terminal state; the completed prefix may change after each poll.
   /// @param length Number of bytes to read.
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
@@ -654,7 +658,8 @@ public:
   /// pollTransfer() to execute bounded sequential-write chunks. Successful
   /// chunks are not rolled back if a later chunk fails.
   /// @param address Starting memory address within the active variant capacity.
-  /// @param data Source buffer that must remain valid until completion/cancel.
+  /// @param data Source buffer that must remain valid and unmodified until the
+  /// request reaches a terminal state.
   /// @param length Number of bytes to write.
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
@@ -682,7 +687,8 @@ public:
   /// next chunk is attempted. A mismatch terminates the transfer with
   /// Err::VERIFY_MISMATCH and detail set to the first mismatching offset.
   /// @param address Starting memory address within the active variant capacity.
-  /// @param data Expected bytes that must remain valid until completion/cancel.
+  /// @param data Expected bytes that must remain valid and unmodified until the
+  /// request reaches a terminal state.
   /// @param length Number of bytes to verify.
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
@@ -696,8 +702,8 @@ public:
   /// transaction. A successful write advances to verify without replay. An
   /// indeterminate failed write enters WAITING_FOR_RECONCILIATION: polling then
   /// performs zero callbacks until resumeVerifiedWrite() authorizes readback.
-  /// `data` must remain valid until the terminal result is retained or the
-  /// operation is cancelled/timed out.
+  /// `data` must remain valid and unmodified until the request reaches a
+  /// terminal state, including throughout reconciliation waiting.
   Status requestVerifiedWrite(uint32_t requestId, uint32_t address,
                               const uint8_t* data, size_t length);
 

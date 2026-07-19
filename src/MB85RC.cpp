@@ -17,7 +17,10 @@ void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
   id.productId = static_cast<uint16_t>(((raw[1] & 0x0F) << 8) | raw[2]);
   id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
-  const cmd::VariantInfo* variant = cmd::findVariantByProductId(id.productId);
+  const cmd::VariantInfo* variant =
+      (id.manufacturerId == cmd::MANUFACTURER_ID)
+          ? cmd::findVariantByProductId(id.productId)
+          : nullptr;
   id.variant = (variant != nullptr) ? variant->variant : DeviceVariant::AUTO;
 }
 
@@ -245,8 +248,10 @@ void MB85RC::tick(uint32_t nowMs) {
 
 void MB85RC::end() {
   if (_transferBusy()) {
-    _transfer.result.failedChunkOffset = _transfer.offset;
-    _transfer.result.failedChunkLength = 0;
+    if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+      _transfer.result.failedChunkOffset = _transfer.offset;
+      _transfer.result.failedChunkLength = 0;
+    }
     _finishTransfer(TransferState::CANCELLED,
                     Status::Error(Err::CANCELLED,
                                   "Transfer cancelled by end"));
@@ -683,6 +688,10 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
       result.status = st;
       result.failedChunkOffset = offset;
       result.failedChunkLength = chunk;
+      if (commit == WriteCommit::ACCEPTED) {
+        result.bytesAccepted = offset + chunk;
+        result.complete = (result.bytesAccepted == result.bytesRequested);
+      }
       return result;
     }
     offset += chunk;
@@ -750,6 +759,10 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
       result.status = st;
       result.failedChunkOffset = offset;
       result.failedChunkLength = toWrite;
+      if (commit == WriteCommit::ACCEPTED) {
+        result.bytesAccepted = offset + toWrite;
+        result.complete = (result.bytesAccepted == result.bytesRequested);
+      }
       return result;
     }
     offset += toWrite;
@@ -1233,8 +1246,10 @@ Status MB85RC::cancelTransfer(uint32_t requestId) {
   if (_transfer.result.requestId != requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
-  _transfer.result.failedChunkOffset = _transfer.offset;
-  _transfer.result.failedChunkLength = 0;
+  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkLength = 0;
+  }
   _finishTransfer(TransferState::CANCELLED,
                   Status::Error(Err::CANCELLED, "Transfer cancelled"));
   return Status::Ok();
@@ -1247,8 +1262,10 @@ Status MB85RC::timeoutTransfer(uint32_t requestId) {
   if (_transfer.result.requestId != requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
-  _transfer.result.failedChunkOffset = _transfer.offset;
-  _transfer.result.failedChunkLength = 0;
+  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkLength = 0;
+  }
   _finishTransfer(TransferState::TIMED_OUT,
                   Status::Error(Err::TIMEOUT, "Transfer timed out"));
   return Status::Ok();
@@ -1578,6 +1595,9 @@ Status MB85RC::_pollTransferInstruction() {
         } else {
           _transfer.result.failedChunkOffset = _transfer.offset;
           _transfer.result.failedChunkLength = chunk;
+          if (commit == WriteCommit::ACCEPTED) {
+            _transfer.result.bytesCompleted = _transfer.offset + chunk;
+          }
         }
         return st;
       }
@@ -1602,6 +1622,9 @@ Status MB85RC::_pollTransferInstruction() {
         } else {
           _transfer.result.failedChunkOffset = _transfer.offset;
           _transfer.result.failedChunkLength = chunk;
+          if (commit == WriteCommit::ACCEPTED) {
+            _transfer.result.bytesCompleted = _transfer.offset + chunk;
+          }
         }
         return st;
       }
@@ -1659,6 +1682,9 @@ Status MB85RC::_pollTransferInstruction() {
         }
         _transfer.result.failedChunkOffset = 0;
         _transfer.result.failedChunkLength = _transfer.result.bytesRequested;
+        if (commit == WriteCommit::ACCEPTED) {
+          _transfer.result.bytesCompleted = _transfer.result.bytesRequested;
+        }
         if (commit == WriteCommit::INDETERMINATE ||
             commit == WriteCommit::ACCEPTED) {
           _transfer.result.state = TransferState::WAITING_FOR_RECONCILIATION;
@@ -1675,6 +1701,9 @@ Status MB85RC::_pollTransferInstruction() {
                                 _transfer.result.bytesRequested);
         _transfer.result.verifyStatus = st;
         if (!st.ok()) {
+          _transfer.result.failedChunkOffset = 0;
+          _transfer.result.failedChunkLength =
+              _transfer.result.bytesRequested;
           return st;
         }
         for (size_t i = 0; i < _transfer.result.bytesRequested; ++i) {
