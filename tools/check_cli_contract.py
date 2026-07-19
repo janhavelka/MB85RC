@@ -68,7 +68,8 @@ MANDATORY_COMMANDS = [
     "typed_demo",
 ]
 DEVICE_ID_IDF_TOKENS = [
-    "addr == 0x7CU",
+    "I2cSpecialOp::READ_DEVICE_ID",
+    "transmitReceiveWithManualAddress(*bus, 0x7CU",
     "transmitReceiveWithManualAddress",
     "I2C_DEVICE_ADDRESS_NOT_USED",
     "writeAddress = static_cast<uint8_t>(addr << 1)",
@@ -77,7 +78,7 @@ DEVICE_ID_IDF_TOKENS = [
     "i2c_master_execute_defined_operations",
 ]
 DEVICE_ID_CORE_TOKENS = [
-    "cmd::DEVICE_ID_ADDR_W >> 1",
+    "I2cSpecialOp::READ_DEVICE_ID",
     "_config.i2cAddress << 1",
 ]
 

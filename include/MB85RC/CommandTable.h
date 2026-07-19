@@ -6,6 +6,18 @@
 #include <cstdint>
 
 namespace MB85RC {
+
+/// @brief Runtime device variant selection and decoded identity.
+enum class DeviceVariant : uint8_t {
+  AUTO = 0,
+  MB85RC256V = 1,
+  MB85RC64TA = 2,
+  MB85RC04V = 3,
+  MB85RC16V = 4,
+  MB85RC512T = 5,
+  MB85RC1MT = 6
+};
+
 namespace cmd {
 
 // ============================================================================
@@ -62,6 +74,7 @@ enum class AddressModel : uint8_t {
 /// memory capacity, and encode runtime memory addresses. Entries with
 /// `hasDeviceId == false` cannot be selected by `DeviceVariant::AUTO`.
 struct VariantInfo {
+  DeviceVariant variant;          ///< Stable typed identity; never inferred from name text.
   const char* name;              ///< Marketing part number.
   uint32_t memoryBytes;          ///< Total memory capacity in bytes.
   uint16_t productId;            ///< 12-bit Device ID product field when available.
@@ -70,8 +83,6 @@ struct VariantInfo {
   AddressModel addressModel;     ///< Addressing model used by memory transactions.
   bool uses256vAccessFormat;     ///< True when the 256V two-byte linear access format applies.
   bool supportedByDriver;        ///< True when runtime memory operations are implemented/tested.
-  bool highSpeedMode;            ///< Legacy alias for supportsHighSpeedMode.
-  bool sleepMode;                ///< Legacy alias for supportsSleepMode.
   bool supportsHighSpeedMode;    ///< True when the variant documents I2C High-speed mode.
   bool supportsSleepMode;        ///< True when the variant documents Sleep mode.
   uint32_t maxNormalBusHz;       ///< Maximum normal-mode I2C bus rate from local datasheets.
@@ -86,23 +97,23 @@ struct VariantInfo {
 /// but the reusable driver still does not own the I2C controller clock. HS
 /// clock changes, bus locking, and wake-delay policy remain application-owned.
 static constexpr VariantInfo KNOWN_VARIANTS[] = {
-  {"MB85RC04V", 512UL, PRODUCT_ID_MB85RC04V, 0x00, true,
-   AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true, false, false,
+  {DeviceVariant::MB85RC04V, "MB85RC04V", 512UL, PRODUCT_ID_MB85RC04V, 0x00, true,
+   AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true,
    false, false, 1000000UL, 0UL, 0U},
-  {"MB85RC16V", 2048UL, 0x000, 0x00, false,
-   AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, true, false, false,
+  {DeviceVariant::MB85RC16V, "MB85RC16V", 2048UL, 0x000, 0x00, false,
+   AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, true,
    false, false, 1000000UL, 0UL, 0U},
-  {"MB85RC64TA", 8192UL, PRODUCT_ID_MB85RC64TA, 0x03, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true,
+  {DeviceVariant::MB85RC64TA, "MB85RC64TA", 8192UL, PRODUCT_ID_MB85RC64TA, 0x03, true,
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
    true, true, 1000000UL, 3400000UL, 400U},
-  {"MB85RC256V", 32768UL, PRODUCT_ID, DENSITY_CODE, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, false, false,
+  {DeviceVariant::MB85RC256V, "MB85RC256V", 32768UL, PRODUCT_ID, DENSITY_CODE, true,
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
    false, false, 1000000UL, 0UL, 0U},
-  {"MB85RC512T", 65536UL, PRODUCT_ID_MB85RC512T, 0x06, true,
-   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true, true, true,
+  {DeviceVariant::MB85RC512T, "MB85RC512T", 65536UL, PRODUCT_ID_MB85RC512T, 0x06, true,
+   AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
    true, true, 1000000UL, 3400000UL, 400U},
-  {"MB85RC1MT", 131072UL, PRODUCT_ID_MB85RC1MT, 0x07, true,
-   AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS, false, true, true, true,
+  {DeviceVariant::MB85RC1MT, "MB85RC1MT", 131072UL, PRODUCT_ID_MB85RC1MT, 0x07, true,
+   AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS, false, true,
    true, true, 1000000UL, 3400000UL, 400U},
 };
 
@@ -244,9 +255,11 @@ static constexpr uint8_t ADDRESS_BYTES = 2;
 // I2C Transaction Limits
 // ============================================================================
 
-/// Maximum bytes per single write transaction (address + data).
-/// Conservative limit to stay within typical I2C controller buffers.
-static constexpr size_t MAX_WRITE_CHUNK = 126;
+/// Maximum memory-data bytes in one write transaction. Address bytes are extra.
+static constexpr size_t MAX_WRITE_DATA_BYTES = 126;
+
+/// Legacy alias. This value has always been used as memory-data bytes.
+static constexpr size_t MAX_WRITE_CHUNK = MAX_WRITE_DATA_BYTES;
 
 /// Maximum bytes per single read transaction.
 static constexpr size_t MAX_READ_CHUNK = 128;

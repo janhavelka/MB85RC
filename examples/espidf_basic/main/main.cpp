@@ -57,23 +57,34 @@ int timeoutArg(uint32_t timeoutMs) {
   return timeoutMs > static_cast<uint32_t>(INT_MAX) ? INT_MAX : static_cast<int>(timeoutMs);
 }
 
-MB85RC::Status mapI2c(esp_err_t err, const char* msg) {
+MB85RC::TransportResult mapI2c(
+    esp_err_t err, size_t txBytes, size_t rxBytes,
+    MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_APPLICABLE) {
   if (err == ESP_OK) {
-    return MB85RC::Status::Ok();
+    return MB85RC::TransportResult::Ok(txBytes, rxBytes);
   }
   if (err == ESP_ERR_TIMEOUT) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_TIMEOUT, msg, err);
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::TIMEOUT, err, failureCommit);
   }
   if (err == ESP_ERR_INVALID_ARG) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, msg, err);
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, err,
+        MB85RC::WriteCommit::NOT_COMMITTED);
   }
   if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_NACK_ADDR, msg, err);
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::NACK_ADDRESS, err,
+        failureCommit == MB85RC::WriteCommit::INDETERMINATE
+            ? MB85RC::WriteCommit::NOT_COMMITTED
+            : failureCommit);
   }
   if (err == ESP_FAIL) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::BUS_ERROR, err, failureCommit);
   }
-  return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, msg, err);
+  return MB85RC::TransportResult::Error(
+      MB85RC::TransportCode::IO_ERROR, err, failureCommit);
 }
 
 const char* sleepStateName(MB85RC::SleepState state) {
@@ -322,35 +333,34 @@ esp_err_t wakeRaw(NativeBus& bus, const MB85RC::I2cSpecialTransfer& transfer,
   return executeRawOperations(bus, ops, op, timeoutMs);
 }
 
-MB85RC::Status i2cWrite(uint8_t addr, const uint8_t* data, size_t len,
-                        uint32_t timeoutMs, void* user) {
+MB85RC::TransportResult i2cWrite(uint8_t addr, const uint8_t* data,
+                                 size_t len, uint32_t timeoutMs, void* user) {
   NativeBus* bus = static_cast<NativeBus*>(user);
   if (bus == nullptr || bus->bus == nullptr) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, ESP_ERR_INVALID_STATE,
+        MB85RC::WriteCommit::NOT_COMMITTED);
   }
   i2c_master_dev_handle_t dev = nullptr;
   esp_err_t err = addDevice(*bus, addr, &dev);
+  MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_COMMITTED;
   if (err == ESP_OK) {
+    failureCommit = MB85RC::WriteCommit::INDETERMINATE;
     err = i2c_master_transmit(dev, data, len, timeoutArg(timeoutMs));
   }
   if (dev != nullptr) {
     (void)i2c_master_bus_rm_device(dev);
   }
-  return mapI2c(err, "I2C write failed");
+  return mapI2c(err, len, 0U, failureCommit);
 }
 
-MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
-                            uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
-                            void* user) {
+MB85RC::TransportResult i2cWriteRead(uint8_t addr, const uint8_t* tx,
+                                     size_t txLen, uint8_t* rx, size_t rxLen,
+                                     uint32_t timeoutMs, void* user) {
   NativeBus* bus = static_cast<NativeBus*>(user);
   if (bus == nullptr || bus->bus == nullptr) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
-  }
-
-  if (addr == 0x7CU && txLen > 0U && rxLen > 0U) {
-    esp_err_t manualErr = transmitReceiveWithManualAddress(*bus, addr, tx, txLen, rx, rxLen,
-                                                           timeoutMs);
-    return mapI2c(manualErr, "I2C manual-address write-read failed");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR,
+                                           ESP_ERR_INVALID_STATE);
   }
 
   i2c_master_dev_handle_t dev = nullptr;
@@ -365,40 +375,53 @@ MB85RC::Status i2cWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
   if (dev != nullptr) {
     (void)i2c_master_bus_rm_device(dev);
   }
-  return mapI2c(err, "I2C write-read failed");
+  return mapI2c(err, txLen, rxLen);
 }
 
-MB85RC::Status i2cSpecial(MB85RC::I2cSpecialOp op,
-                          const MB85RC::I2cSpecialTransfer& transfer,
-                          uint32_t timeoutMs, void* user) {
+MB85RC::TransportResult i2cSpecial(
+    MB85RC::I2cSpecialOp op, const MB85RC::I2cSpecialTransfer& transfer,
+    uint32_t timeoutMs, void* user) {
   NativeBus* bus = static_cast<NativeBus*>(user);
   if (bus == nullptr || bus->bus == nullptr) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "I2C bus not initialized");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR,
+                                           ESP_ERR_INVALID_STATE);
   }
 
   esp_err_t err = ESP_ERR_INVALID_ARG;
-  const char* context = "I2C special operation failed";
+  size_t completedTxBytes = transfer.txLen;
+  size_t completedRxBytes = transfer.rxLen;
+  MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_APPLICABLE;
   switch (op) {
+    case MB85RC::I2cSpecialOp::READ_DEVICE_ID: {
+      if (transfer.txData == nullptr || transfer.txLen != 1U ||
+          transfer.rxData == nullptr ||
+          transfer.rxLen != MB85RC::cmd::DEVICE_ID_LEN) {
+        break;
+      }
+      err = transmitReceiveWithManualAddress(*bus, 0x7CU,
+                                             transfer.txData, transfer.txLen,
+                                             transfer.rxData, transfer.rxLen,
+                                             timeoutMs);
+      break;
+    }
     case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE:
-      context = "I2C high-speed write failed";
+      failureCommit = MB85RC::WriteCommit::INDETERMINATE;
       err = highSpeedWrite(*bus, transfer, timeoutMs);
       break;
     case MB85RC::I2cSpecialOp::HIGH_SPEED_WRITE_READ:
-      context = "I2C high-speed write-read failed";
       err = highSpeedWriteRead(*bus, transfer, timeoutMs);
       break;
     case MB85RC::I2cSpecialOp::ENTER_SLEEP:
-      context = "I2C sleep entry failed";
       err = enterSleepRaw(*bus, transfer, timeoutMs);
       break;
     case MB85RC::I2cSpecialOp::WAKE_FROM_SLEEP:
-      context = "I2C sleep wake failed";
       err = wakeRaw(*bus, transfer, timeoutMs);
       break;
     default:
-      return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Unknown special op");
+      return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR,
+                                             ESP_ERR_INVALID_ARG);
   }
-  return mapI2c(err, context);
+  return mapI2c(err, completedTxBytes, completedRxBytes, failureCommit);
 }
 
 bool initBus() {
@@ -543,7 +566,13 @@ void beginDriver() {
   gCfg.nowMs = nowMs;
   gCfg.i2cTimeoutMs = I2C_TIMEOUT_MS;
   gCfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
-  printStatus("begin", gFram.begin(gCfg));
+  const MB85RC::Status bound = gFram.bind(gCfg);
+  printStatus("bind", bound);
+  if (!bound.ok()) {
+    return;
+  }
+  MB85RC::DeviceId identity;
+  printStatus("identity", gFram.readDeviceId(identity));
 }
 
 void printHelp() {
@@ -966,6 +995,12 @@ void runRwSuite() {
   printStatus("rw_suite restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
+MB85RC::Status takeStagedTerminal(MB85RC::Status terminal) {
+  MB85RC::TransferResult result;
+  const MB85RC::Status taken = gFram.takeTransferResult(result);
+  return taken.ok() ? result.status : terminal;
+}
+
 MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
   if (len == 0U || chunkSize == 0U) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer bounds");
@@ -978,9 +1013,11 @@ MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
     if (st.inProgress()) {
       continue;
     }
-    return st;
+    return takeStagedTerminal(st);
   }
-  gFram.cancelTransfer();
+  (void)gFram.cancelTransfer();
+  MB85RC::TransferResult cancelled;
+  (void)gFram.takeTransferResult(cancelled);
   return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
 }
 
@@ -1083,7 +1120,7 @@ void runXferDemo() {
           highBudget.msg);
     st = highBudget.inProgress()
              ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
-             : highBudget;
+             : takeStagedTerminal(highBudget);
     checkStatus("pollFill", st);
   }
 

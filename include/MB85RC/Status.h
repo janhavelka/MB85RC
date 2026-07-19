@@ -9,16 +9,16 @@ namespace MB85RC {
 /// @brief Error codes for all MB85RC operations.
 enum class Err : uint8_t {
   OK = 0,                    ///< Operation successful
-  NOT_INITIALIZED = 1,       ///< begin() not called
+  NOT_INITIALIZED = 1,       ///< No passive binding is active
   INVALID_CONFIG = 2,        ///< Invalid configuration parameter
   I2C_ERROR = 3,             ///< I2C communication failure
-  TIMEOUT = 4,               ///< Core-owned deadline timed out (not an I2C transport timeout)
+  TIMEOUT = 4,               ///< Owner-declared staged deadline expired (not an I2C transport timeout)
   INVALID_PARAM = 5,         ///< Invalid parameter value
   DEVICE_NOT_FOUND = 6,      ///< Reserved compatibility code; core preserves transport NACK/timeout details
   DEVICE_ID_MISMATCH = 7,    ///< Device ID does not match expected/active variant
   ADDRESS_OUT_OF_RANGE = 8,  ///< Memory address/range exceeds active variant capacity
   WRITE_PROTECTED = 9,       ///< Application/transport-reported protection; WP-high writes may still ACK
-  BUSY = 10,                 ///< Device is busy or driver is latched OFFLINE until recover()
+  BUSY = 10,                 ///< Another operation or device power transition is active
   IN_PROGRESS = 11,          ///< Operation queued / in progress
 
   // I2C transport details (append-only to preserve existing values)
@@ -27,17 +27,21 @@ enum class Err : uint8_t {
   I2C_TIMEOUT = 14,          ///< I2C transport transaction timeout
   I2C_BUS = 15,              ///< I2C bus error (arbitration lost, etc.)
   VERIFY_MISMATCH = 16,      ///< Readback verification did not match expected data
-  UNSUPPORTED = 17           ///< Operation is not supported by the active variant/transport
+  UNSUPPORTED = 17,          ///< Operation is not supported by the active variant/transport
+  NO_RESULT = 18,            ///< No retained terminal staged result is available
+  CANCELLED = 19             ///< Operation was explicitly cancelled by its owner
 };
 
 /// @brief Machine-readable Status::detail values used with Err::BUSY.
 enum class BusyDetail : int32_t {
-  OFFLINE = 1,             ///< Driver is OFFLINE until recover() succeeds.
+  OFFLINE = 1,             ///< Reserved legacy diagnostic value; OFFLINE no longer gates I/O.
   TRANSFER_ACTIVE = 2,     ///< A staged transfer is already active.
   ASLEEP = 3,              ///< Device is asleep; call wake().
   WAKING = 4,              ///< Sleep wake recovery deadline has not elapsed.
   ALREADY_ASLEEP = 5,      ///< Sleep entry requested while already asleep.
-  TRANSFER_CANCELLED = 6   ///< Active staged transfer was cancelled.
+  TRANSFER_CANCELLED = 6,  ///< Reserved legacy cancellation detail.
+  RESULT_PENDING = 7,      ///< A terminal result must be consumed before another request.
+  REQUEST_ID_MISMATCH = 8  ///< Supplied request ID does not identify the active request.
 };
 
 /// @brief Status structure returned by all fallible operations.

@@ -9,20 +9,54 @@
 
 namespace MB85RC {
 
-/// @brief Runtime device variant selection for Device ID validation and memory bounds.
+/// @brief Terminal result code returned by an injected transport callback.
 ///
-/// `AUTO` selects a supported runtime variant from Device ID readback. It can
-/// only identify variants that implement the Device ID command. `MB85RC16V`
-/// has no Device ID command in the local datasheet set, so applications must
-/// select it explicitly when using that part.
-enum class DeviceVariant : uint8_t {
-  AUTO = 0,       ///< Select a supported runtime variant from Device ID.
-  MB85RC256V = 1, ///< Expect MB85RC256V, 32 KiB, Product ID 0x510.
-  MB85RC64TA = 2, ///< Expect MB85RC64TA, 8 KiB, Product ID 0x358.
-  MB85RC04V = 3,  ///< Expect MB85RC04V, 512 bytes, Product ID 0x010.
-  MB85RC16V = 4,  ///< Expect MB85RC16V, 2 KiB, no Device ID command.
-  MB85RC512T = 5, ///< Expect MB85RC512T, 64 KiB, Product ID 0x658.
-  MB85RC1MT = 6   ///< Expect MB85RC1MT, 128 KiB, Product ID 0x758.
+/// A callback represents exactly one completed physical I2C transaction. It
+/// must return only after that transaction has reached a terminal outcome; the
+/// transport contract has no queued or in-progress result.
+enum class TransportCode : uint8_t {
+  OK = 0,          ///< The complete requested transaction was transferred.
+  NACK_ADDRESS,    ///< The addressed device did not acknowledge.
+  NACK_DATA,       ///< A transmitted data byte did not acknowledge.
+  TIMEOUT,         ///< The transport's per-transaction deadline expired.
+  BUS_ERROR,       ///< Arbitration, controller, or physical bus failure.
+  IO_ERROR         ///< Other terminal transport failure.
+};
+
+/// @brief Knowledge of a failed write transaction's physical effect.
+///
+/// This describes transport acceptance, not durable FRAM persistence: hardware
+/// WP can allow an acknowledged transaction while suppressing the memory
+/// change. `INDETERMINATE` prevents the core from replaying a possibly accepted
+/// write; callers must reconcile it by readback.
+enum class WriteCommit : uint8_t {
+  NOT_APPLICABLE = 0, ///< No memory-data write was requested.
+  NOT_COMMITTED,      ///< Transport proves that no requested data was accepted.
+  ACCEPTED,           ///< The full write transaction was acknowledged.
+  INDETERMINATE,      ///< Some or all requested data may have been accepted.
+  VERIFIED            ///< Requested content was later observed by readback.
+};
+
+/// @brief Typed, terminal outcome of one injected transport callback.
+struct TransportResult {
+  TransportCode code = TransportCode::IO_ERROR;
+  int32_t detail = 0; ///< Transport-owned numeric detail; no borrowed text pointer.
+  WriteCommit writeCommit = WriteCommit::INDETERMINATE;
+  size_t completedTxBytes = 0; ///< Bytes physically completed in the TX phase.
+  size_t completedRxBytes = 0; ///< Bytes physically completed in the RX phase.
+
+  constexpr bool ok() const { return code == TransportCode::OK; }
+
+  static constexpr TransportResult Ok(size_t txBytes, size_t rxBytes) {
+    return TransportResult{TransportCode::OK, 0, WriteCommit::NOT_APPLICABLE,
+                           txBytes, rxBytes};
+  }
+
+  static constexpr TransportResult Error(TransportCode error, int32_t detailCode = 0,
+                                         WriteCommit commit = WriteCommit::INDETERMINATE,
+                                         size_t txBytes = 0, size_t rxBytes = 0) {
+    return TransportResult{error, detailCode, commit, txBytes, rxBytes};
+  }
 };
 
 /// I2C write callback signature.
@@ -35,9 +69,13 @@ enum class DeviceVariant : uint8_t {
 /// @param len Number of bytes to write
 /// @param timeoutMs Maximum time to wait for completion
 /// @param user User context pointer passed through from Config
-/// @return Status indicating success or failure
-using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
-                              uint32_t timeoutMs, void* user);
+/// `OK` means every requested byte was transferred and is normalized to
+/// `WriteCommit::ACCEPTED`. On failure, `writeCommit` must say whether none of
+/// the requested data was accepted or whether its effect is indeterminate.
+/// The callback must not retry or recover the bus internally.
+/// @return Terminal result of this one physical transaction.
+using I2cWriteFn = TransportResult (*)(uint8_t addr, const uint8_t* data, size_t len,
+                                       uint32_t timeoutMs, void* user);
 
 /// I2C write-then-read callback signature.
 ///
@@ -51,21 +89,26 @@ using I2cWriteFn = Status (*)(uint8_t addr, const uint8_t* data, size_t len,
 /// @param rxLen Number of bytes to read
 /// @param timeoutMs Maximum time to wait for completion
 /// @param user User context pointer passed through from Config
-/// @return Status indicating success or failure
-using I2cWriteReadFn = Status (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
-                                  uint8_t* rxData, size_t rxLen, uint32_t timeoutMs,
-                                  void* user);
+/// `OK` means the complete TX and RX lengths were transferred. When both phases
+/// are present, the callback must issue a repeated START with no STOP between
+/// them. RX contents are unspecified after failure. The callback must not retry
+/// or recover the bus internally.
+/// @return Terminal result of this one physical transaction.
+using I2cWriteReadFn = TransportResult (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
+                                           uint8_t* rxData, size_t rxLen,
+                                           uint32_t timeoutMs, void* user);
 
 /// @brief Optional bus-level operations that do not fit normal 7-bit callbacks.
 ///
 /// These operations remain application-owned. The core requests them only when
-/// the active variant documents the feature and the application supplied
-/// Config::i2cSpecial.
+/// the configured/decoded variant documents the feature, or when AUTO needs
+/// identity selection, and the application supplied Config::i2cSpecial.
 enum class I2cSpecialOp : uint8_t {
-  HIGH_SPEED_WRITE = 0,      ///< HS master code, expected NACK, then a write transaction.
-  HIGH_SPEED_WRITE_READ = 1, ///< HS master code, expected NACK, then a write/read transaction.
-  ENTER_SLEEP = 2,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
-  WAKE_FROM_SLEEP = 3        ///< Device address wake stimulus; ACK may be indeterminate.
+  READ_DEVICE_ID = 0,        ///< Reserved F8h/F9h Device ID sequence; not a normal 7-bit transfer.
+  HIGH_SPEED_WRITE = 1,      ///< HS master code, expected NACK, then a write transaction.
+  HIGH_SPEED_WRITE_READ = 2, ///< HS master code, expected NACK, then a write/read transaction.
+  ENTER_SLEEP = 3,           ///< F8h + device address word + repeated-start 86h; R/W bit is don't-care.
+  WAKE_FROM_SLEEP = 4        ///< Device address wake stimulus; ACK may be indeterminate.
 };
 
 /// @brief Parameters for optional special I2C operations.
@@ -90,9 +133,12 @@ struct I2cSpecialTransfer {
 ///
 /// The callback owns raw controller details, expected-NACK handling for HS
 /// master code, bus clock selection, sleep wake timing policy, and locking.
+/// READ_DEVICE_ID must implement the reserved F8h/F9h sequence described by the
+/// datasheet; it must not route address 0x7C through a normal-device backend.
 /// It must not recursively call public methods on the same MB85RC instance.
-using I2cSpecialFn = Status (*)(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
-                                uint32_t timeoutMs, void* user);
+using I2cSpecialFn = TransportResult (*)(I2cSpecialOp op,
+                                         const I2cSpecialTransfer& transfer,
+                                         uint32_t timeoutMs, void* user);
 
 /// Millisecond timestamp callback.
 /// @param user User context pointer passed through from Config
@@ -108,12 +154,18 @@ static constexpr uint32_t DEFAULT_I2C_TIMEOUT_MS = 50UL;
 /// Maximum accepted per-transaction timeout passed to injected I2C callbacks.
 static constexpr uint32_t MAX_I2C_TIMEOUT_MS = 1000UL;
 
+/// Fixed core TX buffer capacity; larger transport capabilities are accepted.
+static constexpr size_t MAX_TRANSPORT_TX_BYTES = 128U;
+
+/// Fixed core RX buffer capacity; larger transport capabilities are accepted.
+static constexpr size_t MAX_TRANSPORT_RX_BYTES = 128U;
+
 /// @brief Configuration for MB85RC driver.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer
   I2cWriteReadFn i2cWriteRead = nullptr; ///< I2C write-read function pointer
-  I2cSpecialFn i2cSpecial = nullptr;     ///< Optional HS/Sleep special operation function
+  I2cSpecialFn i2cSpecial = nullptr;     ///< Optional Device-ID/HS/Sleep operation function
   void* i2cUser = nullptr;               ///< User context for callbacks
 
   // === Timing Hooks (optional) ===
@@ -130,6 +182,8 @@ struct Config {
   /// or `0x56`; `MB85RC16V` uses only `0x50`.
   uint8_t i2cAddress = 0x50;
   uint32_t i2cTimeoutMs = DEFAULT_I2C_TIMEOUT_MS; ///< Callback deadline in `MIN_I2C_TIMEOUT_MS..MAX_I2C_TIMEOUT_MS`
+  size_t maxTxBytes = MAX_TRANSPORT_TX_BYTES; ///< Maximum total TX bytes accepted by callbacks.
+  size_t maxRxBytes = MAX_TRANSPORT_RX_BYTES; ///< Maximum total RX bytes accepted by callbacks.
   uint8_t highSpeedMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT; ///< Raw `0000 1XXX` HS code
   uint16_t sleepRecoveryUs = cmd::SLEEP_RECOVERY_US; ///< Must be 0 or >= active variant tREC
   /// Expected runtime variant.
@@ -142,7 +196,9 @@ struct Config {
   DeviceVariant expectedVariant = DeviceVariant::AUTO;
 
   // === Health Tracking ===
-  uint8_t offlineThreshold = 5;          ///< Consecutive failures before OFFLINE state
+  /// Optional diagnostic threshold. Zero disables OFFLINE classification.
+  /// READY/DEGRADED/OFFLINE are observations only and never gate transport.
+  uint8_t offlineThreshold = 0;
 };
 
 }  // namespace MB85RC

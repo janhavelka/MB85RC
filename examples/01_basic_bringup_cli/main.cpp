@@ -1572,6 +1572,12 @@ size_t stagedDemoLength(uint32_t address) {
   return (remaining > XFER_DEMO_LEN) ? XFER_DEMO_LEN : static_cast<size_t>(remaining);
 }
 
+MB85RC::Status takeStagedTerminal(MB85RC::Status terminal) {
+  MB85RC::TransferResult result;
+  const MB85RC::Status taken = device.takeTransferResult(result);
+  return taken.ok() ? result.status : terminal;
+}
+
 MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
   if (len == 0U || chunkSize == 0U) {
     return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer poll bounds");
@@ -1584,9 +1590,11 @@ MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
     if (st.inProgress()) {
       continue;
     }
-    return st;
+    return takeStagedTerminal(st);
   }
-  device.cancelTransfer();
+  (void)device.cancelTransfer();
+  MB85RC::TransferResult cancelled;
+  (void)device.takeTransferResult(cancelled);
   return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
 }
 
@@ -1680,7 +1688,7 @@ void runTransferDemo() {
                         highBudget.msg);
     st = highBudget.inProgress()
              ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
-             : highBudget;
+             : takeStagedTerminal(highBudget);
     reportXferDemoStatus(result, "poll fill with one-instruction budget", st);
   }
 
@@ -2526,6 +2534,7 @@ void setup() {
   MB85RC::Config cfg;
   cfg.i2cWrite = transport::wireWrite;
   cfg.i2cWriteRead = transport::wireWriteRead;
+  cfg.i2cSpecial = transport::wireSpecial;
   cfg.i2cUser = &Wire;
   cfg.i2cAddress = 0x50;
   cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
@@ -2533,14 +2542,21 @@ void setup() {
   cfg.nowMs = exampleNowMs;
   cfg.offlineThreshold = 5;
 
-  MB85RC::Status st = device.begin(cfg);
+  MB85RC::Status st = device.bind(cfg);
   if (!st.ok()) {
-    LOGE("Failed to initialize device");
+    LOGE("Failed to bind device configuration");
     printStatus(st);
     return;
   }
 
-  LOGI("Device initialized successfully");
+  MB85RC::DeviceId identity;
+  st = device.readDeviceId(identity);
+  if (st.ok()) {
+    LOGI("Device binding and identity check succeeded");
+  } else {
+    LOGW("Device identity unavailable; passive binding retained for later owner attempts");
+    printStatus(st);
+  }
   printDriverHealth();
   printHelp();
   cli::printPrompt();
