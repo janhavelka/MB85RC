@@ -36,10 +36,9 @@ MB85RC256V production-readiness evidence.
   `0x00A`, product `0x510`, capacity 32768 bytes.
 
 The local report supports basic v3.0.0 operation on that fixture but is not an
-immutable release artifact. It does not exercise
-the later passive-core API, a 5 ms transfer timeout, TunnelMonitor-node shared-
-bus scheduling, write-timeout reconciliation, WP-high behavior, or controlled
-power loss.
+immutable release artifact. It does not exercise the later passive-core API, a
+5 ms transfer timeout, external-owner shared-bus scheduling, write-timeout
+reconciliation, WP-high behavior, or controlled power loss.
 
 ## Runs
 
@@ -79,9 +78,9 @@ failures and are not release qualification.
 - Native ESP-IDF hardware HIL and local `idf.py` builds; `idf.py` was not on
   PATH during the recorded validation.
 - Current passive-core revision HIL on either retained fixture.
-- TunnelMonitor-node hardware revision 2.0.0 with its exact populated FRAM
-  ordering code, 400 kHz shared bus, 124-byte data chunks, and 5 ms physical
-  transfer timeout.
+- Owner-integrated target hardware with its exact populated FRAM ordering code,
+  configured shared-bus speed, production chunk sizes, and physical transfer
+  timeout.
 - Fault-injection HIL: ambiguous-write reconciliation, wrong address/missing
   device, WP-high behavior, controlled power cycle/brownout, address-strap
   matrix, and shared-bus load.

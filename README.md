@@ -450,10 +450,10 @@ The whole-range helpers are blocking convenience APIs: `read()`, `write()`,
 `readCurrentAddress(uint8_t*, size_t)`. They may perform several backend I2C
 transactions before returning. That is appropriate for simple applications and
 diagnostics, but it does not preserve a scheduler model that advances one
-backend transfer per poll. TunnelMonitor-style integrations should treat these
-helpers as convenience-only and use the one-transaction or staged API for
-poll-budgeted FRAM work. Their maximum callback counts are the formulas in
-Bounded Operation Classes; no helper retries or waits for FRAM programming.
+backend transfer per poll. Poll-budgeted external-owner integrations should
+treat these helpers as convenience-only and use the one-transaction or staged
+API for poll-budgeted FRAM work. Their maximum callback counts are the formulas
+in Bounded Operation Classes; no helper retries or waits for FRAM programming.
 
 ### Poll-Chunked Transfer API
 
@@ -784,7 +784,6 @@ doxygen Doxyfile
 - `docs/DEVICE_REFERENCE.md` - maintained MB85RC-family behavior reference
 - `docs/IDF_PORT.md` - ESP-IDF portability and native example notes
 - `docs/RELEASE_CHECKLIST.md` - release verification checklist
-- `docs/TUNNELMONITOR_NODE_SUITABILITY_AUDIT.md` - current external-owner suitability dispositions and remaining gates
 - `docs/reference-pdfs/` - retained vendor datasheets and fact sheet
 - `Doxyfile` - indexes public headers, the ESP-IDF port notes, the Arduino CLI,
   and the native IDF entry point

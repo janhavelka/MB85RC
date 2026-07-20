@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Changed
+
+- Removed the obsolete product-specific suitability report and generalized
+  maintained integration guidance around the external I2C-owner contract.
 
 ## [4.0.0] - 2026-07-19
 
@@ -147,10 +150,10 @@ No unreleased changes.
   Device-ID-capable parts select active capacity from readback. Fixed-BOM
   production integrations should still set the exact expected variant.
 - Documented synchronous whole-range memory helpers as convenience APIs for
-  TunnelMonitor-style poll-budgeted integrations.
+  poll-budgeted external-owner integrations.
 - Documented timeout status policy and possible-write ambiguity after
   transport timeouts.
-- Documented the staged transfer API as the recommended TunnelMonitor
+- Documented the staged transfer API as the recommended external-owner
   integration path for preserving one or more bounded backend FRAM chunks per
   scheduler poll.
 - `Config::i2cTimeoutMs` is now bounded to
