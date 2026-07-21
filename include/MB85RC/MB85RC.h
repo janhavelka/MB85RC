@@ -45,7 +45,7 @@ struct DeviceId {
 
 /// @brief Raw 3-byte Device ID payload as returned on the bus.
 struct DeviceIdRaw {
-  uint8_t bytes[cmd::DEVICE_ID_LEN] = {};
+  uint8_t bytes[cmd::DEVICE_ID_LEN] = {}; ///< Raw bytes in bus order.
 };
 
 /// @brief Snapshot of current driver settings/state without performing I2C.
@@ -96,7 +96,7 @@ struct SettingsSnapshot {
 
 /// @brief Result of comparing expected bytes with FRAM contents.
 struct VerifyResult {
-  bool match = false;
+  bool match = false;               ///< True only when every requested byte matched.
   size_t mismatchOffset = 0;      ///< First mismatching byte offset from the requested start
   uint8_t expected = 0;           ///< Expected byte at mismatchOffset
   uint8_t actual = 0;             ///< Actual byte read at mismatchOffset
@@ -164,23 +164,25 @@ enum class TransferState : uint8_t {
 /// exactly once. A new request is rejected while a terminal result is pending.
 struct TransferResult {
   uint32_t requestId = 0;             ///< Caller-supplied nonzero correlation ID.
-  TransferKind kind = TransferKind::NONE;
-  TransferState state = TransferState::IDLE;
+  TransferKind kind = TransferKind::NONE; ///< Requested cooperative operation.
+  TransferState state = TransferState::IDLE; ///< Current or terminal lifecycle state.
   Status status = Status::Ok();       ///< Current or terminal operation status.
-  uint32_t address = 0;
-  size_t bytesRequested = 0;
+  uint32_t address = 0;               ///< Requested starting memory address.
+  size_t bytesRequested = 0;          ///< Total requested memory-data length.
   size_t bytesCompleted = 0;          ///< Definite read/match/accepted prefix.
-  size_t failedChunkOffset = 0;
-  size_t failedChunkLength = 0;
+  size_t failedChunkOffset = 0;       ///< Offset of the first failed chunk.
+  size_t failedChunkLength = 0;       ///< Length of the first failed chunk.
+
   /// Most recent/failed write chunk effect, or VERIFIED after reconciliation.
   WriteCommit writeCommit = WriteCommit::NOT_APPLICABLE;
+
   /// Most recent write result; original failed write for reconciliation.
   Status writeStatus = Status::Ok();
   Status verifyStatus = Status::Ok(); ///< Most recent readback result, when attempted.
-  bool match = false;
-  size_t mismatchOffset = 0;
-  uint8_t expected = 0;
-  uint8_t actual = 0;
+  bool match = false;                  ///< True after complete successful verification.
+  size_t mismatchOffset = 0;           ///< First mismatching offset when known.
+  uint8_t expected = 0;                ///< Expected byte at mismatchOffset.
+  uint8_t actual = 0;                  ///< Observed byte at mismatchOffset.
 };
 
 /// @brief MB85RC-family FRAM driver class.
@@ -277,9 +279,11 @@ public:
   DriverState driverState() const { return state(); }
 
   /// Check if bind()/begin() established a valid passive binding.
+  /// @return true while a valid configuration is bound.
   bool isInitialized() const { return _initialized; }
   
   /// Check if the driver is passively bound. Health never gates admission.
+  /// @return true while bound, including DEGRADED/OFFLINE diagnostic states.
   bool isOnline() const { return _initialized; }
 
   /// Get a copy of the active configuration.
@@ -421,9 +425,13 @@ public:
   uint32_t totalSuccess() const { return _totalSuccess; }
 
   /// Maximum memory-data bytes accepted by writeOnce() for the active variant.
+  /// @return Address-adjusted single-transaction write-data capacity, or 0
+  /// before an active variant is selected.
   size_t maxWriteDataBytes() const;
 
   /// Maximum memory-data bytes accepted by readOnce()/verifyOnce().
+  /// @return Single-transaction read-data capacity, or 0 before an active
+  /// variant is selected.
   size_t maxReadDataBytes() const;
   
   // =========================================================================
@@ -438,6 +446,11 @@ public:
 
   /// Perform exactly one addressed read transaction.
   /// `len` must fit the configured RX transport capability.
+  /// @param address Starting memory address within active capacity.
+  /// @param buf Output buffer that receives exactly len bytes on success.
+  /// @param len Number of bytes in `1..maxReadDataBytes()`.
+  /// @return Status::Ok() after one complete read callback, otherwise the
+  /// validation or terminal transport error.
   Status readOnce(uint32_t address, uint8_t* buf, size_t len);
 
   /// Read multiple bytes starting at the specified address.
@@ -471,6 +484,12 @@ public:
   /// On a transport failure `writeCommit` preserves whether no data was
   /// accepted or the physical effect is indeterminate. This method never
   /// retries. Transport acceptance does not prove persistence while WP is high.
+  /// @param address Starting memory address within active capacity.
+  /// @param buf Input data that remains valid for the synchronous call.
+  /// @param len Number of bytes in `1..maxWriteDataBytes()`.
+  /// @param writeCommit Optional output for transport-acceptance evidence.
+  /// @return Status::Ok() after one complete write callback, otherwise the
+  /// validation or terminal transport error.
   Status writeOnce(uint32_t address, const uint8_t* buf, size_t len,
                    WriteCommit* writeCommit = nullptr);
 
@@ -557,6 +576,8 @@ public:
   Status readDeviceIdRaw(DeviceIdRaw& raw);
 
   /// Pure decode of a raw three-byte Device ID; performs no I2C.
+  /// @param raw Raw three-byte Device ID payload.
+  /// @return Decoded identity and exact known variant, or AUTO when unknown.
   static DeviceId decodeDeviceId(const DeviceIdRaw& raw);
 
   /// Read the byte at the device's current internal address pointer.
@@ -596,6 +617,12 @@ public:
 
   /// Perform exactly one addressed read transaction and compare its bytes.
   /// Returns VERIFY_MISMATCH on the first mismatch.
+  /// @param address Starting memory address within active capacity.
+  /// @param expected Expected bytes.
+  /// @param len Number of bytes in `1..maxReadDataBytes()`.
+  /// @param out Match or first-mismatch details.
+  /// @return Status::Ok() when all bytes match, VERIFY_MISMATCH on a content
+  /// difference, otherwise the validation or terminal transport error.
   Status verifyOnce(uint32_t address, const uint8_t* expected, size_t len,
                     VerifyResult& out);
 
@@ -661,6 +688,12 @@ public:
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
   Status requestRead(uint32_t address, uint8_t* data, size_t length);
+  /// Request-qualified overload for external-owner correlation.
+  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param address Starting memory address within active capacity.
+  /// @param data Output buffer with the lifetime documented above.
+  /// @param length Number of bytes to read.
+  /// @return Status::Ok() when queued, otherwise a preflight error.
   Status requestRead(uint32_t requestId, uint32_t address, uint8_t* data, size_t length);
 
   /// Queue a staged explicit-address write transfer.
@@ -675,6 +708,12 @@ public:
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
   Status requestWrite(uint32_t address, const uint8_t* data, size_t length);
+  /// Request-qualified overload for external-owner correlation.
+  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param address Starting memory address within active capacity.
+  /// @param data Input buffer with the lifetime documented above.
+  /// @param length Number of bytes to write.
+  /// @return Status::Ok() when queued, otherwise a preflight error.
   Status requestWrite(uint32_t requestId, uint32_t address,
                       const uint8_t* data, size_t length);
 
@@ -690,6 +729,12 @@ public:
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
   Status requestFill(uint32_t address, uint8_t value, size_t length);
+  /// Request-qualified overload for external-owner correlation.
+  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param address Starting memory address within active capacity.
+  /// @param value Fill byte.
+  /// @param length Number of bytes to fill.
+  /// @return Status::Ok() when queued, otherwise a preflight error.
   Status requestFill(uint32_t requestId, uint32_t address, uint8_t value, size_t length);
 
   /// Queue a staged explicit-address readback verification transfer.
@@ -704,6 +749,12 @@ public:
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
   Status requestVerify(uint32_t address, const uint8_t* data, size_t length);
+  /// Request-qualified overload for external-owner correlation.
+  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param address Starting memory address within active capacity.
+  /// @param data Expected bytes with the lifetime documented above.
+  /// @param length Number of bytes to verify.
+  /// @return Status::Ok() when queued, otherwise a preflight error.
   Status requestVerify(uint32_t requestId, uint32_t address,
                        const uint8_t* data, size_t length);
 
@@ -715,6 +766,11 @@ public:
   /// performs zero callbacks until resumeVerifiedWrite() authorizes readback.
   /// `data` must remain valid and unmodified until the request reaches a
   /// terminal state, including throughout reconciliation waiting.
+  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param address Starting memory address within active capacity.
+  /// @param data Input/expected bytes retained through terminal state.
+  /// @param length Length that must fit one write and one read transaction.
+  /// @return Status::Ok() when queued, otherwise a preflight error.
   Status requestVerifiedWrite(uint32_t requestId, uint32_t address,
                               const uint8_t* data, size_t length);
 
@@ -738,12 +794,18 @@ public:
   Status getTransferStatus() const { return _transfer.result.status; }
 
   /// Copy active progress or retained terminal result without retaining caller buffer pointers.
+  /// @param out Output snapshot of the active or retained result.
+  /// @return Status::Ok() when progress/result exists, otherwise NO_RESULT.
   Status getTransferProgress(TransferResult& out) const;
 
   /// Consume the retained terminal result exactly once.
+  /// @param out Output terminal result.
+  /// @return Status::Ok() when consumed, otherwise NO_RESULT.
   Status takeTransferResult(TransferResult& out);
 
   /// Authorize verify-only reconciliation after an indeterminate write.
+  /// @param requestId Exact active request correlation ID.
+  /// @return Status::Ok() when verify-only readback is resumed.
   Status resumeVerifiedWrite(uint32_t requestId);
 
   /// Cancel the active staged transfer, if any.
@@ -751,10 +813,19 @@ public:
   /// Cancellation emits no I2C traffic. Already accepted write/fill chunks are
   /// not rolled back; current-address tracking remains whatever the last
   /// successful chunk established.
+  /// @return Status::Ok() when the active request is cancelled, otherwise
+  /// NO_RESULT.
   Status cancelTransfer();
+  /// Cancel an active request only when its identity matches.
+  /// @param requestId Exact active request correlation ID.
+  /// @return Status::Ok() when cancelled, BUSY on identity mismatch, or
+  /// NO_RESULT when no request is active.
   Status cancelTransfer(uint32_t requestId);
 
   /// Terminalize the active request as timed out without performing I2C.
+  /// @param requestId Exact active request correlation ID.
+  /// @return Status::Ok() when timed out, BUSY on identity mismatch, or
+  /// NO_RESULT when no request is active.
   Status timeoutTransfer(uint32_t requestId);
 
   /// Get the legacy MB85RC256V memory size in bytes.

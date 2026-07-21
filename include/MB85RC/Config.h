@@ -39,26 +39,40 @@ enum class WriteCommit : uint8_t {
 
 /// @brief Typed, terminal outcome of one injected transport callback.
 struct TransportResult {
-  TransportCode code = TransportCode::IO_ERROR;
+  TransportCode code = TransportCode::IO_ERROR; ///< Terminal transport classification.
   int32_t detail = 0; ///< Transport-owned numeric detail; no borrowed text pointer.
-  WriteCommit writeCommit = WriteCommit::INDETERMINATE;
+  WriteCommit writeCommit = WriteCommit::INDETERMINATE; ///< Memory-write effect knowledge.
+
   /// Bytes completed in `txData`/the normal callback TX buffer. For memory
   /// writes this count includes the one- or two-byte memory-address prefix;
   /// `writeCommit` separately describes acceptance of the requested data.
   /// Hidden special-operation envelope bytes (reserved Device-ID address,
   /// High-speed master code, Sleep command framing) are not included.
   size_t completedTxBytes = 0;
+
   /// Bytes completed in `rxData`/the normal callback RX buffer. Hidden
   /// special-operation envelope bytes are not included.
   size_t completedRxBytes = 0;
 
+  /// @return true only when the complete callback transaction succeeded.
   constexpr bool ok() const { return code == TransportCode::OK; }
 
+  /// Construct a successful terminal result.
+  /// @param txBytes Complete callback-buffer TX byte count.
+  /// @param rxBytes Complete callback-buffer RX byte count.
+  /// @return Successful terminal result with no write-effect claim.
   static constexpr TransportResult Ok(size_t txBytes, size_t rxBytes) {
     return TransportResult{TransportCode::OK, 0, WriteCommit::NOT_APPLICABLE,
                            txBytes, rxBytes};
   }
 
+  /// Construct a failed terminal result.
+  /// @param error Terminal transport failure classification.
+  /// @param detailCode Transport-owned numeric diagnostic detail.
+  /// @param commit Memory-write effect knowledge.
+  /// @param txBytes Callback-buffer TX bytes completed before failure.
+  /// @param rxBytes Callback-buffer RX bytes completed before failure.
+  /// @return Failed terminal result retaining the supplied evidence.
   static constexpr TransportResult Error(TransportCode error, int32_t detailCode = 0,
                                          WriteCommit commit = WriteCommit::INDETERMINATE,
                                          size_t txBytes = 0, size_t rxBytes = 0) {
@@ -203,6 +217,7 @@ struct Config {
   size_t maxRxBytes = MAX_TRANSPORT_RX_BYTES; ///< Maximum total RX bytes accepted by callbacks.
   uint8_t highSpeedMasterCode = cmd::HIGH_SPEED_MASTER_CODE_DEFAULT; ///< Raw `0000 1XXX` HS code
   uint16_t sleepRecoveryUs = cmd::SLEEP_RECOVERY_US; ///< Must be 0 or >= active variant tREC
+
   /// Expected runtime variant.
   ///
   /// The default is `AUTO` so Device-ID-capable parts select their active

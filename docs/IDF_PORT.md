@@ -4,6 +4,14 @@ The core library is framework-neutral. Public headers and `src/` do not include
 Arduino or ESP-IDF framework headers, and all hardware access is supplied
 through `Config` callbacks.
 
+`idf_component.yml` declares ESP-IDF 6.0.1 or newer and the `esp32s2` and
+`esp32s3` targets. Build the native example with an initialized ESP-IDF shell:
+
+```bash
+idf.py -C examples/espidf_basic set-target esp32s3 build
+idf.py -C examples/espidf_basic set-target esp32s2 build
+```
+
 The native ESP-IDF example in `examples/espidf_basic` owns only example-local
 resources:
 
@@ -69,6 +77,20 @@ recorded.
 The Device ID path uses the reserved `0x7C` controller sequence only inside
 `I2cSpecialOp::READ_DEVICE_ID`; normal scan/device transfers retain conventional
 7-bit policy.
+
+For a production adapter:
+
+- keep the bus handle, locking, controller timeout, retry, and recovery policy
+  outside the MB85RC instance;
+- return only terminal results and enforce the supplied per-transaction timeout;
+- report exact callback-buffer TX/RX progress, excluding hidden special framing;
+- preserve `WriteCommit::INDETERMINATE` unless the backend can prove that no
+  requested memory data was accepted;
+- implement Device ID, High-speed, Sleep, and wake framing only through
+  `Config::i2cSpecial`, without admitting reserved `0x7C` as a normal device;
+- keep callback contexts alive through `end()` or successful rebinding; and
+- serialize all calls touching the same instance because the driver is not
+  internally thread-safe or ISR-safe.
 
 When `Config::nowMs` is null, core health timestamps remain `0`. The IDF
 example supplies `nowMs` from `esp_timer_get_time() / 1000`, intentionally

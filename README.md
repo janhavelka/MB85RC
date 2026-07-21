@@ -53,7 +53,9 @@ Copy `include/MB85RC/` and `src/` into your project.
 This repository includes pure ESP-IDF component metadata and CI build coverage.
 Add the repo as an extra component or dependency, then include
 `MB85RC/MB85RC.h` and provide `Config::i2cWrite` / `Config::i2cWriteRead`
-callbacks from your project-owned I2C master bus. Local ESP-IDF build
+callbacks from your project-owned I2C master bus. Provide `Config::i2cSpecial`
+when using `DeviceVariant::AUTO`, Device ID, High-speed, or Sleep operations.
+The component metadata requires ESP-IDF 6.0.1 or newer. Local ESP-IDF build
 validation requires `idf.py` on PATH.
 
 The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
@@ -73,18 +75,26 @@ diagnostics, typed demo, random benchmark, self-test, and stress diagnostics.
 Mutating ESP-IDF CLI commands use explicit `!` confirmation forms such as
 `write!`, `fill!`, `rw_suite!`, and `typed_demo!`.
 
-The ESP-IDF CLI owns its I2C bus and uses blocking console input. That console input can block the example loop before `tick()` runs; this is acceptable for
-the current diagnostic CLI because `tick()` does no async I2C or write-delay
-work. It only advances Sleep `WAKING` to `AWAKE` state from caller-supplied
-time after a wake operation.
+The ESP-IDF CLI owns its I2C bus; console input can block the example loop
+before `tick()` runs. This is acceptable for the current diagnostic CLI because
+`tick()` does no asynchronous I2C or write-delay work. It only advances Sleep
+`WAKING` to `AWAKE` from caller-supplied time after a wake operation.
+
 Production systems must serialize shared-bus access in their injected transport
 or application bus manager and should call `tick()` from their own scheduler
 cadence if future devices need periodic work.
 
 Validation status: command parity is checked by repo-local contract scripts.
-Hardware smoke tests are still pending until target devices are available.
+Current-v4 hardware smoke tests and the supported-variant matrix remain pending
+until target devices are available. Historical v3 fixture evidence and its
+limits are recorded in the [HIL summary](docs/reports/HIL_SUMMARY.md).
 
 ## Quick Start
+
+This snippet uses the repository's example-only Arduino transport adapter from
+`examples/common/I2cTransport.h`. It is not installed as part of the public
+library. Production applications should provide an equivalent adapter around
+their application-owned bus, locking, timeout, and recovery policy.
 
 ```cpp
 #include <Wire.h>
@@ -138,10 +148,9 @@ void loop() {
 The default `expectedVariant` is `DeviceVariant::AUTO`. `bind()` is still
 bus-silent in that mode and requires `Config::i2cSpecial`; memory access remains
 unavailable until an explicit Device ID read selects a supported variant.
-Production fixed-BOM integrations
-should select the exact variant and validate its identity before publishing the
-device ready. `MB85RC16V` has no Device ID command and must be selected
-explicitly.
+Production fixed-BOM integrations should select the exact variant and validate
+its identity before publishing the device ready. `MB85RC16V` has no Device ID
+command and must be selected explicitly.
 
 `Config::i2cAddress` is the board strap base address, not a memory-bank encoded
 transaction address. Two-byte A2/A1/A0 variants accept `0x50`-`0x57`; variants
@@ -168,10 +177,9 @@ configuration. A rejected replacement leaves the previous binding active.
 
 The example transport adapter maps Arduino `Wire` outcomes to terminal
 `TransportResult` values and keeps bus timeout ownership outside the library.
-Applications that
-need meaningful health timestamps or Sleep wake gating should inject
-`Config::nowMs`; otherwise timestamps remain `0` and wake gating advances only
-when the caller supplies time to `tick()`.
+Applications that need meaningful health timestamps or Sleep wake gating should
+inject `Config::nowMs`; otherwise timestamps remain `0` and wake gating
+advances only when the caller supplies time to `tick()`.
 
 ## I2C Ownership And Concurrency
 
@@ -379,6 +387,28 @@ construction plus named member assignment.
 
 ## API Reference
 
+The public headers under `include/MB85RC/` are the authoritative API contract.
+`doxygen Doxyfile` builds the complete reference and fails when a public member,
+parameter, return contract, or documentation link produces a warning.
+
+### Transport And Configuration
+
+- `Config::i2cWrite` and `Config::i2cWriteRead` are required synchronous,
+  terminal callbacks. They perform one physical attempt with no hidden retry or
+  recovery.
+- `Config::i2cSpecial` is required for `AUTO` identity selection and for any
+  Device ID, High-speed, Sleep, or wake operation used by the application.
+- `TransportResult` reports a typed terminal `TransportCode`, exact callback-
+  buffer TX/RX progress, numeric transport detail, and conservative
+  `WriteCommit` evidence.
+- `Config::maxTxBytes` includes memory-address bytes; `maxRxBytes` is the total
+  callback RX capacity. The active one-transaction data limits are exposed by
+  `maxWriteDataBytes()` and `maxReadDataBytes()`.
+- `Config::i2cUser`, `Config::timeUser`, and referenced state remain caller-
+  owned and valid until `end()` or a later successful replacement binding.
+- `Status::msg` and all retained driver diagnostics use static-lifetime library
+  text; callback-owned message pointers are not accepted.
+
 ### Lifecycle
 
 - `Status bind(const Config& config)` - validate and retain configuration with zero I2C
@@ -397,11 +427,14 @@ construction plus named member assignment.
 - `uint32_t maxAddress() const` - active highest valid memory address.
 - `uint32_t maxNormalBusHz() const` - active variant normal-mode I2C bus limit.
 - `uint32_t maxHighSpeedBusHz() const` - active variant HS bus limit, or `0` when unsupported.
+- `size_t maxWriteDataBytes() const` - active address-adjusted data limit for one write callback.
+- `size_t maxReadDataBytes() const` - active data limit for one read/verify callback.
 - `static constexpr uint16_t memorySize()` - legacy MB85RC256V size helper retained for existing users.
 
 ### High-Speed And Sleep APIs
 
 - `bool supportsHighSpeedMode() const` - true only for variants with local HS-mode datasheet support.
+- `bool highSpeedModeEnabled() const` - true when memory transfers currently use the HS-prefixed special path.
 - `Status enterHighSpeedMode()` / `Status exitHighSpeedMode()` - enable or disable HS-prefixed memory/current-address transfers; the MCU bus clock remains application-owned.
 - `Status setHighSpeedMode(bool enabled)` - explicit form of the same HS transfer-mode toggle.
 - `bool supportsSleepMode() const` - true only for variants with local Sleep-mode datasheet support.
@@ -441,6 +474,13 @@ construction plus named member assignment.
 - `Status resumeVerifiedWrite(uint32_t id)` - authorize verify-only readback after an indeterminate write
 - `Status cancelTransfer(uint32_t id)` - cancel between callbacks without rolling back accepted chunks
 - `Status timeoutTransfer(uint32_t id)` - owner-directed deadline expiry without I2C
+
+The request overloads without an explicit ID allocate an internal nonzero ID
+for source compatibility. External owners should use the request-qualified
+overloads so their own identity can be matched through progress, cancellation,
+timeout, reconciliation, and exactly-once result consumption. The no-argument
+`cancelTransfer()` compatibility overload cancels whichever request is active;
+owner-managed code should use `cancelTransfer(id)`.
 
 ### Synchronous Bulk Convenience APIs
 
@@ -555,6 +595,10 @@ known successful addressed read/write by the same instance.
 - `uint8_t consecutiveFailures() const`
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
+
+`isOnline()` is a compatibility name for “passively bound”; it remains true in
+diagnostic `DEGRADED` and `OFFLINE` states. Use `state()` for health display,
+not for transport admission policy.
 
 `SettingsSnapshot` is a cache-only view. It includes bound/state/online status,
 I2C timeout/capacities, health counters and library-owned last-error text,
@@ -785,8 +829,9 @@ doxygen Doxyfile
 - `docs/IDF_PORT.md` - ESP-IDF portability and native example notes
 - `docs/RELEASE_CHECKLIST.md` - release verification checklist
 - `docs/reference-pdfs/` - retained vendor datasheets and fact sheet
-- `Doxyfile` - indexes public headers, the ESP-IDF port notes, the Arduino CLI,
-  and the native IDF entry point
+- `CONTRIBUTING.md` - contribution workflow and required validation
+- `SECURITY.md` - supported-version and vulnerability-reporting policy
+- `Doxyfile` - builds strict public-header and maintained-documentation output
 
 ## License
 

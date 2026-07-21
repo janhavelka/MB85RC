@@ -184,30 +184,37 @@ def _render_version_header(namespace: str, version: str) -> str:
 #include <stdint.h>
 
 #ifndef {prefix}_VERSION_STRING
+/// @brief Semantic version string generated from library.json.
 #define {prefix}_VERSION_STRING "{version}"
 #endif
 
 #ifndef {prefix}_BUILD_DATE
+/// @brief Build date override; defaults to the compiler date.
 #define {prefix}_BUILD_DATE __DATE__
 #endif
 
 #ifndef {prefix}_BUILD_TIME
+/// @brief Build time override; defaults to the compiler time.
 #define {prefix}_BUILD_TIME __TIME__
 #endif
 
 #ifndef {prefix}_BUILD_TIMESTAMP
+/// @brief Combined build date and time string.
 #define {prefix}_BUILD_TIMESTAMP {prefix}_BUILD_DATE " " {prefix}_BUILD_TIME
 #endif
 
 #ifndef {prefix}_GIT_COMMIT
+/// @brief Source revision override injected by the build system when available.
 #define {prefix}_GIT_COMMIT "unknown"
 #endif
 
 #ifndef {prefix}_GIT_STATUS
+/// @brief Source working-tree status override injected by the build system.
 #define {prefix}_GIT_STATUS "unknown"
 #endif
 
 #ifndef {prefix}_VERSION_FULL
+/// @brief Full version, revision, build timestamp, and source-status string.
 #define {prefix}_VERSION_FULL {prefix}_VERSION_STRING " (" {prefix}_GIT_COMMIT ", " {prefix}_BUILD_TIMESTAMP ", " {prefix}_GIT_STATUS ")"
 #endif
 

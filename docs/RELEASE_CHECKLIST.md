@@ -3,7 +3,7 @@
 Use this checklist before tagging and publishing a release.
 
 - Update `library.json`, `idf_component.yml`, `CHANGELOG.md`, README release
-  wording, and `Doxyfile`.
+  wording, `SECURITY.md` supported versions, and `Doxyfile`.
 - Regenerate and check `include/MB85RC/Version.h` with
   `python scripts/generate_version.py` and
   `python scripts/generate_version.py check`.
@@ -23,8 +23,13 @@ Use this checklist before tagging and publishing a release.
   `python tools/check_idf_example_contract.py`.
 - Run package validation with `python -m platformio pkg pack`; confirm the
   tarball version matches the release, then remove the generated artifact.
-- Run `doxygen Doxyfile`; remove generated `docs/doxygen` output unless the
-  repository intentionally starts tracking it.
+- Run `doxygen Doxyfile`. The strict configuration must complete with no
+  undocumented-public-API, parameter/return, or documentation warnings. Remove
+  generated `docs/doxygen` output unless the repository intentionally starts
+  tracking it.
+- Check maintained Markdown links and ensure `README.md`, `docs/README.md`,
+  `CONTRIBUTING.md`, and `SECURITY.md` describe the same supported release and
+  validation commands.
 - Review GitHub Actions results, including the configured pure ESP-IDF
   `esp32s2` and `esp32s3` jobs.
 - Confirm public docs and tests cover all operation classes: one-callback

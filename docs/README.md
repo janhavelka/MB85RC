@@ -14,6 +14,11 @@ the public API comments, and the files listed here.
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Release verification checklist before tagging or publishing. |
 | [reports/HIL_SUMMARY.md](reports/HIL_SUMMARY.md) | Historical HIL ledger with explicit fixture, revision, result, and evidence-grade limits. |
 
+Project-level maintained documents are [README.md](../README.md),
+[CHANGELOG.md](../CHANGELOG.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and
+[SECURITY.md](../SECURITY.md). Public API documentation is generated from the
+headers under `include/MB85RC/` with [Doxyfile](../Doxyfile).
+
 ## Vendor References
 
 Vendor PDFs live under [reference-pdfs/](reference-pdfs/). They are retained as

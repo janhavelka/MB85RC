@@ -12,30 +12,37 @@
 #include <stdint.h>
 
 #ifndef MB85RC_VERSION_STRING
+/// @brief Semantic version string generated from library.json.
 #define MB85RC_VERSION_STRING "4.0.0"
 #endif
 
 #ifndef MB85RC_BUILD_DATE
+/// @brief Build date override; defaults to the compiler date.
 #define MB85RC_BUILD_DATE __DATE__
 #endif
 
 #ifndef MB85RC_BUILD_TIME
+/// @brief Build time override; defaults to the compiler time.
 #define MB85RC_BUILD_TIME __TIME__
 #endif
 
 #ifndef MB85RC_BUILD_TIMESTAMP
+/// @brief Combined build date and time string.
 #define MB85RC_BUILD_TIMESTAMP MB85RC_BUILD_DATE " " MB85RC_BUILD_TIME
 #endif
 
 #ifndef MB85RC_GIT_COMMIT
+/// @brief Source revision override injected by the build system when available.
 #define MB85RC_GIT_COMMIT "unknown"
 #endif
 
 #ifndef MB85RC_GIT_STATUS
+/// @brief Source working-tree status override injected by the build system.
 #define MB85RC_GIT_STATUS "unknown"
 #endif
 
 #ifndef MB85RC_VERSION_FULL
+/// @brief Full version, revision, build timestamp, and source-status string.
 #define MB85RC_VERSION_FULL MB85RC_VERSION_STRING " (" MB85RC_GIT_COMMIT ", " MB85RC_BUILD_TIMESTAMP ", " MB85RC_GIT_STATUS ")"
 #endif
 

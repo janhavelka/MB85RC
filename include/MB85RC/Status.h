@@ -47,17 +47,23 @@ enum class BusyDetail : int32_t {
 
 /// @brief Status structure returned by all fallible operations.
 struct Status {
-  Err code = Err::OK;
+  Err code = Err::OK;        ///< Machine-readable status classification.
   int32_t detail = 0;        ///< Implementation-specific detail (e.g., I2C error code)
   const char* msg = "";      ///< Static string describing the error
 
+  /// Construct an OK status with default fields.
   constexpr Status() = default;
+  /// Construct an explicit status value.
+  /// @param c Machine-readable status classification.
+  /// @param d Numeric detail owned by the status producer.
+  /// @param m Static-lifetime diagnostic message.
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
   
   /// @return true if operation succeeded
   constexpr bool ok() const { return code == Err::OK; }
 
   /// @return true if this status has the requested error code
+  /// @param err Error code to compare.
   constexpr bool is(Err err) const { return code == err; }
 
   /// @return true if operation is in progress (queued, not yet complete)
@@ -67,9 +73,14 @@ struct Status {
   constexpr explicit operator bool() const { return ok(); }
 
   /// Create a success status
+  /// @return Status with Err::OK and static `"OK"` text.
   static constexpr Status Ok() { return Status{Err::OK, 0, "OK"}; }
   
   /// Create an error status
+  /// @param err Machine-readable error classification.
+  /// @param message Static-lifetime diagnostic message.
+  /// @param detailCode Numeric diagnostic detail.
+  /// @return Status retaining the supplied static message and detail.
   static constexpr Status Error(Err err, const char* message, int32_t detailCode = 0) {
     return Status{err, detailCode, message};
   }
