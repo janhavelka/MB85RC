@@ -46,4 +46,6 @@ Use this checklist before tagging and publishing a release.
   evidence are recorded. Production HIL evidence must use strict mode, the
   required variant/product/capacity gates, zero FAIL, zero UNKNOWN, final READY
   health, zero total failures, zero target resets/reconnects, and documented
-  heap thresholds.
+  heap thresholds. The diagnostic examples default to a maximum heap drop of
+  1024 bytes and a minimum free heap of 8192 bytes; record the rationale for
+  board-specific changes.

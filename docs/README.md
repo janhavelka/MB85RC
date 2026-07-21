@@ -1,9 +1,8 @@
 # MB85RC Documentation
 
 This directory contains maintained project documentation and vendor reference
-PDFs. Historical audit reports and generated PDF-to-Markdown dumps are not kept
-as source documentation; their durable conclusions are folded into the README,
-the public API comments, and the files listed here.
+PDFs. One-off working reports and generated documentation are excluded; durable
+contracts belong in the README, public API comments, and the files listed here.
 
 ## Maintained Docs
 

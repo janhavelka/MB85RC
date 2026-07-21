@@ -2,7 +2,9 @@
 
 Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Library version: `4.0.0` (release tag pending)
+Library version: `4.0.0`
+
+Latest published tag: `v3.0.0`
 
 ## Features
 
@@ -84,10 +86,9 @@ Production systems must serialize shared-bus access in their injected transport
 or application bus manager and should call `tick()` from their own scheduler
 cadence if future devices need periodic work.
 
-Validation status: command parity is checked by repo-local contract scripts.
-Current-v4 hardware smoke tests and the supported-variant matrix remain pending
-until target devices are available. Historical v3 fixture evidence and its
-limits are recorded in the [HIL summary](docs/reports/HIL_SUMMARY.md).
+Command parity is checked by repo-local contract scripts. Hardware evidence and
+its revision-specific limits are recorded separately in the
+[HIL summary](docs/reports/HIL_SUMMARY.md).
 
 ## Quick Start
 
@@ -312,84 +313,12 @@ entry can leave the hardware effect ambiguous; the driver then reports
 `SleepState::UNKNOWN`, blocks normal I2C, and requires an explicit `wake()`.
 A failed wake remains `UNKNOWN`; a successful wake enters `WAKING` until tREC.
 
-## Release 4.0.0 Highlights
-
-- Adds zero-I/O `bind()`; compatibility `begin()` retains a valid binding after
-  a presence/identity failure so later owner-directed attempts remain possible.
-- Replaces callback `Status` with terminal `TransportResult`, including exact
-  byte counts, typed transport codes, and write-commit knowledge.
-- Routes Device ID through `I2cSpecialOp::READ_DEVICE_ID`, keeping reserved
-  address `0x7C` outside normal scan and device-transfer policy.
-- Adds transport `maxTxBytes`/`maxRxBytes`, exact one-transaction primitives,
-  and active-variant `maxWriteDataBytes()`/`maxReadDataBytes()`.
-- Makes health states diagnostic-only. Previous failures never block a later
-  transaction requested by the application bus owner.
-- Adds request-qualified cooperative transfers whose results retain no caller
-  buffer pointers, with exactly-once terminal consumption, cancellation,
-  explicit timeout, and verified-write reconciliation that never blindly
-  replays an ambiguous write.
-- Pins PlatformIO 6.1.18 and pioarduino Espressif platform 54.03.20 in one
-  stable ESP32-S3 CI reference while retaining broader ESP32-S2/S3
-  compatibility builds.
-
-Breaking notes: all injected I2C callbacks now return `TransportResult`, and
-production staged callers should use nonzero request IDs and consume terminal
-results. `Config` adds explicit transport capacities. The compatibility
-`begin()`, legacy request overloads, and observational `recover()` remain for
-incremental migration, but OFFLINE no longer changes admission.
-
-## Release 3.0.0 Highlights
-
-- Adds accepted-prefix reporting with `writeDetailed()` and `fillDetailed()` for non-atomic bulk writes/fills.
-- Adds readback verification helpers: `VerifyDetailedResult`, `verifyDetailed()`, `writeVerify()`, `fillVerify()`, and `VERIFY_MISMATCH`.
-- Adds variant-gated High-speed and Sleep APIs for `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`, with unsupported variants returning `UNSUPPORTED` before bus traffic.
-- Adds optional `Config::i2cSpecial` for HS-prefixed transfers, Sleep entry, and Sleep wake stimulus; the core still does not change the MCU I2C clock or insert hidden delays.
-- Deletes `MB85RC` copy/move operations and documents thread/ISR/reentrancy contracts.
-- Tightens current-address invalidation after failed or diagnostic transactions.
-- Adds pure ESP-IDF CI build configuration for ESP32-S2/S3 and native IDF Device-ID manual-address handling.
-- Expands Arduino and ESP-IDF diagnostic CLI parity, including HS/Sleep diagnostics and explicit confirmation for destructive IDF commands.
-- Adds production documentation for WP-high ACK/no-persistence behavior, accepted-prefix versus verified persistence, and hardware-validation planning.
-
-Breaking notes: applications that copied/moved `MB85RC` instances must keep a
-single instance and pass it by reference or pointer. Applications using
-positional aggregate initialization for `Config` should switch to default
-construction plus named member assignment.
-
-## Release 2.0.0 Highlights
-
-- Runtime support now covers every locally documented variant: `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`.
-- Runtime variant selection through `Config::expectedVariant` with `AUTO` and explicit selectors.
-- `begin()`, `probe()`, and `recover()` validate the selected active Device ID where available instead of hard-coding the 256V product ID.
-- `capacityBytes()`, `maxAddress()`, `variantName()`, `variantInfo()`, and `deviceId()` expose the active runtime device.
-- Memory APIs and `maxAddress()` now use `uint32_t` addresses so the 128 KB `MB85RC1MT` range (`0x00000..0x1FFFF`) is not truncated.
-- Address encoding is centralized for one-byte small-density devices, two-byte address-pin devices, and `MB85RC1MT` A16-in-device-address transactions.
-- `MB85RC16V` is supported through explicit selection and memory-probe diagnostics because the part has no Device ID command.
-- `read`, `write`, `fill`, `verify`, typed helpers, and CLI commands reject ranges that cross the active capacity.
-- Arduino and native ESP-IDF CLIs use separate implementations with repo-local contract checks, accept 32-bit addresses, and cover the same diagnostic workflows. ESP-IDF mutating commands require explicit `!` confirmation forms.
-- Core health timestamps now come only from injected `Config::nowMs`; framework time sources live in examples and application glue.
-- ESP-IDF CLI remains a native `app_main` example using `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
-- Native tests cover explicit begin, AUTO selection where Device ID exists, address encoding, cross-end rejection, current-address behavior, and no-Device-ID diagnostics across the variant matrix.
-
-## Release 1.1.1 Highlights
-
-- Bringup CLI status output is quieter and more consistent for successful diagnostic/demo commands.
-- Stress progress keeps color on success/fail counters only, so the percentage remains plain text.
-- Stress summaries now distinguish cycles, mixed commands, and tracked I2C health transactions.
-- Serial command input now uses the shared bounded CLI shell helper for cleaner monitor output.
-
-## Release 1.1.0 Highlights
-
-- Historical 1.1.0 behavior latched `OFFLINE`; 4.0.0 supersedes that admission policy and keeps health observational.
-- Public MB85RC family variant metadata documents family address models.
-- Cross-library diagnostics have `driverState()` and a value-returning `getSettings()` overload.
-- Validation and recovery paths keep health counters aligned with transport failures and Device ID mismatches.
-- The bringup CLI and documentation cover current validation, health, and family-reference behavior.
-
 ## API Reference
 
 The public headers under `include/MB85RC/` are the authoritative API contract.
 `doxygen Doxyfile` builds the complete reference and fails when a public member,
 parameter, return contract, or documentation link produces a warning.
+Release history and migration notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ### Transport And Configuration
 
@@ -635,25 +564,13 @@ lifetime budgets: the local reference shows 10^12 writes/byte for
 `MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`. Retention statements vary by part
 and temperature.
 
-## Validation Status
-
-| Coverage area | Current evidence | Status |
-| --- | --- | --- |
-| Implemented behavior | Passive binding, terminal typed transport, explicit Device ID special operation, one-transaction primitives, cooperative result identity/reconciliation, range checks, and diagnostic health | Implemented in code |
-| Unit-test coverage | Native fake-bus tests cover binding silence, terminal callback validation, configured capacities, variant/address boundaries, staged budgets/results/cancel/timeout, ambiguous writes, WP-high simulation, HS/Sleep gating, and health observation | Covered by native tests |
-| CI/build coverage | Stable PlatformIO 6.1.18/pioarduino 54.03.20 ESP32-S3 reference, broader PlatformIO ESP32-S2/S3 builds, native tests, guards, package validation, and pure ESP-IDF example jobs | Covered by CI configuration; local IDF build depends on `idf.py` availability |
-| HIL runner gate | `tools/hil_runner.py --strict` can require variant/product/capacity, zero UNKNOWNs, final READY health, zero failures, zero resets/reconnects, and heap thresholds | Tooling implemented; production evidence still requires the exact hardware rows below |
-| Hardware validation | Board/variant/address-pin/WP/brownout/shared-bus/soak evidence | Pending hardware; use the matrix below |
-
-Suggested production soak thresholds for the diagnostic examples are
-`--heap-max-drop-bytes 1024` and `--heap-min-free-bytes 8192`. Board-specific
-threshold changes must be documented in the HIL report with rationale.
-
 ## Hardware Validation Matrix
 
 Status values below are planning states, not claims. Mark rows complete only
 after recording board, MCU, FRAM package/date code, supply voltage, pull-ups,
 bus speed, address-pin straps, WP wiring, command log, and captured evidence.
+For strict HIL acceptance criteria and suggested heap thresholds, use the
+[release checklist](docs/RELEASE_CHECKLIST.md).
 
 | Scenario | Variant(s) | Address pins | Command/test | Expected evidence | Status |
 | --- | --- | --- | --- | --- | --- |

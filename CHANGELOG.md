@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Removed the obsolete product-specific suitability report and generalized
-  maintained integration guidance around the external I2C-owner contract.
+- Consolidated maintained documentation around durable API, transport, and
+  qualification contracts; removed the obsolete product-specific report,
+  duplicate README release summaries, and transient audit/status narration.
 - Made Doxygen fail on undocumented public API, missing parameter/return
-  contracts, and documentation warnings; completed the reported public-header
-  documentation and excluded internal agent instructions from generated docs.
+  contracts, and documentation warnings; documented all public headers and
+  excluded internal agent instructions from generated docs.
 - Aligned README, native ESP-IDF adapter guidance, contribution validation,
   release checks, documentation indexes, and the security policy with the v4
   transport and lifecycle contracts.
