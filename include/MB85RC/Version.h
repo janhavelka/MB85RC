@@ -12,37 +12,44 @@
 #include <stdint.h>
 
 #ifndef MB85RC_VERSION_STRING
-#define MB85RC_VERSION_STRING "3.0.0"
+/// @brief Semantic version string generated from library.json.
+#define MB85RC_VERSION_STRING "4.0.0"
 #endif
 
 #ifndef MB85RC_BUILD_DATE
+/// @brief Build date override; defaults to the compiler date.
 #define MB85RC_BUILD_DATE __DATE__
 #endif
 
 #ifndef MB85RC_BUILD_TIME
+/// @brief Build time override; defaults to the compiler time.
 #define MB85RC_BUILD_TIME __TIME__
 #endif
 
 #ifndef MB85RC_BUILD_TIMESTAMP
+/// @brief Combined build date and time string.
 #define MB85RC_BUILD_TIMESTAMP MB85RC_BUILD_DATE " " MB85RC_BUILD_TIME
 #endif
 
 #ifndef MB85RC_GIT_COMMIT
+/// @brief Source revision override injected by the build system when available.
 #define MB85RC_GIT_COMMIT "unknown"
 #endif
 
 #ifndef MB85RC_GIT_STATUS
+/// @brief Source working-tree status override injected by the build system.
 #define MB85RC_GIT_STATUS "unknown"
 #endif
 
 #ifndef MB85RC_VERSION_FULL
+/// @brief Full version, revision, build timestamp, and source-status string.
 #define MB85RC_VERSION_FULL MB85RC_VERSION_STRING " (" MB85RC_GIT_COMMIT ", " MB85RC_BUILD_TIMESTAMP ", " MB85RC_GIT_STATUS ")"
 #endif
 
 namespace MB85RC {
 
 /// @brief Major version (breaking changes).
-static constexpr uint16_t VERSION_MAJOR = 3;
+static constexpr uint16_t VERSION_MAJOR = 4;
 
 /// @brief Minor version (backward-compatible features).
 static constexpr uint16_t VERSION_MINOR = 0;
@@ -54,10 +61,10 @@ static constexpr uint16_t VERSION_PATCH = 0;
 static constexpr const char* VERSION = MB85RC_VERSION_STRING;
 
 /// @brief Encoded version for numeric comparison: MAJOR*10000 + MINOR*100 + PATCH.
-static constexpr uint32_t VERSION_CODE = 30000;
+static constexpr uint32_t VERSION_CODE = 40000;
 
 /// @brief Backward-compatible alias used by older repositories.
-static constexpr int VERSION_INT = 30000;
+static constexpr int VERSION_INT = 40000;
 
 /// @brief Build date string.
 static constexpr const char* BUILD_DATE = MB85RC_BUILD_DATE;

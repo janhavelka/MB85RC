@@ -11,42 +11,22 @@
 namespace MB85RC {
 namespace {
 
-static constexpr size_t MAX_WRITE_BUF = cmd::MAX_WRITE_CHUNK + cmd::ADDRESS_BYTES;
+static constexpr size_t MAX_WRITE_BUF = MAX_TRANSPORT_TX_BYTES;
 
 void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
   id.productId = static_cast<uint16_t>(((raw[1] & 0x0F) << 8) | raw[2]);
   id.densityCode = static_cast<uint8_t>((id.productId >> 8) & 0x0F);
+  const cmd::VariantInfo* variant =
+      (id.manufacturerId == cmd::MANUFACTURER_ID)
+          ? cmd::findVariantByProductId(id.productId)
+          : nullptr;
+  id.variant = (variant != nullptr) ? variant->variant : DeviceVariant::AUTO;
 }
 
 const cmd::VariantInfo* variantForExpected(DeviceVariant expected) {
-  const char* name = nullptr;
-  switch (expected) {
-    case DeviceVariant::MB85RC04V:
-      name = "MB85RC04V";
-      break;
-    case DeviceVariant::MB85RC16V:
-      name = "MB85RC16V";
-      break;
-    case DeviceVariant::MB85RC64TA:
-      name = "MB85RC64TA";
-      break;
-    case DeviceVariant::MB85RC256V:
-      name = "MB85RC256V";
-      break;
-    case DeviceVariant::MB85RC512T:
-      name = "MB85RC512T";
-      break;
-    case DeviceVariant::MB85RC1MT:
-      name = "MB85RC1MT";
-      break;
-    case DeviceVariant::AUTO:
-    default:
-      return nullptr;
-  }
-
   for (size_t i = 0; i < cmd::VARIANT_COUNT; ++i) {
-    if (std::strcmp(cmd::KNOWN_VARIANTS[i].name, name) == 0) {
+    if (cmd::KNOWN_VARIANTS[i].variant == expected) {
       return &cmd::KNOWN_VARIANTS[i];
     }
   }
@@ -118,6 +98,18 @@ Status validateBaseAddressForVariant(uint8_t address, const cmd::VariantInfo& va
                        address);
 }
 
+size_t addressBytesForVariant(const cmd::VariantInfo& variant) {
+  switch (variant.addressModel) {
+    case cmd::AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+    case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      return 1U;
+    case cmd::AddressModel::TWO_BYTE_ADDRESS_PINS:
+    case cmd::AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+    default:
+      return 2U;
+  }
+}
+
 bool shouldTrackHealthFailure(Err code) {
   switch (code) {
     case Err::OK:
@@ -135,72 +127,20 @@ bool shouldTrackHealthFailure(Err code) {
   }
 }
 
-class ScopedOfflineI2cAllowance {
-public:
-  explicit ScopedOfflineI2cAllowance(bool& flag, bool allow) : _flag(flag), _old(flag) {
-    _flag = allow;
-  }
-
-  ~ScopedOfflineI2cAllowance() {
-    _flag = _old;
-  }
-
-  ScopedOfflineI2cAllowance(const ScopedOfflineI2cAllowance&) = delete;
-  ScopedOfflineI2cAllowance& operator=(const ScopedOfflineI2cAllowance&) = delete;
-
-private:
-  bool& _flag;
-  bool _old;
-};
-
 }  // namespace
 
 // ===========================================================================
 // Lifecycle
 // ===========================================================================
 
-Status MB85RC::begin(const Config& config) {
-  _clearTransfer(Status::Ok());
-  _config = Config{};
-  _variant = nullptr;
-  _deviceId = DeviceId{};
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-
-  _lastOkMs = 0;
-  _lastErrorMs = 0;
-  _lastError = Status::Ok();
-  _consecutiveFailures = 0;
-  _totalFailures = 0;
-  _totalSuccess = 0;
-  _allowOfflineI2c = false;
-  _highSpeedModeEnabled = false;
-  _sleepState = SleepState::AWAKE;
-  _sleepWakeReadyMs = 0;
-  _currentAddressKnown = false;
-  _currentAddress = 0;
-
-  auto resetAfterFailedBegin = [this](Status failure) -> Status {
-    _config = Config{};
-    _variant = nullptr;
-    _deviceId = DeviceId{};
-    _initialized = false;
-    _driverState = DriverState::UNINIT;
-    _lastOkMs = 0;
-    _lastErrorMs = 0;
-    _lastError = Status::Ok();
-    _consecutiveFailures = 0;
-    _totalFailures = 0;
-    _totalSuccess = 0;
-    _allowOfflineI2c = false;
-    _highSpeedModeEnabled = false;
-    _sleepState = SleepState::AWAKE;
-    _sleepWakeReadyMs = 0;
-    _currentAddressKnown = false;
-    _currentAddress = 0;
-    _clearTransfer(Status::Ok());
-    return failure;
-  };
+Status MB85RC::bind(const Config& config) {
+  if (_transferBusy()) {
+    return busyStatus(BusyDetail::TRANSFER_ACTIVE, "Transfer in progress");
+  }
+  if (_transfer.resultPending) {
+    return busyStatus(BusyDetail::RESULT_PENDING,
+                      "Terminal transfer result not consumed");
+  }
 
   if (config.i2cWrite == nullptr || config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C callbacks not set");
@@ -214,12 +154,25 @@ Status MB85RC::begin(const Config& config) {
     return Status::Error(Err::INVALID_CONFIG, "Invalid I2C address (must be 0x50-0x57)",
                          config.i2cAddress);
   }
+  if (config.maxTxBytes == 0U) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid transport TX capacity",
+                         detailFromU32(static_cast<uint32_t>(config.maxTxBytes)));
+  }
+  if (config.maxRxBytes == 0U) {
+    return Status::Error(Err::INVALID_CONFIG, "Invalid transport RX capacity",
+                         detailFromU32(static_cast<uint32_t>(config.maxRxBytes)));
+  }
   if (!isValidHighSpeedMasterCode(config.highSpeedMasterCode)) {
     return Status::Error(Err::INVALID_CONFIG, "High-speed master code must be 0x08-0x0F");
   }
   if (config.expectedVariant != DeviceVariant::AUTO &&
       variantForExpected(config.expectedVariant) == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
+  }
+  if (config.expectedVariant == DeviceVariant::AUTO &&
+      config.i2cSpecial == nullptr) {
+    return Status::Error(Err::INVALID_CONFIG,
+                         "AUTO requires Device ID special transport");
   }
   const cmd::VariantInfo* explicitVariant = variantForExpected(config.expectedVariant);
   if (explicitVariant != nullptr && !isSupportedRuntimeVariant(*explicitVariant)) {
@@ -231,65 +184,25 @@ Status MB85RC::begin(const Config& config) {
       return addressStatus;
     }
   }
+  const size_t minimumTxBytes = (explicitVariant != nullptr)
+                                    ? addressBytesForVariant(*explicitVariant) + 1U
+                                    : cmd::ADDRESS_BYTES + 1U;
+  if (config.maxTxBytes < minimumTxBytes) {
+    return Status::Error(Err::INVALID_CONFIG,
+                         "Transport TX capacity cannot carry address and data");
+  }
+  if (config.expectedVariant == DeviceVariant::AUTO &&
+      config.maxRxBytes < cmd::DEVICE_ID_LEN) {
+    return Status::Error(Err::INVALID_CONFIG,
+                         "AUTO requires capacity for Device ID read");
+  }
   if (config.sleepRecoveryUs != 0U && explicitVariant != nullptr &&
       explicitVariant->supportsSleepMode &&
       config.sleepRecoveryUs < explicitVariant->sleepRecoveryUs) {
     return Status::Error(Err::INVALID_CONFIG, "Sleep recovery time below datasheet tREC");
   }
 
-  _config = config;
-  if (_config.offlineThreshold == 0) {
-    _config.offlineThreshold = 1;
-  }
-
-  // Verify device identity via Device ID read (uses raw path — not yet initialized)
-  Status st = Status::Ok();
-  if (explicitVariant != nullptr && !explicitVariant->hasDeviceId) {
-    _variant = explicitVariant;
-    _deviceId = DeviceId{};
-
-    uint8_t scratch = 0;
-    st = _readMemoryRaw(0, &scratch, 1);
-    if (!st.ok()) {
-      return resetAfterFailedBegin(st);
-    }
-    _currentAddressKnown = false;
-    _currentAddress = 0;
-  } else {
-    DeviceId id;
-    st = _readDeviceIdRaw(id);
-    if (!st.ok()) {
-      return resetAfterFailedBegin(st);
-    }
-    st = _selectVariant(_config.expectedVariant, id);
-    if (!st.ok()) {
-      return resetAfterFailedBegin(st);
-    }
-    st = validateBaseAddressForVariant(_config.i2cAddress, *_variant);
-    if (!st.ok()) {
-      return resetAfterFailedBegin(st);
-    }
-    if (_config.sleepRecoveryUs != 0U && _variant != nullptr &&
-        _variant->supportsSleepMode &&
-        _config.sleepRecoveryUs < _variant->sleepRecoveryUs) {
-      return resetAfterFailedBegin(
-          Status::Error(Err::INVALID_CONFIG, "Sleep recovery time below datasheet tREC"));
-    }
-  }
-
-  _initialized = true;
-  _driverState = DriverState::READY;
-
-  return Status::Ok();
-}
-
-void MB85RC::tick(uint32_t nowMs) {
-  _advanceWakeState(nowMs);
-  // No I2C, delay, retry, allocation, or health update is allowed here.
-}
-
-void MB85RC::end() {
-  _clearTransfer(Status::Ok());
+  _transfer = TransferJob{};
   _config = Config{};
   _variant = nullptr;
   _deviceId = DeviceId{};
@@ -301,7 +214,66 @@ void MB85RC::end() {
   _consecutiveFailures = 0;
   _totalFailures = 0;
   _totalSuccess = 0;
-  _allowOfflineI2c = false;
+  _highSpeedModeEnabled = false;
+  _sleepState = SleepState::AWAKE;
+  _sleepWakeReadyMs = 0;
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+
+  _config = config;
+  _variant = explicitVariant;
+
+  // Establish a passive binding. Identity and presence checks are explicit.
+  _initialized = true;
+  _driverState = DriverState::READY;
+
+  return Status::Ok();
+}
+
+Status MB85RC::begin(const Config& config) {
+  Status st = bind(config);
+  if (!st.ok()) {
+    return st;
+  }
+  if (_variant != nullptr && !_variant->hasDeviceId) {
+    uint8_t scratch = 0;
+    st = _readMemory(0, &scratch, 1);
+    _currentAddressKnown = false;
+    _currentAddress = 0;
+    return st;
+  }
+  DeviceId id;
+  return readDeviceId(id);
+}
+
+void MB85RC::tick(uint32_t nowMs) {
+  _advanceWakeState(nowMs);
+  // No I2C, delay, retry, allocation, or health update is allowed here.
+}
+
+void MB85RC::end() {
+  if (_transferBusy()) {
+    if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+      _transfer.result.failedChunkOffset = _transfer.offset;
+      _transfer.result.failedChunkLength = 0;
+    }
+    _finishTransfer(TransferState::CANCELLED,
+                    Status::Error(Err::CANCELLED,
+                                  "Transfer cancelled by end"));
+  } else if (!_transfer.resultPending) {
+    _transfer = TransferJob{};
+  }
+  _config = Config{};
+  _variant = nullptr;
+  _deviceId = DeviceId{};
+  _initialized = false;
+  _driverState = DriverState::UNINIT;
+  _lastOkMs = 0;
+  _lastErrorMs = 0;
+  _lastError = Status::Ok();
+  _consecutiveFailures = 0;
+  _totalFailures = 0;
+  _totalSuccess = 0;
   _highSpeedModeEnabled = false;
   _sleepState = SleepState::AWAKE;
   _sleepWakeReadyMs = 0;
@@ -315,6 +287,10 @@ Status MB85RC::getSettings(SettingsSnapshot& out) const {
   out.online = isOnline();
   out.i2cAddress = _config.i2cAddress;
   out.i2cTimeoutMs = _config.i2cTimeoutMs;
+  out.maxTxBytes = _config.maxTxBytes;
+  out.maxRxBytes = _config.maxRxBytes;
+  out.maxWriteDataBytes = maxWriteDataBytes();
+  out.maxReadDataBytes = maxReadDataBytes();
   out.offlineThreshold = _config.offlineThreshold;
   out.lastOkMs = _lastOkMs;
   out.lastErrorMs = _lastErrorMs;
@@ -346,17 +322,15 @@ Status MB85RC::getSettings(SettingsSnapshot& out) const {
 }
 
 uint32_t MB85RC::capacityBytes() const {
-  return (_variant != nullptr) ? _variant->memoryBytes
-                               : static_cast<uint32_t>(cmd::MEMORY_SIZE_MB85RC256V);
+  return (_variant != nullptr) ? _variant->memoryBytes : 0UL;
 }
 
 uint32_t MB85RC::maxAddress() const {
-  return (_variant != nullptr) ? cmd::maxAddressForVariant(*_variant)
-                               : cmd::MAX_MEM_ADDRESS_MB85RC256V;
+  return (_variant != nullptr) ? cmd::maxAddressForVariant(*_variant) : 0UL;
 }
 
 uint32_t MB85RC::maxNormalBusHz() const {
-  return (_variant != nullptr) ? _variant->maxNormalBusHz : cmd::NORMAL_BUS_HZ;
+  return (_variant != nullptr) ? _variant->maxNormalBusHz : 0UL;
 }
 
 uint32_t MB85RC::maxHighSpeedBusHz() const {
@@ -378,9 +352,33 @@ uint16_t MB85RC::sleepRecoveryUs() const {
   return (_config.sleepRecoveryUs != 0U) ? _config.sleepRecoveryUs : _variant->sleepRecoveryUs;
 }
 
+size_t MB85RC::maxWriteDataBytes() const {
+  if (_variant == nullptr) {
+    return 0U;
+  }
+  const size_t addressBytes = addressBytesForVariant(*_variant);
+  if (_config.maxTxBytes <= addressBytes) {
+    return 0U;
+  }
+  size_t limit = _config.maxTxBytes - addressBytes;
+  if (limit > cmd::MAX_WRITE_DATA_BYTES) {
+    limit = cmd::MAX_WRITE_DATA_BYTES;
+  }
+  return limit;
+}
+
+size_t MB85RC::maxReadDataBytes() const {
+  if (_variant == nullptr) {
+    return 0U;
+  }
+  return (_config.maxRxBytes < cmd::MAX_READ_CHUNK)
+             ? _config.maxRxBytes
+             : cmd::MAX_READ_CHUNK;
+}
+
 Status MB85RC::setHighSpeedMode(bool enabled) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -405,7 +403,7 @@ Status MB85RC::setHighSpeedMode(bool enabled) {
 
 Status MB85RC::enterSleep() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -423,12 +421,19 @@ Status MB85RC::enterSleep() {
   if (_sleepState == SleepState::WAKING) {
     return busyStatus(BusyDetail::WAKING, "Sleep wake recovery pending");
   }
+  if (_sleepState == SleepState::UNKNOWN) {
+    return busyStatus(BusyDetail::SLEEP_STATE_UNKNOWN,
+                      "Sleep state unknown; call wake()");
+  }
 
   I2cSpecialTransfer transfer = _specialTransfer(_config.i2cAddress);
   Status st = _i2cSpecialTracked(I2cSpecialOp::ENTER_SLEEP, transfer);
   _currentAddressKnown = false;
   _currentAddress = 0;
   if (!st.ok()) {
+    if (st.code != Err::I2C_NACK_ADDR && st.code != Err::I2C_NACK_DATA) {
+      _sleepState = SleepState::UNKNOWN;
+    }
     return st;
   }
 
@@ -439,7 +444,7 @@ Status MB85RC::enterSleep() {
 
 Status MB85RC::wake() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -463,6 +468,7 @@ Status MB85RC::wake() {
   _currentAddressKnown = false;
   _currentAddress = 0;
   if (!st.ok()) {
+    _sleepState = SleepState::UNKNOWN;
     return st;
   }
 
@@ -481,7 +487,7 @@ Status MB85RC::wake() {
 
 Status MB85RC::probe() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -503,53 +509,37 @@ Status MB85RC::probe() {
   if (!st.ok()) {
     return st;
   }
+  if (_config.expectedVariant == DeviceVariant::AUTO) {
+    if (id.manufacturerId != cmd::MANUFACTURER_ID ||
+        cmd::findVariantByProductId(id.productId) == nullptr) {
+      return Status::Error(Err::DEVICE_ID_MISMATCH,
+                           "Unknown Device ID", deviceIdDetail(id));
+    }
+    return Status::Ok();
+  }
   return _validateActiveDeviceId(id);
 }
 
 Status MB85RC::recover() {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
     return busy;
   }
 
-  const bool startedOffline = (_driverState == DriverState::OFFLINE);
-  ScopedOfflineI2cAllowance allowOfflineI2c(_allowOfflineI2c, true);
-  Status result = [&]() -> Status {
-    if (_variant != nullptr && !_variant->hasDeviceId) {
-      uint8_t scratch = 0;
-      Status st = _readMemory(0, &scratch, 1);
-      _currentAddressKnown = false;
-      _currentAddress = 0;
-      return st;
-    }
-
-    // Use tracked path so failures update health counters.
+  Status st = Status::Ok();
+  if (_variant != nullptr && !_variant->hasDeviceId) {
+    uint8_t scratch = 0;
+    st = _readMemory(0, &scratch, 1);
+  } else {
     DeviceId id;
-    Status st = _readDeviceIdTracked(id);
-    if (!st.ok()) {
-      _currentAddressKnown = false;
-      _currentAddress = 0;
-      return st;
-    }
-    st = _validateActiveDeviceId(id);
-    if (!st.ok()) {
-      _currentAddressKnown = false;
-      _currentAddress = 0;
-      return _recordFailure(st);
-    }
-
-    _deviceId = id;
-    _currentAddressKnown = false;
-    _currentAddress = 0;
-    return Status::Ok();
-  }();
-  if (startedOffline && !result.ok() && !result.inProgress()) {
-    _reassertOfflineLatch();
+    st = readDeviceId(id);
   }
-  return result;
+  _currentAddressKnown = false;
+  _currentAddress = 0;
+  return st;
 }
 
 // ===========================================================================
@@ -558,7 +548,7 @@ Status MB85RC::recover() {
 
 Status MB85RC::readByte(uint32_t address, uint8_t& value) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -571,9 +561,27 @@ Status MB85RC::readByte(uint32_t address, uint8_t& value) {
   return _readMemory(address, &value, 1);
 }
 
+Status MB85RC::readOnce(uint32_t address, uint8_t* buf, size_t len) {
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
+  if (buf == nullptr || len == 0U || len > maxReadDataBytes()) {
+    return Status::Error(Err::INVALID_PARAM, "Read exceeds one-transaction limit");
+  }
+  if (!_fitsRange(address, len)) {
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                         "Read range exceeds active capacity", address);
+  }
+  return _readMemory(address, buf, len);
+}
+
 Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -590,8 +598,8 @@ Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
   size_t offset = 0;
   while (offset < len) {
     size_t chunk = len - offset;
-    if (chunk > cmd::MAX_READ_CHUNK) {
-      chunk = cmd::MAX_READ_CHUNK;
+    if (chunk > maxReadDataBytes()) {
+      chunk = maxReadDataBytes();
     }
 
     uint32_t addr = address + static_cast<uint32_t>(offset);
@@ -612,7 +620,7 @@ Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
 
 Status MB85RC::writeByte(uint32_t address, uint8_t value) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -625,6 +633,28 @@ Status MB85RC::writeByte(uint32_t address, uint8_t value) {
   return _writeMemory(address, &value, 1);
 }
 
+Status MB85RC::writeOnce(uint32_t address, const uint8_t* buf, size_t len,
+                         WriteCommit* writeCommit) {
+  if (writeCommit != nullptr) {
+    *writeCommit = WriteCommit::NOT_APPLICABLE;
+  }
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
+  if (buf == nullptr || len == 0U || len > maxWriteDataBytes()) {
+    return Status::Error(Err::INVALID_PARAM, "Write exceeds one-transaction limit");
+  }
+  if (!_fitsRange(address, len)) {
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                         "Write range exceeds active capacity", address);
+  }
+  return _writeMemory(address, buf, len, writeCommit);
+}
+
 Status MB85RC::write(uint32_t address, const uint8_t* buf, size_t len) {
   return writeDetailed(address, buf, len).status;
 }
@@ -635,7 +665,7 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -658,17 +688,23 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
   size_t offset = 0;
   while (offset < len) {
     size_t chunk = len - offset;
-    if (chunk > cmd::MAX_WRITE_CHUNK) {
-      chunk = cmd::MAX_WRITE_CHUNK;
+    if (chunk > maxWriteDataBytes()) {
+      chunk = maxWriteDataBytes();
     }
 
     uint32_t addr = address + static_cast<uint32_t>(offset);
 
-    Status st = _writeMemory(addr, buf + offset, chunk);
+    WriteCommit commit = WriteCommit::INDETERMINATE;
+    Status st = _writeMemory(addr, buf + offset, chunk, &commit);
+    result.writeCommit = commit;
     if (!st.ok()) {
       result.status = st;
       result.failedChunkOffset = offset;
       result.failedChunkLength = chunk;
+      if (commit == WriteCommit::ACCEPTED) {
+        result.bytesAccepted = offset + chunk;
+        result.complete = (result.bytesAccepted == result.bytesRequested);
+      }
       return result;
     }
     offset += chunk;
@@ -676,6 +712,7 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
   }
 
   result.status = Status::Ok();
+  result.writeCommit = WriteCommit::ACCEPTED;
   result.failedChunkOffset = result.bytesRequested;
   result.failedChunkLength = 0;
   result.complete = true;
@@ -692,7 +729,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -718,17 +755,27 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
   size_t offset = 0;
   while (remaining > 0) {
     size_t toWrite = remaining;
-    if (toWrite > cmd::MAX_FILL_CHUNK) {
-      toWrite = cmd::MAX_FILL_CHUNK;
+    size_t fillLimit = cmd::MAX_FILL_CHUNK;
+    if (fillLimit > maxWriteDataBytes()) {
+      fillLimit = maxWriteDataBytes();
+    }
+    if (toWrite > fillLimit) {
+      toWrite = fillLimit;
     }
 
     uint32_t addr = address + static_cast<uint32_t>(offset);
 
-    Status st = _writeMemory(addr, chunk, toWrite);
+    WriteCommit commit = WriteCommit::INDETERMINATE;
+    Status st = _writeMemory(addr, chunk, toWrite, &commit);
+    result.writeCommit = commit;
     if (!st.ok()) {
       result.status = st;
       result.failedChunkOffset = offset;
       result.failedChunkLength = toWrite;
+      if (commit == WriteCommit::ACCEPTED) {
+        result.bytesAccepted = offset + toWrite;
+        result.complete = (result.bytesAccepted == result.bytesRequested);
+      }
       return result;
     }
     offset += toWrite;
@@ -737,6 +784,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
   }
 
   result.status = Status::Ok();
+  result.writeCommit = WriteCommit::ACCEPTED;
   result.failedChunkOffset = result.bytesRequested;
   result.failedChunkLength = 0;
   result.complete = true;
@@ -749,7 +797,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
 
 Status MB85RC::readDeviceId(DeviceId& id) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -759,12 +807,45 @@ Status MB85RC::readDeviceId(DeviceId& id) {
     return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
   }
 
-  return _readDeviceIdTracked(id);
+  Status st = _readDeviceIdTracked(id);
+  if (!st.ok()) {
+    return st;
+  }
+
+  if (_config.expectedVariant == DeviceVariant::AUTO) {
+    st = _selectVariant(DeviceVariant::AUTO, id);
+    if (!st.ok()) {
+      _variant = nullptr;
+      _deviceId = DeviceId{};
+      return st;
+    }
+    st = validateBaseAddressForVariant(_config.i2cAddress, *_variant);
+    if (!st.ok()) {
+      _variant = nullptr;
+      _deviceId = DeviceId{};
+      return st;
+    }
+    if (_config.sleepRecoveryUs != 0U && _variant->supportsSleepMode &&
+        _config.sleepRecoveryUs < _variant->sleepRecoveryUs) {
+      _variant = nullptr;
+      _deviceId = DeviceId{};
+      return Status::Error(Err::INVALID_CONFIG,
+                           "Sleep recovery time below datasheet tREC");
+    }
+  } else {
+    st = _validateActiveDeviceId(id);
+    if (!st.ok()) {
+      _deviceId = DeviceId{};
+      return st;
+    }
+    _deviceId = id;
+  }
+  return Status::Ok();
 }
 
 Status MB85RC::readDeviceIdRaw(DeviceIdRaw& raw) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -777,13 +858,19 @@ Status MB85RC::readDeviceIdRaw(DeviceIdRaw& raw) {
   return _readDeviceIdBytesTracked(raw);
 }
 
+DeviceId MB85RC::decodeDeviceId(const DeviceIdRaw& raw) {
+  DeviceId id;
+  parseDeviceId(raw.bytes, id);
+  return id;
+}
+
 Status MB85RC::readCurrentAddress(uint8_t& value) {
   return readCurrentAddress(&value, 1);
 }
 
 Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   Status busy = _ensureNoTransferActive();
   if (!busy.ok()) {
@@ -840,6 +927,43 @@ Status MB85RC::verify(uint32_t address, const uint8_t* expected, size_t len, Ver
   return Status::Ok();
 }
 
+Status MB85RC::verifyOnce(uint32_t address, const uint8_t* expected, size_t len,
+                          VerifyResult& out) {
+  out = VerifyResult{};
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
+  }
+  Status busy = _ensureNoTransferActive();
+  if (!busy.ok()) {
+    return busy;
+  }
+  if (expected == nullptr || len == 0U || len > maxReadDataBytes()) {
+    return Status::Error(Err::INVALID_PARAM, "Verify exceeds one-transaction limit");
+  }
+  if (!_fitsRange(address, len)) {
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
+                         "Verify range exceeds active capacity", address);
+  }
+
+  uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
+  Status st = _readMemory(address, readBuf, len);
+  if (!st.ok()) {
+    return st;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    if (readBuf[i] != expected[i]) {
+      out.match = false;
+      out.mismatchOffset = i;
+      out.expected = expected[i];
+      out.actual = readBuf[i];
+      return Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                           static_cast<int32_t>(i));
+    }
+  }
+  out.match = true;
+  return Status::Ok();
+}
+
 VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* expected,
                                             size_t len) {
   VerifyDetailedResult result;
@@ -847,7 +971,7 @@ VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* exp
   result.bytesRequested = len;
 
   if (!_initialized) {
-    result.status = Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    result.status = Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
     return result;
   }
   Status busy = _ensureNoTransferActive();
@@ -870,8 +994,8 @@ VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* exp
   size_t offset = 0;
   while (offset < len) {
     size_t chunk = len - offset;
-    if (chunk > sizeof(readBuf)) {
-      chunk = sizeof(readBuf);
+    if (chunk > maxReadDataBytes()) {
+      chunk = maxReadDataBytes();
     }
 
     const uint32_t chunkAddr = address + static_cast<uint32_t>(offset);
@@ -952,8 +1076,8 @@ Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
   size_t offset = 0;
   while (offset < len) {
     size_t chunk = len - offset;
-    if (chunk > sizeof(readBuf)) {
-      chunk = sizeof(readBuf);
+    if (chunk > maxReadDataBytes()) {
+      chunk = maxReadDataBytes();
     }
 
     Status st = _readMemory(address + static_cast<uint32_t>(offset), readBuf, chunk);
@@ -998,28 +1122,61 @@ Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
 // ===========================================================================
 
 Status MB85RC::requestRead(uint32_t address, uint8_t* data, size_t length) {
-  return _requestTransfer(TransferKind::READ, address, data, nullptr, 0, length);
+  return requestRead(_allocateRequestId(), address, data, length);
+}
+
+Status MB85RC::requestRead(uint32_t requestId, uint32_t address,
+                           uint8_t* data, size_t length) {
+  return _requestTransfer(requestId, TransferKind::READ, address,
+                          data, nullptr, 0, length);
 }
 
 Status MB85RC::requestWrite(uint32_t address, const uint8_t* data, size_t length) {
-  return _requestTransfer(TransferKind::WRITE, address, nullptr, data, 0, length);
+  return requestWrite(_allocateRequestId(), address, data, length);
+}
+
+Status MB85RC::requestWrite(uint32_t requestId, uint32_t address,
+                            const uint8_t* data, size_t length) {
+  return _requestTransfer(requestId, TransferKind::WRITE, address,
+                          nullptr, data, 0, length);
 }
 
 Status MB85RC::requestFill(uint32_t address, uint8_t value, size_t length) {
-  return _requestTransfer(TransferKind::FILL, address, nullptr, nullptr, value, length);
+  return requestFill(_allocateRequestId(), address, value, length);
+}
+
+Status MB85RC::requestFill(uint32_t requestId, uint32_t address,
+                           uint8_t value, size_t length) {
+  return _requestTransfer(requestId, TransferKind::FILL, address,
+                          nullptr, nullptr, value, length);
 }
 
 Status MB85RC::requestVerify(uint32_t address, const uint8_t* data, size_t length) {
-  return _requestTransfer(TransferKind::VERIFY, address, nullptr, data, 0, length);
+  return requestVerify(_allocateRequestId(), address, data, length);
+}
+
+Status MB85RC::requestVerify(uint32_t requestId, uint32_t address,
+                             const uint8_t* data, size_t length) {
+  return _requestTransfer(requestId, TransferKind::VERIFY, address,
+                          nullptr, data, 0, length);
+}
+
+Status MB85RC::requestVerifiedWrite(uint32_t requestId, uint32_t address,
+                                    const uint8_t* data, size_t length) {
+  return _requestTransfer(requestId, TransferKind::VERIFIED_WRITE, address,
+                          nullptr, data, 0, length);
 }
 
 Status MB85RC::pollTransfer(uint32_t nowMs, uint8_t maxInstructions) {
   _advanceWakeState(nowMs);
   if (!_transferBusy()) {
-    return _transfer.status;
+    return _transfer.resultPending ? _transfer.result.status : Status::Ok();
   }
   if (maxInstructions == 0U) {
-    return _transfer.status;
+    return _transfer.result.status;
+  }
+  if (_transfer.result.state == TransferState::WAITING_FOR_RECONCILIATION) {
+    return _transfer.result.status;
   }
 
   uint8_t budget = maxInstructions;
@@ -1030,27 +1187,93 @@ Status MB85RC::pollTransfer(uint32_t nowMs, uint8_t maxInstructions) {
   while (budget > 0U && _transferBusy()) {
     Status st = _pollTransferInstruction();
     if (st.inProgress()) {
-      _transfer.status = st;
+      _transfer.result.status = st;
       return st;
     }
     if (!st.ok()) {
-      _clearTransfer(st);
+      _finishTransfer(TransferState::FAILED, st);
       return st;
     }
-    if (_transfer.offset >= _transfer.length) {
-      _clearTransfer(Status::Ok());
+    if (_transfer.offset >= _transfer.result.bytesRequested) {
+      _finishTransfer(TransferState::SUCCEEDED, Status::Ok());
       return Status::Ok();
     }
     --budget;
   }
 
-  return _transfer.status;
+  return _transfer.result.status;
 }
 
-void MB85RC::cancelTransfer() {
-  if (_transferBusy()) {
-    _clearTransfer(busyStatus(BusyDetail::TRANSFER_CANCELLED, "Transfer cancelled"));
+Status MB85RC::getTransferProgress(TransferResult& out) const {
+  if (!_transferBusy() && !_transfer.resultPending) {
+    return Status::Error(Err::NO_RESULT, "No transfer result available");
   }
+  out = _transfer.result;
+  return Status::Ok();
+}
+
+Status MB85RC::takeTransferResult(TransferResult& out) {
+  if (!_transfer.resultPending || _transferBusy()) {
+    return Status::Error(Err::NO_RESULT, "No terminal transfer result available");
+  }
+  out = _transfer.result;
+  _transfer = TransferJob{};
+  return Status::Ok();
+}
+
+Status MB85RC::resumeVerifiedWrite(uint32_t requestId) {
+  if (!_transferBusy() || _transfer.result.kind != TransferKind::VERIFIED_WRITE ||
+      _transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Verified write is not awaiting reconciliation");
+  }
+  if (_transfer.result.requestId != requestId) {
+    return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
+  }
+  _transfer.verifyPhase = true;
+  _transfer.result.state = TransferState::ACTIVE;
+  _transfer.result.status = Status::Error(Err::IN_PROGRESS,
+                                          "Transfer in progress");
+  return Status::Ok();
+}
+
+Status MB85RC::cancelTransfer() {
+  if (!_transferBusy()) {
+    return Status::Error(Err::NO_RESULT, "No active transfer to cancel");
+  }
+  return cancelTransfer(_transfer.result.requestId);
+}
+
+Status MB85RC::cancelTransfer(uint32_t requestId) {
+  if (!_transferBusy()) {
+    return Status::Error(Err::NO_RESULT, "No active transfer to cancel");
+  }
+  if (_transfer.result.requestId != requestId) {
+    return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
+  }
+  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkLength = 0;
+  }
+  _finishTransfer(TransferState::CANCELLED,
+                  Status::Error(Err::CANCELLED, "Transfer cancelled"));
+  return Status::Ok();
+}
+
+Status MB85RC::timeoutTransfer(uint32_t requestId) {
+  if (!_transferBusy()) {
+    return Status::Error(Err::NO_RESULT, "No active transfer to time out");
+  }
+  if (_transfer.result.requestId != requestId) {
+    return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
+  }
+  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkLength = 0;
+  }
+  _finishTransfer(TransferState::TIMED_OUT,
+                  Status::Error(Err::TIMEOUT, "Transfer timed out"));
+  return Status::Ok();
 }
 
 // ===========================================================================
@@ -1070,15 +1293,24 @@ Status MB85RC::_i2cWriteReadRaw(uint8_t addr, const uint8_t* txBuf, size_t txLen
   if (_config.i2cWriteRead == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write-read not set");
   }
+  if (txLen > _config.maxTxBytes || rxLen > _config.maxRxBytes) {
+    return Status::Error(Err::INVALID_PARAM, "I2C transfer exceeds transport capacity");
+  }
   if (_highSpeedModeEnabled && addr >= cmd::MIN_ADDRESS && addr <= cmd::MAX_ADDRESS) {
     I2cSpecialTransfer transfer = _specialTransfer(addr, txBuf, txLen, rxBuf, rxLen);
     return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE_READ, transfer);
   }
-  return _config.i2cWriteRead(addr, txBuf, txLen, rxBuf, rxLen,
-                              _config.i2cTimeoutMs, _config.i2cUser);
+  const TransportResult result = _config.i2cWriteRead(
+      addr, txBuf, txLen, rxBuf, rxLen, _config.i2cTimeoutMs, _config.i2cUser);
+  return _mapTransportResult(result, txLen, rxLen, false, 0U);
 }
 
-Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len) {
+Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len,
+                            size_t memoryAddressBytes,
+                            WriteCommit* writeCommit) {
+  if (writeCommit != nullptr) {
+    *writeCommit = WriteCommit::NOT_APPLICABLE;
+  }
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
@@ -1089,18 +1321,35 @@ Status MB85RC::_i2cWriteRaw(uint8_t addr, const uint8_t* buf, size_t len) {
   if (_config.i2cWrite == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "I2C write not set");
   }
+  if (len > _config.maxTxBytes) {
+    return Status::Error(Err::INVALID_PARAM, "I2C write exceeds transport capacity");
+  }
   if (_highSpeedModeEnabled && addr >= cmd::MIN_ADDRESS && addr <= cmd::MAX_ADDRESS) {
     I2cSpecialTransfer transfer = _specialTransfer(addr, buf, len);
-    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE, transfer);
+    return _i2cSpecialRaw(I2cSpecialOp::HIGH_SPEED_WRITE, transfer, writeCommit,
+                          memoryAddressBytes);
   }
-  return _config.i2cWrite(addr, buf, len, _config.i2cTimeoutMs, _config.i2cUser);
+  const TransportResult result = _config.i2cWrite(
+      addr, buf, len, _config.i2cTimeoutMs, _config.i2cUser);
+  return _mapTransportResult(result, len, 0U, true, memoryAddressBytes,
+                             writeCommit);
 }
 
-Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer) {
+Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
+                              WriteCommit* writeCommit,
+                              size_t memoryAddressBytes) {
   if (_config.i2cSpecial == nullptr) {
-    return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
+    return Status::Error(Err::UNSUPPORTED, "Special I2C callback not set");
   }
-  return _config.i2cSpecial(op, transfer, _config.i2cTimeoutMs, _config.i2cUser);
+  if (transfer.txLen > _config.maxTxBytes || transfer.rxLen > _config.maxRxBytes) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Special I2C transfer exceeds transport capacity");
+  }
+  const TransportResult result = _config.i2cSpecial(
+      op, transfer, _config.i2cTimeoutMs, _config.i2cUser);
+  return _mapTransportResult(result, transfer.txLen, transfer.rxLen,
+                             op == I2cSpecialOp::HIGH_SPEED_WRITE,
+                             memoryAddressBytes, writeCommit);
 }
 
 Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
@@ -1110,9 +1359,6 @@ Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
 
 Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                         uint8_t* rxBuf, size_t rxLen) {
-  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
-  }
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
@@ -1130,14 +1376,9 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
   return _updateHealth(st);
 }
 
-Status MB85RC::_i2cWriteTracked(const uint8_t* buf, size_t len) {
-  return _i2cWriteTrackedAddr(_config.i2cAddress, buf, len);
-}
-
-Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len) {
-  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
-  }
+Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len,
+                                    size_t memoryAddressBytes,
+                                    WriteCommit* writeCommit) {
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
@@ -1147,19 +1388,17 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
     return Status::Error(Err::INVALID_PARAM, "Invalid I2C buffer");
   }
 
-  Status st = _i2cWriteRaw(addr, buf, len);
+  Status st = _i2cWriteRaw(addr, buf, len, memoryAddressBytes, writeCommit);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
     return st;
   }
   return _updateHealth(st);
 }
 
-Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& transfer) {
-  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return busyStatus(BusyDetail::OFFLINE, "Driver is offline; call recover()");
-  }
-
-  Status st = _i2cSpecialRaw(op, transfer);
+Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op,
+                                  const I2cSpecialTransfer& transfer,
+                                  WriteCommit* writeCommit) {
+  Status st = _i2cSpecialRaw(op, transfer, writeCommit);
   if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
       st.code == Err::UNSUPPORTED) {
     return st;
@@ -1167,12 +1406,79 @@ Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op, const I2cSpecialTransfer& tra
   return _updateHealth(st);
 }
 
+Status MB85RC::_mapTransportResult(const TransportResult& result,
+                                   size_t expectedTx, size_t expectedRx,
+                                   bool memoryWrite, size_t memoryAddressBytes,
+                                   WriteCommit* writeCommit) const {
+  const bool knownFailureCode =
+      result.code == TransportCode::NACK_ADDRESS ||
+      result.code == TransportCode::NACK_DATA ||
+      result.code == TransportCode::TIMEOUT ||
+      result.code == TransportCode::BUS_ERROR ||
+      result.code == TransportCode::IO_ERROR;
+  const bool postAcceptanceFailure =
+      result.code == TransportCode::TIMEOUT ||
+      result.code == TransportCode::BUS_ERROR ||
+      result.code == TransportCode::IO_ERROR;
+  if (writeCommit != nullptr) {
+    if (!memoryWrite) {
+      *writeCommit = WriteCommit::NOT_APPLICABLE;
+    } else if (result.ok()) {
+      *writeCommit = WriteCommit::ACCEPTED;
+    } else if (knownFailureCode &&
+               result.writeCommit == WriteCommit::NOT_COMMITTED &&
+               result.completedTxBytes <= memoryAddressBytes) {
+      *writeCommit = WriteCommit::NOT_COMMITTED;
+    } else if (postAcceptanceFailure &&
+               result.writeCommit == WriteCommit::ACCEPTED &&
+               result.completedTxBytes == expectedTx) {
+      *writeCommit = WriteCommit::ACCEPTED;
+    } else if (result.writeCommit == WriteCommit::INDETERMINATE) {
+      *writeCommit = WriteCommit::INDETERMINATE;
+    } else {
+      *writeCommit = WriteCommit::INDETERMINATE;
+    }
+  }
+
+  if (result.ok()) {
+    if (result.completedTxBytes != expectedTx ||
+        result.completedRxBytes != expectedRx) {
+      if (writeCommit != nullptr && memoryWrite) {
+        *writeCommit = WriteCommit::INDETERMINATE;
+      }
+      return Status::Error(Err::I2C_ERROR,
+                           "Transport reported short completion",
+                           result.detail);
+    }
+    return Status::Ok();
+  }
+
+  switch (result.code) {
+    case TransportCode::NACK_ADDRESS:
+      return Status::Error(Err::I2C_NACK_ADDR, "I2C address not acknowledged",
+                           result.detail);
+    case TransportCode::NACK_DATA:
+      return Status::Error(Err::I2C_NACK_DATA, "I2C data not acknowledged",
+                           result.detail);
+    case TransportCode::TIMEOUT:
+      return Status::Error(Err::I2C_TIMEOUT, "I2C transport timeout",
+                           result.detail);
+    case TransportCode::BUS_ERROR:
+      return Status::Error(Err::I2C_BUS, "I2C bus error", result.detail);
+    case TransportCode::IO_ERROR:
+    case TransportCode::OK:
+    default:
+      return Status::Error(Err::I2C_ERROR, "I2C transport error", result.detail);
+  }
+}
+
 // ===========================================================================
 // Internal Helpers
 // ===========================================================================
 
 bool MB85RC::_transferBusy() const {
-  return _transfer.kind != TransferKind::NONE;
+  return _transfer.result.state == TransferState::ACTIVE ||
+         _transfer.result.state == TransferState::WAITING_FOR_RECONCILIATION;
 }
 
 Status MB85RC::_ensureNoTransferActive() const {
@@ -1183,37 +1489,51 @@ Status MB85RC::_ensureNoTransferActive() const {
 }
 
 Status MB85RC::_canQueueTransfer() {
-  if (_initialized && _driverState == DriverState::OFFLINE && !_allowOfflineI2c) {
-    return busyStatus(BusyDetail::OFFLINE, "Driver offline until recover()");
-  }
   return _ensureAwakeForI2c();
 }
 
-void MB85RC::_clearTransfer(const Status& status) {
-  _transfer = TransferJob{};
-  _transfer.status = status;
+void MB85RC::_finishTransfer(TransferState state, const Status& status) {
+  _transfer.result.state = state;
+  _transfer.result.status = status;
+  _transfer.resultPending = true;
+  _transfer.data = nullptr;
+  _transfer.constData = nullptr;
 }
 
-Status MB85RC::_requestTransfer(TransferKind kind, uint32_t address, uint8_t* data,
+Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
+                                uint32_t address, uint8_t* data,
                                 const uint8_t* constData, uint8_t fillValue,
                                 size_t length) {
   if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() not called");
+    return Status::Error(Err::NOT_INITIALIZED, "Driver not bound");
   }
   if (_transferBusy()) {
     return busyStatus(BusyDetail::TRANSFER_ACTIVE, "Transfer in progress");
+  }
+  if (_transfer.resultPending) {
+    return busyStatus(BusyDetail::RESULT_PENDING,
+                      "Terminal transfer result not consumed");
   }
   Status ready = _canQueueTransfer();
   if (!ready.ok()) {
     return ready;
   }
+  if (requestId == 0U) {
+    return Status::Error(Err::INVALID_PARAM, "Request ID must be nonzero");
+  }
   if (length == 0U) {
     return Status::Error(Err::INVALID_PARAM, "Transfer length must be > 0");
   }
   if ((kind == TransferKind::READ && data == nullptr) ||
-      ((kind == TransferKind::WRITE || kind == TransferKind::VERIFY) &&
+      ((kind == TransferKind::WRITE || kind == TransferKind::VERIFY ||
+        kind == TransferKind::VERIFIED_WRITE) &&
        constData == nullptr)) {
     return Status::Error(Err::INVALID_PARAM, "Invalid transfer buffer");
+  }
+  if (kind == TransferKind::VERIFIED_WRITE &&
+      (length > maxWriteDataBytes() || length > maxReadDataBytes())) {
+    return Status::Error(Err::INVALID_PARAM,
+                         "Verified write exceeds one-transaction limit");
   }
   if (!_fitsRange(address, length)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
@@ -1222,49 +1542,85 @@ Status MB85RC::_requestTransfer(TransferKind kind, uint32_t address, uint8_t* da
   }
 
   _transfer = TransferJob{};
-  _transfer.kind = kind;
-  _transfer.address = address;
+  _transfer.result.requestId = requestId;
+  _transfer.result.kind = kind;
+  _transfer.result.state = TransferState::ACTIVE;
+  _transfer.result.status = Status::Error(Err::IN_PROGRESS, "Transfer in progress");
+  _transfer.result.address = address;
+  _transfer.result.bytesRequested = length;
+  _transfer.result.writeCommit =
+      (kind == TransferKind::WRITE || kind == TransferKind::FILL ||
+       kind == TransferKind::VERIFIED_WRITE)
+          ? WriteCommit::NOT_COMMITTED
+          : WriteCommit::NOT_APPLICABLE;
+  if (kind == TransferKind::WRITE || kind == TransferKind::FILL ||
+      kind == TransferKind::VERIFIED_WRITE) {
+    _transfer.result.writeStatus =
+        Status::Error(Err::IN_PROGRESS, "Write not attempted");
+  }
+  if (kind == TransferKind::VERIFY || kind == TransferKind::VERIFIED_WRITE) {
+    _transfer.result.verifyStatus =
+        Status::Error(Err::IN_PROGRESS, "Verify not attempted");
+  }
   _transfer.data = data;
   _transfer.constData = constData;
   _transfer.fillValue = fillValue;
-  _transfer.length = length;
   _transfer.offset = 0;
-  _transfer.status = Status::Error(Err::IN_PROGRESS, "Transfer in progress");
   return Status::Ok();
 }
 
 Status MB85RC::_pollTransferInstruction() {
   if (!_transferBusy()) {
-    return _transfer.status;
+    return _transfer.result.status;
   }
-  if (_transfer.offset >= _transfer.length) {
+  if (_transfer.result.state == TransferState::WAITING_FOR_RECONCILIATION) {
+    return _transfer.result.status;
+  }
+  if (_transfer.offset >= _transfer.result.bytesRequested) {
     return Status::Ok();
   }
 
-  const uint32_t chunkAddress = _transfer.address + static_cast<uint32_t>(_transfer.offset);
-  size_t chunk = _transfer.length - _transfer.offset;
+  const uint32_t chunkAddress =
+      _transfer.result.address + static_cast<uint32_t>(_transfer.offset);
+  size_t chunk = _transfer.result.bytesRequested - _transfer.offset;
 
-  switch (_transfer.kind) {
+  switch (_transfer.result.kind) {
     case TransferKind::READ:
-      if (chunk > cmd::MAX_READ_CHUNK) {
-        chunk = cmd::MAX_READ_CHUNK;
+      if (chunk > maxReadDataBytes()) {
+        chunk = maxReadDataBytes();
       }
       {
         Status st = _readMemory(chunkAddress, _transfer.data + _transfer.offset, chunk);
         if (st.ok()) {
           _transfer.offset += chunk;
+          _transfer.result.bytesCompleted = _transfer.offset;
+        } else {
+          _transfer.result.failedChunkOffset = _transfer.offset;
+          _transfer.result.failedChunkLength = chunk;
         }
         return st;
       }
 
     case TransferKind::WRITE:
-      if (chunk > cmd::MAX_WRITE_CHUNK) {
-        chunk = cmd::MAX_WRITE_CHUNK;
+      if (chunk > maxWriteDataBytes()) {
+        chunk = maxWriteDataBytes();
       }
       {
-        Status st = _writeMemory(chunkAddress, _transfer.constData + _transfer.offset, chunk);
+        WriteCommit commit = WriteCommit::INDETERMINATE;
+        Status st = _writeMemory(chunkAddress,
+                                 _transfer.constData + _transfer.offset,
+                                 chunk, &commit);
+        _transfer.result.writeCommit = commit;
+        _transfer.result.writeStatus = st;
         if (st.ok()) {
           _transfer.offset += chunk;
+          _transfer.result.bytesCompleted = _transfer.offset;
+        } else {
+          _transfer.result.failedChunkOffset = _transfer.offset;
+          _transfer.result.failedChunkLength = chunk;
+          if (commit == WriteCommit::ACCEPTED) {
+            _transfer.result.bytesCompleted = _transfer.offset + chunk;
+          }
         }
         return st;
       }
@@ -1273,24 +1629,40 @@ Status MB85RC::_pollTransferInstruction() {
       if (chunk > cmd::MAX_FILL_CHUNK) {
         chunk = cmd::MAX_FILL_CHUNK;
       }
+      if (chunk > maxWriteDataBytes()) {
+        chunk = maxWriteDataBytes();
+      }
       {
         uint8_t fillBuf[cmd::MAX_FILL_CHUNK];
         std::memset(fillBuf, _transfer.fillValue, chunk);
-        Status st = _writeMemory(chunkAddress, fillBuf, chunk);
+        WriteCommit commit = WriteCommit::INDETERMINATE;
+        Status st = _writeMemory(chunkAddress, fillBuf, chunk, &commit);
+        _transfer.result.writeCommit = commit;
+        _transfer.result.writeStatus = st;
         if (st.ok()) {
           _transfer.offset += chunk;
+          _transfer.result.bytesCompleted = _transfer.offset;
+        } else {
+          _transfer.result.failedChunkOffset = _transfer.offset;
+          _transfer.result.failedChunkLength = chunk;
+          if (commit == WriteCommit::ACCEPTED) {
+            _transfer.result.bytesCompleted = _transfer.offset + chunk;
+          }
         }
         return st;
       }
 
     case TransferKind::VERIFY:
-      if (chunk > cmd::MAX_READ_CHUNK) {
-        chunk = cmd::MAX_READ_CHUNK;
+      if (chunk > maxReadDataBytes()) {
+        chunk = maxReadDataBytes();
       }
       {
-        uint8_t readBuf[cmd::MAX_READ_CHUNK];
+        uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
         Status st = _readMemory(chunkAddress, readBuf, chunk);
         if (!st.ok()) {
+          _transfer.result.verifyStatus = st;
+          _transfer.result.failedChunkOffset = _transfer.offset;
+          _transfer.result.failedChunkLength = chunk;
           return st;
         }
 
@@ -1298,11 +1670,84 @@ Status MB85RC::_pollTransferInstruction() {
           if (readBuf[i] != _transfer.constData[_transfer.offset + i]) {
             const size_t mismatch = _transfer.offset + i;
             _transfer.offset = mismatch;
+            _transfer.result.bytesCompleted = mismatch;
+            _transfer.result.mismatchOffset = mismatch;
+            _transfer.result.expected = _transfer.constData[mismatch];
+            _transfer.result.actual = readBuf[i];
+            _transfer.result.match = false;
+            _transfer.result.verifyStatus =
+                Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                              static_cast<int32_t>(mismatch));
             return Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
                                  static_cast<int32_t>(mismatch));
           }
         }
         _transfer.offset += chunk;
+        _transfer.result.bytesCompleted = _transfer.offset;
+        _transfer.result.match = (_transfer.offset == _transfer.result.bytesRequested);
+        _transfer.result.verifyStatus = Status::Ok();
+        return Status::Ok();
+      }
+
+    case TransferKind::VERIFIED_WRITE:
+      if (!_transfer.verifyPhase) {
+        WriteCommit commit = WriteCommit::INDETERMINATE;
+        Status st = _writeMemory(_transfer.result.address,
+                                 _transfer.constData,
+                                 _transfer.result.bytesRequested,
+                                 &commit);
+        _transfer.result.writeStatus = st;
+        _transfer.result.writeCommit = commit;
+        if (st.ok()) {
+          _transfer.verifyPhase = true;
+          _transfer.result.bytesCompleted = _transfer.result.bytesRequested;
+          return Status::Ok();
+        }
+        _transfer.result.failedChunkOffset = 0;
+        _transfer.result.failedChunkLength = _transfer.result.bytesRequested;
+        if (commit == WriteCommit::ACCEPTED) {
+          _transfer.result.bytesCompleted = _transfer.result.bytesRequested;
+        }
+        if (commit == WriteCommit::INDETERMINATE ||
+            commit == WriteCommit::ACCEPTED) {
+          _transfer.result.state = TransferState::WAITING_FOR_RECONCILIATION;
+          _transfer.result.status =
+              Status::Error(Err::IN_PROGRESS,
+                            "Waiting for owner reconciliation");
+          return _transfer.result.status;
+        }
+        return st;
+      }
+      {
+        uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
+        Status st = _readMemory(_transfer.result.address, readBuf,
+                                _transfer.result.bytesRequested);
+        _transfer.result.verifyStatus = st;
+        if (!st.ok()) {
+          _transfer.result.failedChunkOffset = 0;
+          _transfer.result.failedChunkLength =
+              _transfer.result.bytesRequested;
+          return st;
+        }
+        for (size_t i = 0; i < _transfer.result.bytesRequested; ++i) {
+          if (readBuf[i] != _transfer.constData[i]) {
+            _transfer.offset = i;
+            _transfer.result.bytesCompleted = i;
+            _transfer.result.mismatchOffset = i;
+            _transfer.result.expected = _transfer.constData[i];
+            _transfer.result.actual = readBuf[i];
+            _transfer.result.match = false;
+            _transfer.result.verifyStatus =
+                Status::Error(Err::VERIFY_MISMATCH, "Verify mismatch",
+                              static_cast<int32_t>(i));
+            return _transfer.result.verifyStatus;
+          }
+        }
+        _transfer.offset = _transfer.result.bytesRequested;
+        _transfer.result.bytesCompleted = _transfer.result.bytesRequested;
+        _transfer.result.match = true;
+        _transfer.result.verifyStatus = Status::Ok();
+        _transfer.result.writeCommit = WriteCommit::VERIFIED;
         return Status::Ok();
       }
 
@@ -1312,11 +1757,26 @@ Status MB85RC::_pollTransferInstruction() {
   }
 }
 
+uint32_t MB85RC::_allocateRequestId() {
+  uint32_t id = _nextRequestId++;
+  if (id == 0U) {
+    id = _nextRequestId++;
+  }
+  if ((_transferBusy() || _transfer.resultPending) &&
+      id == _transfer.result.requestId) {
+    id = _nextRequestId++;
+    if (id == 0U) {
+      id = _nextRequestId++;
+    }
+  }
+  return id;
+}
+
 Status MB85RC::_readMemory(uint32_t address, uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
   }
-  if (len > cmd::MAX_READ_CHUNK) {
+  if (len > maxReadDataBytes()) {
     return Status::Error(Err::INVALID_PARAM, "Read chunk too large");
   }
 
@@ -1341,7 +1801,7 @@ Status MB85RC::_readMemoryRaw(uint32_t address, uint8_t* buf, size_t len) {
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
   }
-  if (len > cmd::MAX_READ_CHUNK) {
+  if (len > maxReadDataBytes()) {
     return Status::Error(Err::INVALID_PARAM, "Read chunk too large");
   }
 
@@ -1359,13 +1819,14 @@ Status MB85RC::_readMemoryRaw(uint32_t address, uint8_t* buf, size_t len) {
   return st;
 }
 
-Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len) {
+Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len,
+                            WriteCommit* writeCommit) {
   // Byte/Sequential Write: [S] [addr W] [addrHi] [addrLo] [data...] [P]
   // No write delay needed - FRAM writes immediately.
   if (buf == nullptr || len == 0) {
     return Status::Error(Err::INVALID_PARAM, "Invalid write buffer");
   }
-  if (len > cmd::MAX_WRITE_CHUNK) {
+  if (len > maxWriteDataBytes()) {
     return Status::Error(Err::INVALID_PARAM, "Write chunk too large");
   }
 
@@ -1381,7 +1842,8 @@ Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len) {
   }
   std::memcpy(&payload[enc.len], buf, len);
 
-  st = _i2cWriteTrackedAddr(enc.i2cAddress, payload, enc.len + len);
+  st = _i2cWriteTrackedAddr(enc.i2cAddress, payload, enc.len + len, enc.len,
+                            writeCommit);
   if (st.ok()) {
     _setCurrentAddressAfterTransfer(address, len);
   } else if (st.code != Err::INVALID_CONFIG && st.code != Err::INVALID_PARAM) {
@@ -1420,32 +1882,28 @@ Status MB85RC::_readDeviceIdBytesRaw(DeviceIdRaw& raw) {
   // The device address word sent after 0xF8 tells the device which
   // chip on the bus should respond.  R/W bit is don't-care.
   uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
-
-  // Write phase to reserved address 0xF8, then read phase from 0xF9
-  // We use the raw write-read with the reserved Device ID addresses.
-  Status st = _i2cWriteReadRaw(cmd::DEVICE_ID_ADDR_W >> 1, txBuf, 1,
-                               raw.bytes, cmd::DEVICE_ID_LEN);
-  if (!st.ok()) {
-    return st;
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
   }
-
-  return Status::Ok();
+  I2cSpecialTransfer transfer = _specialTransfer(
+      _config.i2cAddress, txBuf, 1, raw.bytes, cmd::DEVICE_ID_LEN);
+  return _i2cSpecialRaw(I2cSpecialOp::READ_DEVICE_ID, transfer);
 }
 
 Status MB85RC::_readDeviceIdBytesTracked(DeviceIdRaw& raw) {
   uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
-
-  Status st = _i2cWriteReadTrackedAddr(cmd::DEVICE_ID_ADDR_W >> 1, txBuf, 1,
-                                       raw.bytes, cmd::DEVICE_ID_LEN);
-  if (!st.ok()) {
-    return st;
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
   }
-
-  return Status::Ok();
+  I2cSpecialTransfer transfer = _specialTransfer(
+      _config.i2cAddress, txBuf, 1, raw.bytes, cmd::DEVICE_ID_LEN);
+  return _i2cSpecialTracked(I2cSpecialOp::READ_DEVICE_ID, transfer);
 }
 
 bool MB85RC::_isValidAddress(uint32_t address) const {
-  return address <= maxAddress();
+  return _variant != nullptr && address <= maxAddress();
 }
 
 bool MB85RC::_fitsRange(uint32_t address, size_t len) const {
@@ -1572,28 +2030,7 @@ Status MB85RC::_validateActiveDeviceId(const DeviceId& id) const {
 }
 
 DeviceVariant MB85RC::_activeVariantEnum() const {
-  if (_variant == nullptr) {
-    return _config.expectedVariant;
-  }
-  if (std::strcmp(_variant->name, "MB85RC04V") == 0) {
-    return DeviceVariant::MB85RC04V;
-  }
-  if (std::strcmp(_variant->name, "MB85RC16V") == 0) {
-    return DeviceVariant::MB85RC16V;
-  }
-  if (std::strcmp(_variant->name, "MB85RC64TA") == 0) {
-    return DeviceVariant::MB85RC64TA;
-  }
-  if (std::strcmp(_variant->name, "MB85RC256V") == 0) {
-    return DeviceVariant::MB85RC256V;
-  }
-  if (std::strcmp(_variant->name, "MB85RC512T") == 0) {
-    return DeviceVariant::MB85RC512T;
-  }
-  if (std::strcmp(_variant->name, "MB85RC1MT") == 0) {
-    return DeviceVariant::MB85RC1MT;
-  }
-  return DeviceVariant::AUTO;
+  return (_variant != nullptr) ? _variant->variant : DeviceVariant::AUTO;
 }
 
 Status MB85RC::_ensureAwakeForI2c() {
@@ -1602,6 +2039,10 @@ Status MB85RC::_ensureAwakeForI2c() {
   }
   if (_sleepState == SleepState::WAKING) {
     _advanceWakeState(_nowMs());
+  }
+  if (_sleepState == SleepState::UNKNOWN) {
+    return busyStatus(BusyDetail::SLEEP_STATE_UNKNOWN,
+                      "Sleep state unknown; call wake()");
   }
   if (_sleepState == SleepState::ASLEEP) {
     return busyStatus(BusyDetail::ASLEEP, "Device is asleep; call wake()");
@@ -1679,45 +2120,14 @@ Status MB85RC::_updateHealth(const Status& st) {
     _consecutiveFailures++;
   }
 
-  if (_consecutiveFailures >= _config.offlineThreshold) {
+  if (_config.offlineThreshold != 0U &&
+      _consecutiveFailures >= _config.offlineThreshold) {
     _driverState = DriverState::OFFLINE;
   } else {
     _driverState = DriverState::DEGRADED;
   }
 
   return st;
-}
-
-Status MB85RC::_recordFailure(const Status& st) {
-  if (!_initialized || st.ok() || st.inProgress() || !shouldTrackHealthFailure(st.code)) {
-    return st;
-  }
-
-  const uint32_t now = _nowMs();
-  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
-
-  _lastError = st;
-  _lastErrorMs = now;
-  _totalFailures++;
-  if (_consecutiveFailures < maxU8) {
-    _consecutiveFailures++;
-  }
-
-  if (_consecutiveFailures >= _config.offlineThreshold) {
-    _driverState = DriverState::OFFLINE;
-  } else {
-    _driverState = DriverState::DEGRADED;
-  }
-
-  return st;
-}
-
-void MB85RC::_reassertOfflineLatch() {
-  _driverState = DriverState::OFFLINE;
-  const uint8_t threshold = _config.offlineThreshold == 0 ? 1 : _config.offlineThreshold;
-  if (_consecutiveFailures < threshold) {
-    _consecutiveFailures = threshold;
-  }
 }
 
 uint32_t MB85RC::_nowMs() const {

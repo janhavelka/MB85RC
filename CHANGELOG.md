@@ -7,7 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Changed
+
+- Consolidated maintained documentation around durable API, transport, and
+  qualification contracts; removed the obsolete product-specific report,
+  duplicate README release summaries, and transient audit/status narration.
+- Made Doxygen fail on undocumented public API, missing parameter/return
+  contracts, and documentation warnings; documented all public headers and
+  excluded internal agent instructions from generated docs.
+- Aligned README, native ESP-IDF adapter guidance, contribution validation,
+  release checks, documentation indexes, and the security policy with the v4
+  transport and lifecycle contracts.
+
+## [4.0.0] - 2026-07-19
+
+### Added
+
+- Zero-I/O `bind()` lifecycle for passive external-owner integrations.
+- Terminal transport types (`TransportResult`, `TransportCode`, and
+  `WriteCommit`) with exact completed lengths and conservative physical-effect
+  reporting.
+- Explicit `I2cSpecialOp::READ_DEVICE_ID` routing for the reserved F8/F9
+  protocol without weakening normal 7-bit address policy.
+- Pure `decodeDeviceId()` and exact decoded `DeviceId::variant` identity.
+- Configured TX/RX capabilities and active-variant
+  `maxWriteDataBytes()`/`maxReadDataBytes()` limits.
+- Exact one-transaction `readOnce()`, `writeOnce()`, and `verifyOnce()` APIs.
+- Request-qualified cooperative jobs whose results retain no caller-buffer
+  pointers, with exactly-once terminal consumption, cancellation,
+  owner-directed timeout, and write/readback reconciliation after an
+  indeterminate write.
+- Stable CI reference using PlatformIO 6.1.18 and pioarduino Espressif platform
+  54.03.20 while retaining broader ESP32-S2/S3 compatibility builds.
+
+### Changed
+
+- Breaking: injected normal and special I2C callbacks return terminal
+  `TransportResult` instead of general driver `Status`.
+- `begin()` now composes passive binding with one compatibility presence or
+  identity check and retains the valid binding after I/O/identity failure.
+- Invalid `bind()` requests leave an existing valid binding unchanged; declared
+  transport capabilities may exceed the fixed core buffers and are clamped by
+  each operation.
+- Driver health is observational only. DEGRADED/OFFLINE no longer suppresses
+  owner-requested transport or claims bus-recovery authority.
+- Staged terminal progress and ambiguous write effects remain observable until
+  explicitly consumed.
+- Ambiguous Sleep-entry and wake failures now enter `SleepState::UNKNOWN`, which
+  blocks normal access until an explicit successful wake is allowed to recover.
+- Examples use typed terminal callbacks, explicit Device ID special transport,
+  passive binding, and retained staged-result consumption.
+- Public documentation distinguishes steady-state, multi-step runtime, and
+  rare/maintenance operation bounds and scheduling suitability.
+
+### Fixed
+
+- Prevented a non-terminal callback status from replaying a staged write.
+- Corrected write-chunk terminology so configured TX capacity includes memory
+  address bytes and data capacity does not.
+- Removed callback-owned message pointers from durable diagnostic state.
+- Preserved partial progress and request provenance across failure,
+  cancellation, and timeout.
+- Counted a full `WriteCommit::ACCEPTED` error outcome in accepted-prefix
+  progress while retaining the transport error and failed-chunk evidence.
+- Preserved indeterminate failed-write evidence through cancel, timeout, and
+  `end()`, and require a matching manufacturer before reporting an exact
+  decoded variant.
+- Preserved proven `NOT_COMMITTED` results when only a one- or two-byte memory
+  address prefix completed, while normalizing contradictory NACK/full-acceptance
+  claims conservatively.
+- Rejected unusable `AUTO` bindings that omit the required Device-ID special
+  transport.
+- Kept ESP-IDF invalid-response writes indeterminate when the backend cannot
+  identify the NACKed byte, and corrected Wire buffer-short counts to report
+  zero physical TX progress before `endTransmission()`.
+- Preserved the v3 numeric values of existing `I2cSpecialOp` members and
+  appended `READ_DEVICE_ID` without renumbering the public enum.
+
+### Removed
+
+- Breaking: removed redundant public `VariantInfo::highSpeedMode` and
+  `VariantInfo::sleepMode` fields; use `supportsHighSpeedMode` and
+  `supportsSleepMode` capability fields instead.
 
 ## [3.0.0] - 2026-06-25
 
@@ -76,10 +157,10 @@ No unreleased changes.
   Device-ID-capable parts select active capacity from readback. Fixed-BOM
   production integrations should still set the exact expected variant.
 - Documented synchronous whole-range memory helpers as convenience APIs for
-  TunnelMonitor-style poll-budgeted integrations.
+  poll-budgeted external-owner integrations.
 - Documented timeout status policy and possible-write ambiguity after
   transport timeouts.
-- Documented the staged transfer API as the recommended TunnelMonitor
+- Documented the staged transfer API as the recommended external-owner
   integration path for preserving one or more bounded backend FRAM chunks per
   scheduler poll.
 - `Config::i2cTimeoutMs` is now bounded to
@@ -241,7 +322,8 @@ No unreleased changes.
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/janhavelka/MB85RC/compare/v1.1.0...v1.1.1

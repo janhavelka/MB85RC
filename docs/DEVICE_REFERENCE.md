@@ -131,6 +131,9 @@ records this state contract but does not insert a hidden delay.
   relying on current-address state.
 - Keep bus-level retries, clock switching, Sleep wake delay, and bus recovery
   in the application-owned transport or bus manager.
+- Route the reserved Device ID transaction through
+  `I2cSpecialOp::READ_DEVICE_ID`; do not make `0x7C` a normal scanned device
+  address.
 - Datasheet bus recovery/software reset, when needed, is transport-owned. The
   extracted notes describe nine repetitions of `START` plus one data `1` before
   read/write retry, and warn not to force SDA high while a slave may be holding
@@ -140,6 +143,9 @@ records this state contract but does not insert a hidden delay.
 
 - The core owns no I2C controller, pins, bus locks, retries, clock changes, or
   framework time sources.
+- Each injected callback is one terminal physical attempt with complete-length
+  reporting. A failed memory write is indeterminate unless the transport can
+  prove that no requested data was accepted.
 - `Config::expectedVariant = DeviceVariant::AUTO` works only for variants with
   a Device ID command. Fixed-BOM products should set the exact expected variant.
 - `MB85RC16V` has no Device ID command in the local datasheet set and must be

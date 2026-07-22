@@ -1,9 +1,8 @@
 # MB85RC Documentation
 
 This directory contains maintained project documentation and vendor reference
-PDFs. Historical audit reports and generated PDF-to-Markdown dumps are not kept
-as source documentation; their durable conclusions are folded into the README,
-the public API comments, and the files listed here.
+PDFs. One-off working reports and generated documentation are excluded; durable
+contracts belong in the README, public API comments, and the files listed here.
 
 ## Maintained Docs
 
@@ -12,7 +11,12 @@ the public API comments, and the files listed here.
 | [DEVICE_REFERENCE.md](DEVICE_REFERENCE.md) | MB85RC-family variant, addressing, protocol, timing, WP, Device ID, High-speed, and Sleep notes used by the driver. |
 | [IDF_PORT.md](IDF_PORT.md) | Native ESP-IDF example boundary, command contract, and validation notes. |
 | [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Release verification checklist before tagging or publishing. |
-| [reports/HIL_SUMMARY.md](reports/HIL_SUMMARY.md) | Compact retained HIL evidence summary after raw runner artifacts were pruned from the release tree. |
+| [reports/HIL_SUMMARY.md](reports/HIL_SUMMARY.md) | Historical HIL ledger with explicit fixture, revision, result, and evidence-grade limits. |
+
+Project-level maintained documents are [README.md](../README.md),
+[CHANGELOG.md](../CHANGELOG.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and
+[SECURITY.md](../SECURITY.md). Public API documentation is generated from the
+headers under `include/MB85RC/` with [Doxyfile](../Doxyfile).
 
 ## Vendor References
 

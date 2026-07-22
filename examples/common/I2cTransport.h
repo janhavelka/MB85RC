@@ -14,7 +14,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-#include "MB85RC/Status.h"
+#include "MB85RC/Config.h"
 
 namespace transport {
 
@@ -44,22 +44,37 @@ inline bool interfaceReset(int sda, int scl) {
   return true;
 }
 
-inline MB85RC::Status mapWireResult(uint8_t result, const char* context) {
+inline MB85RC::TransportResult mapWireResult(uint8_t result, size_t txBytes,
+                                             size_t rxBytes,
+                                             bool memoryWriteMayCommit = false) {
+  const MB85RC::WriteCommit uncertainCommit =
+      memoryWriteMayCommit ? MB85RC::WriteCommit::INDETERMINATE
+                           : MB85RC::WriteCommit::NOT_APPLICABLE;
   switch (result) {
     case 0:
-      return MB85RC::Status::Ok();
+      return MB85RC::TransportResult::Ok(txBytes, rxBytes);
     case 1:
-      return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, context, result);
+      return MB85RC::TransportResult::Error(
+          MB85RC::TransportCode::IO_ERROR, result,
+          memoryWriteMayCommit ? MB85RC::WriteCommit::NOT_COMMITTED
+                               : MB85RC::WriteCommit::NOT_APPLICABLE);
     case 2:
-      return MB85RC::Status::Error(MB85RC::Err::I2C_NACK_ADDR, context, result);
+      return MB85RC::TransportResult::Error(
+          MB85RC::TransportCode::NACK_ADDRESS, result,
+          memoryWriteMayCommit ? MB85RC::WriteCommit::NOT_COMMITTED
+                               : MB85RC::WriteCommit::NOT_APPLICABLE);
     case 3:
-      return MB85RC::Status::Error(MB85RC::Err::I2C_NACK_DATA, context, result);
+      return MB85RC::TransportResult::Error(MB85RC::TransportCode::NACK_DATA,
+                                             result, uncertainCommit);
     case 4:
-      return MB85RC::Status::Error(MB85RC::Err::I2C_BUS, context, result);
+      return MB85RC::TransportResult::Error(MB85RC::TransportCode::BUS_ERROR,
+                                             result, uncertainCommit);
     case 5:
-      return MB85RC::Status::Error(MB85RC::Err::I2C_TIMEOUT, context, result);
+      return MB85RC::TransportResult::Error(MB85RC::TransportCode::TIMEOUT,
+                                             result, uncertainCommit);
     default:
-      return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, context, result);
+      return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR,
+                                             result, uncertainCommit);
   }
 }
 
@@ -74,34 +89,42 @@ inline MB85RC::Status mapWireResult(uint8_t result, const char* context) {
  * @param len Number of bytes
  * @param timeoutMs Timeout requested by the driver (advisory only)
  * @param user Pointer to TwoWire instance
- * @return Status OK on success, I2C error on failure
+ * @return Terminal result for exactly one physical I2C transaction.
  */
-inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
-                                uint32_t timeoutMs, void* user) {
+inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
+                                         size_t len, uint32_t timeoutMs,
+                                         void* user) {
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "Wire instance is null");
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, -1,
+        MB85RC::WriteCommit::NOT_COMMITTED);
   }
   (void)timeoutMs;
   if (!data || len == 0) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid I2C write params");
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, -2,
+        MB85RC::WriteCommit::NOT_COMMITTED);
   }
 
   // Check for oversized writes (ESP32 Wire buffer is 128 bytes)
   if (len > 128) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Write exceeds I2C buffer",
-                                 static_cast<int32_t>(len));
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(len),
+        MB85RC::WriteCommit::NOT_COMMITTED);
   }
 
   wire->beginTransmission(addr);
   size_t written = wire->write(data, len);
   if (written != len) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C write incomplete",
-                                  static_cast<int32_t>(written));
+    // Bytes copied into Wire's software buffer have not reached the I2C bus.
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
+        MB85RC::WriteCommit::NOT_COMMITTED, 0U, 0U);
   }
 
   uint8_t result = wire->endTransmission(true);  // Send STOP
-  return mapWireResult(result, "I2C write failed");
+  return mapWireResult(result, len, 0U, true);
 }
 
 /**
@@ -117,55 +140,85 @@ inline MB85RC::Status wireWrite(uint8_t addr, const uint8_t* data, size_t len,
  * @param rxLen RX length
  * @param timeoutMs Timeout requested by the driver (advisory only)
  * @param user Pointer to TwoWire instance
- * @return Status OK on success, I2C error on failure
+ * @return Terminal result for exactly one physical I2C transaction.
  */
-inline MB85RC::Status wireWriteRead(uint8_t addr, const uint8_t* tx, size_t txLen,
-                                    uint8_t* rx, size_t rxLen, uint32_t timeoutMs,
-                                    void* user) {
+inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
+                                             size_t txLen, uint8_t* rx,
+                                             size_t rxLen, uint32_t timeoutMs,
+                                             void* user) {
   TwoWire* wire = static_cast<TwoWire*>(user);
   if (wire == nullptr) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_CONFIG, "Wire instance is null");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -1);
   }
   (void)timeoutMs;
   if ((txLen > 0 && tx == nullptr) || (rxLen > 0 && rx == nullptr)) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid I2C read params");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -2);
   }
   if (txLen == 0 && rxLen == 0) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "I2C read length invalid");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -3);
   }
   if (txLen > 128 || rxLen > 128) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "I2C read exceeds buffer");
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -4);
   }
 
   if (txLen > 0) {
     wire->beginTransmission(addr);
     size_t written = wire->write(tx, txLen);
     if (written != txLen) {
-      return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C write incomplete",
-                                   static_cast<int32_t>(written));
+      // No endTransmission() means no physical TX phase has started.
+      return MB85RC::TransportResult::Error(
+          MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
+          MB85RC::WriteCommit::NOT_APPLICABLE, 0U, 0U);
     }
 
     uint8_t result = wire->endTransmission(false);  // Repeated start
     if (result != 0) {
-      return mapWireResult(result, "I2C write phase failed");
+      return mapWireResult(result, 0U, 0U);
     }
   }
 
   size_t read = wire->requestFrom(addr, static_cast<uint8_t>(rxLen));
   if (read != rxLen) {
-    return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C read length mismatch",
-                                  static_cast<int32_t>(read));
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(read),
+        MB85RC::WriteCommit::NOT_APPLICABLE, txLen, read);
   }
 
   for (size_t i = 0; i < rxLen; ++i) {
     if (wire->available()) {
       rx[i] = static_cast<uint8_t>(wire->read());
     } else {
-      return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR, "I2C data not available");
+      return MB85RC::TransportResult::Error(
+          MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(i),
+          MB85RC::WriteCommit::NOT_APPLICABLE, txLen, i);
     }
   }
 
-  return MB85RC::Status::Ok();
+  return MB85RC::TransportResult::Ok(txLen, rxLen);
+}
+
+/**
+ * @brief Wire implementation of the reserved Device ID transaction.
+ *
+ * Device ID is deliberately routed through the special callback so a normal
+ * owner backend and its 0x03..0x77 scan policy do not need to accept 0x7C.
+ * High-speed and Sleep controller sequences remain unsupported by this simple
+ * example adapter.
+ */
+inline MB85RC::TransportResult wireSpecial(
+    MB85RC::I2cSpecialOp op, const MB85RC::I2cSpecialTransfer& transfer,
+    uint32_t timeoutMs, void* user) {
+  if (op != MB85RC::I2cSpecialOp::READ_DEVICE_ID ||
+      transfer.txData == nullptr || transfer.txLen != 1U ||
+      transfer.rxData == nullptr || transfer.rxLen != MB85RC::cmd::DEVICE_ID_LEN) {
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -5);
+  }
+  const MB85RC::TransportResult result =
+      wireWriteRead(0x7CU, transfer.txData, transfer.txLen, transfer.rxData,
+                    transfer.rxLen, timeoutMs, user);
+  return result.ok()
+             ? MB85RC::TransportResult::Ok(transfer.txLen, transfer.rxLen)
+             : MB85RC::TransportResult::Error(result.code, result.detail);
 }
 
 /**
