@@ -49,6 +49,7 @@ MANDATORY_COMMANDS = [
     "hs",
     "hs support",
     "hs enter",
+    "hs exit",
     "sleep",
     "sleep support",
     "sleep enter",

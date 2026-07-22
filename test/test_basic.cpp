@@ -4053,6 +4053,7 @@ void test_bind_is_zero_io_and_fixed_variant_is_immediately_usable() {
   cfg.i2cTimeoutMs = 5U;
   cfg.maxTxBytes = 126U;
   cfg.maxRxBytes = 124U;
+  cfg.i2cSpecial = nullptr;
   Status st = dev.bind(cfg);
   TEST_ASSERT_TRUE(st.ok());
   TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
@@ -4613,6 +4614,7 @@ void test_verified_write_success_uses_different_polls_and_one_callback_budget() 
   FakeBus bus;
   MB85RC::MB85RC dev;
   Config cfg = make64TaConfig(bus);
+  cfg.i2cTimeoutMs = 5U;
   cfg.maxTxBytes = 126U;
   cfg.maxRxBytes = 124U;
   TEST_ASSERT_TRUE(dev.bind(cfg).ok());
@@ -4623,9 +4625,11 @@ void test_verified_write_success_uses_different_polls_and_one_callback_budget() 
   TEST_ASSERT_TRUE(dev.pollTransfer(10U, 1U).inProgress());
   TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
   TEST_ASSERT_EQUAL_UINT32(0U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(5U, bus.lastTimeoutMs);
   TEST_ASSERT_TRUE(dev.pollTransfer(11U, 1U).ok());
   TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
   TEST_ASSERT_EQUAL_UINT32(1U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(5U, bus.lastTimeoutMs);
   TEST_ASSERT_EQUAL_CHAR('W', bus.callOrder[0]);
   TEST_ASSERT_EQUAL_CHAR('R', bus.callOrder[1]);
   TransferResult result;
@@ -5078,6 +5082,74 @@ void test_end_active_transfer_retains_cancelled_result_and_request_identity() {
   TEST_ASSERT_TRUE(dev.takeTransferResult(rebound).ok());
 }
 
+void test_two_owner_instances_keep_transport_jobs_and_results_independent() {
+  FakeBus busA;
+  FakeBus busB;
+  MB85RC::MB85RC devA;
+  MB85RC::MB85RC devB;
+  Config cfgA = make64TaConfig(busA);
+  Config cfgB = make64TaConfig(busB);
+  cfgA.i2cTimeoutMs = 5U;
+  cfgB.i2cTimeoutMs = 5U;
+  cfgA.maxTxBytes = 126U;
+  cfgB.maxTxBytes = 126U;
+  cfgA.maxRxBytes = 124U;
+  cfgB.maxRxBytes = 124U;
+  cfgA.i2cSpecial = nullptr;
+  cfgB.i2cSpecial = nullptr;
+
+  TEST_ASSERT_TRUE(devA.bind(cfgA).ok());
+  TEST_ASSERT_TRUE(devB.bind(cfgB).ok());
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(busA));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(busB));
+
+  uint8_t dataA[124]{};
+  uint8_t dataB[124]{};
+  for (size_t i = 0; i < sizeof(dataA); ++i) {
+    dataA[i] = static_cast<uint8_t>(i ^ 0x5AU);
+    dataB[i] = static_cast<uint8_t>(i ^ 0xA5U);
+  }
+
+  TEST_ASSERT_TRUE(devA.requestWrite(0xA001U, 0x0100U, dataA, sizeof(dataA)).ok());
+  TEST_ASSERT_TRUE(devB.requestWrite(0xB002U, 0x0200U, dataB, sizeof(dataB)).ok());
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(busA));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(busB));
+
+  TEST_ASSERT_TRUE(devB.pollTransfer(10U, 1U).ok());
+  TEST_ASSERT_TRUE(devA.pollTransfer(20U, 1U).ok());
+  TEST_ASSERT_EQUAL_UINT32(1U, busB.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(1U, busA.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(5U, busB.lastTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT32(5U, busA.lastTimeoutMs);
+
+  TransferResult resultA;
+  TransferResult resultB;
+  TEST_ASSERT_TRUE(devA.takeTransferResult(resultA).ok());
+  TEST_ASSERT_TRUE(devB.takeTransferResult(resultB).ok());
+  TEST_ASSERT_EQUAL_UINT32(0xA001U, resultA.requestId);
+  TEST_ASSERT_EQUAL_UINT32(0xB002U, resultB.requestId);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::WRITE),
+                          static_cast<uint8_t>(resultA.kind));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::WRITE),
+                          static_cast<uint8_t>(resultB.kind));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::SUCCEEDED),
+                          static_cast<uint8_t>(resultA.state));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::SUCCEEDED),
+                          static_cast<uint8_t>(resultB.state));
+  TEST_ASSERT_EQUAL_HEX32(0x0100U, resultA.address);
+  TEST_ASSERT_EQUAL_HEX32(0x0200U, resultB.address);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(dataA), static_cast<uint32_t>(resultA.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(dataB), static_cast<uint32_t>(resultB.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(resultA.writeCommit));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::ACCEPTED),
+                          static_cast<uint8_t>(resultB.writeCommit));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(dataA, &busA.mem[0x0100U], sizeof(dataA));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(dataB, &busB.mem[0x0200U], sizeof(dataB));
+  TEST_ASSERT_EQUAL_UINT8(0U, busA.mem[0x0200U]);
+  TEST_ASSERT_EQUAL_UINT8(0U, busB.mem[0x0100U]);
+}
+
 // ===========================================================================
 // Test runner
 // ===========================================================================
@@ -5263,6 +5335,7 @@ int main() {
   RUN_TEST(test_failed_write_commit_claims_are_normalized_conservatively);
   RUN_TEST(test_verified_write_rejects_unbound_with_zero_callbacks);
   RUN_TEST(test_end_active_transfer_retains_cancelled_result_and_request_identity);
+  RUN_TEST(test_two_owner_instances_keep_transport_jobs_and_results_independent);
 
   return UNITY_END();
 }

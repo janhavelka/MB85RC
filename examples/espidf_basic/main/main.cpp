@@ -531,6 +531,12 @@ bool rangeFits(uint32_t addr, uint32_t len) {
   return len > 0U && capacity > 0U && addr < capacity && len <= (capacity - addr);
 }
 
+MB85RC::Status restoreVerified(uint32_t address,
+                               const uint8_t* original,
+                               size_t len) {
+  return gFram.writeVerify(address, original, len);
+}
+
 void printConfirmationRequired(const char* command, const char* effect, const char* confirmedForm) {
   printf("%s\n", effect);
   puts("Confirmation required because this command changes FRAM contents.");
@@ -582,10 +588,10 @@ void printHelp() {
   puts("  write <addr> <byte> [byte...] | write! <addr> <byte> [byte...]");
   puts("  fill <addr> <value> <len> | fill! <addr> <value> <len>");
   puts("  current / cur [len] | id | idraw | variants | size");
-  puts("  hs | hs support | hs enter");
+  puts("  hs | hs support | hs enter | hs exit");
   puts("  sleep | sleep support | sleep enter | sleep wake");
   puts("  drv | heap | iface_reset | probe | recover | verbose [0|1]");
-  puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite!");
+  puts("  stress [N] | stress! [N] | selftest | selftest! | rw_suite | rw_suite! (scratch restored)");
   puts("  xfer_demo | xfer_demo!");
   puts("  stress_mix [N] | stress_mix! [N] | randbench [N] | randbench! [N]");
   puts("  typed_demo | typed_demo!");
@@ -613,6 +619,12 @@ void printDrv() {
          static_cast<unsigned long>(gFram.totalSuccess()),
          static_cast<unsigned long>(gFram.totalFailures()),
          static_cast<unsigned>(gFram.consecutiveFailures()));
+  printf("transport_timeout_ms=%lu max_tx=%u max_rx=%u write_data=%u read_data=%u\n",
+         static_cast<unsigned long>(snap.i2cTimeoutMs),
+         static_cast<unsigned>(snap.maxTxBytes),
+         static_cast<unsigned>(snap.maxRxBytes),
+         static_cast<unsigned>(snap.maxWriteDataBytes),
+         static_cast<unsigned>(snap.maxReadDataBytes));
   printf("hs_support=%s hs_enabled=%s normal_hz=%lu hs_hz=%lu sleep_support=%s sleep_state=%s tREC_us=%u wake_ready_ms=%lu\n",
          snap.highSpeedModeSupported ? "yes" : "no",
          snap.highSpeedModeEnabled ? "yes" : "no",
@@ -659,7 +671,11 @@ void handleHighSpeedCommand(const char* full) {
     }
     return;
   }
-  puts("Usage: hs | hs support | hs enter");
+  if (strcmp(full, "hs exit") == 0) {
+    printStatus("hs exit", gFram.exitHighSpeedMode());
+    return;
+  }
+  puts("Usage: hs | hs support | hs enter | hs exit");
 }
 
 void printSleepSupport() {
@@ -896,7 +912,7 @@ void runSelfTest() {
     printStatus("selftest readback", st);
     printf("selftest_pattern=%s\n", (st.ok() && readBack == 0xA5U) ? "PASS" : "FAIL");
   }
-  printStatus("selftest restore", gFram.writeByte(0, original));
+  printStatus("selftest restore", restoreVerified(0U, &original, 1U));
 }
 
 void runStress(uint32_t count) {
@@ -926,7 +942,7 @@ void runStress(uint32_t count) {
     }
     ++ok;
   }
-  printStatus("stress restore", gFram.writeByte(0, original));
+  printStatus("stress restore", restoreVerified(0U, &original, 1U));
   printf("stress_ok=%lu/%lu\n", static_cast<unsigned long>(ok), static_cast<unsigned long>(count));
 }
 
@@ -970,7 +986,8 @@ void runStressMix(uint32_t count) {
     }
     ++ok;
   }
-  printStatus("stress_mix restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+  printStatus("stress_mix restore",
+              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
   printf("stress_mix_ok=%lu/%lu\n",
          static_cast<unsigned long>(ok),
          static_cast<unsigned long>(count));
@@ -991,7 +1008,8 @@ void runRwSuite() {
     st = gFram.fill(RW_SUITE_ADDR, 0x00U, sizeof(scratch));
     printStatus("rw_suite fill", st);
   }
-  printStatus("rw_suite restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+  printStatus("rw_suite restore",
+              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 MB85RC::Status takeStagedTerminal(MB85RC::Status terminal) {
@@ -1193,7 +1211,8 @@ void runRandBench(uint32_t count) {
          static_cast<unsigned long>(count),
          static_cast<long long>(elapsedUs),
          (st.ok() && verify.match) ? "yes" : "no");
-  printStatus("randbench restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+  printStatus("randbench restore",
+              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void runTypedDemo() {
@@ -1211,7 +1230,8 @@ void runTypedDemo() {
   if (st.ok()) {
     verifyMemory(RW_SUITE_ADDR, typedBytes, sizeof(typedBytes));
   }
-  printStatus("typed_demo restore", gFram.write(RW_SUITE_ADDR, original, sizeof(original)));
+  printStatus("typed_demo restore",
+              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void handleCommand(char* line) {
@@ -1223,7 +1243,7 @@ void handleCommand(char* line) {
   } else if (strcmp(full, "scan") == 0) {
     scanBus();
   } else if (strcmp(full, "hs") == 0 || strcmp(full, "hs support") == 0 ||
-             strcmp(full, "hs enter") == 0) {
+             strcmp(full, "hs enter") == 0 || strcmp(full, "hs exit") == 0) {
     handleHighSpeedCommand(full);
   } else if (strcmp(full, "sleep") == 0 || strcmp(full, "sleep support") == 0 ||
              strcmp(full, "sleep enter") == 0 || strcmp(full, "sleep wake") == 0) {

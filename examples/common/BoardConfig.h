@@ -35,7 +35,10 @@ static constexpr int I2C_SCL = 9;
 static constexpr uint32_t I2C_FREQ_HZ = 400000;
 
 /// @brief I2C timeout in milliseconds for example transactions.
-static constexpr uint16_t I2C_TIMEOUT_MS = 50;
+///
+/// Five milliseconds covers one 124-byte transaction at the configured
+/// 400 kHz clock while exercising a production-style bounded owner deadline.
+static constexpr uint16_t I2C_TIMEOUT_MS = 5;
 
 /// @brief LED pin. Example default for ESP32-S3 (RGB LED on GPIO48).
 /// Set to -1 to disable.

@@ -433,6 +433,12 @@ bool rangeFitsActiveCapacity(uint32_t address, size_t len) {
   return len <= remaining;
 }
 
+MB85RC::Status restoreVerified(uint32_t address,
+                               const uint8_t* original,
+                               size_t len) {
+  return device.writeVerify(address, original, len);
+}
+
 void printRangeError(uint32_t address, size_t len) {
   Serial.printf("  Range 0x%04lX + %lu exceeds active capacity (%lu bytes, max 0x%04lX)\n",
                 static_cast<unsigned long>(address),
@@ -588,6 +594,12 @@ void printSettings() {
                 LOG_COLOR_RESET);
   Serial.printf("  I2C address: 0x%02X\n", snap.i2cAddress);
   Serial.printf("  I2C timeout: %lu ms\n", static_cast<unsigned long>(snap.i2cTimeoutMs));
+  Serial.printf("  Transport capacity: TX=%u RX=%u bytes\n",
+                static_cast<unsigned>(snap.maxTxBytes),
+                static_cast<unsigned>(snap.maxRxBytes));
+  Serial.printf("  One-transaction data: write=%u read=%u bytes\n",
+                static_cast<unsigned>(snap.maxWriteDataBytes),
+                static_cast<unsigned>(snap.maxReadDataBytes));
   Serial.printf("  Offline threshold: %u\n", snap.offlineThreshold);
   Serial.printf("  nowMs hook: %s%s%s\n",
                 snap.hasNowMsHook ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
@@ -634,7 +646,7 @@ void printHighSpeedSupport() {
   Serial.println("  Diagnostic bus clock: BoardConfig/Wire setting; this example does not prove 3.4 MHz operation");
   Serial.println("  App action: application bus manager must configure/operate the bus at 3.4 MHz after HS entry");
   Serial.println("  Note: STOP exits high-speed mode; enabled driver transfers send the HS prefix per transaction");
-  Serial.println("  Arduino Wire diagnostic transport: raw HS master-code callback not installed");
+  Serial.println("  Arduino Wire diagnostic transport: Device ID special operation only; raw HS unsupported");
   Serial.println("  Hardware validation: not claimed by this diagnostic");
 }
 
@@ -644,16 +656,18 @@ void handleHighSpeedCommand(const String& cmd) {
     return;
   }
   if (cmd == "hs enter") {
-    MB85RC::Status st = device.enterHighSpeedMode();
+    MB85RC::Status st = MB85RC::Status::Error(
+        MB85RC::Err::UNSUPPORTED,
+        "Arduino diagnostic transport does not implement raw HS transfers");
     printStatus(st);
-    if (st.ok()) {
-      LOGI("High-speed transfer mode requested; entry prefix is sent with each memory transfer.");
-    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
-      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
-    }
+    LOGW("This diagnostic adapter implements only the Device ID special operation.");
     return;
   }
-  LOGW("Usage: hs | hs support | hs enter");
+  if (cmd == "hs exit") {
+    printStatus(device.exitHighSpeedMode());
+    return;
+  }
+  LOGW("Usage: hs | hs support | hs enter | hs exit");
 }
 
 void printSleepSupport() {
@@ -665,7 +679,7 @@ void printSleepSupport() {
   Serial.println("  Entry: F8h + active device address word + repeated-start 86h");
   Serial.println("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
   Serial.println("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
-  Serial.println("  Arduino Wire diagnostic transport: raw Sleep callback not installed");
+  Serial.println("  Arduino Wire diagnostic transport: Device ID special operation only; raw Sleep unsupported");
   Serial.println("  Hardware validation: not claimed by this diagnostic");
 }
 
@@ -675,23 +689,19 @@ void handleSleepCommand(const String& cmd) {
     return;
   }
   if (cmd == "sleep enter") {
-    MB85RC::Status st = device.enterSleep();
+    MB85RC::Status st = MB85RC::Status::Error(
+        MB85RC::Err::UNSUPPORTED,
+        "Arduino diagnostic transport does not implement raw Sleep entry");
     printStatus(st);
-    if (st.code == MB85RC::Err::INVALID_CONFIG) {
-      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
-    }
+    LOGW("This diagnostic adapter implements only the Device ID special operation.");
     return;
   }
   if (cmd == "sleep wake") {
-    MB85RC::Status st = device.wake();
+    MB85RC::Status st = MB85RC::Status::Error(
+        MB85RC::Err::UNSUPPORTED,
+        "Arduino diagnostic transport does not implement raw Sleep wake");
     printStatus(st);
-    if (st.ok()) {
-      delay(1);
-      device.tick(millis());
-      printCheckStatus("recover after sleep wake", device.recover());
-    } else if (st.code == MB85RC::Err::INVALID_CONFIG) {
-      LOGW("No raw special I2C callback is configured for this diagnostic Arduino transport.");
-    }
+    LOGW("This diagnostic adapter implements only the Device ID special operation.");
     return;
   }
   LOGW("Usage: sleep | sleep support | sleep enter | sleep wake");
@@ -953,13 +963,22 @@ void runStress(int count) {
     finishStressStats();
     return;
   }
+  const uint32_t scratchAddr =
+      rangeFitsActiveCapacity(RW_SUITE_ADDR, 1U) ? RW_SUITE_ADDR : 0U;
+  uint8_t original = 0;
+  MB85RC::Status backup = device.readByte(scratchAddr, original);
+  printCheckStatus("backup stress byte", backup);
+  if (!backup.ok()) {
+    stressStats.lastError = backup;
+    finishStressStats();
+    return;
+  }
 
   for (int i = 0; i < count; ++i) {
     stressStats.attempts++;
-    const uint32_t addr = static_cast<uint32_t>(i) % capacity;
     const uint8_t pattern = static_cast<uint8_t>(i & 0xFF);
 
-    MB85RC::Status st = device.writeByte(addr, pattern);
+    MB85RC::Status st = device.writeByte(scratchAddr, pattern);
     if (!st.ok()) {
       stressStats.errors++;
       stressStats.lastError = st;
@@ -968,7 +987,7 @@ void runStress(int count) {
       }
     } else {
       uint8_t readBack = 0;
-      st = device.readByte(addr, readBack);
+      st = device.readByte(scratchAddr, readBack);
       if (!st.ok()) {
         stressStats.errors++;
         stressStats.lastError = st;
@@ -990,6 +1009,13 @@ void runStress(int count) {
                         static_cast<uint32_t>(stressStats.target),
                         static_cast<uint32_t>(stressStats.success),
                         stressStats.errors);
+  }
+
+  MB85RC::Status restore = restoreVerified(scratchAddr, &original, 1U);
+  printCheckStatus("restore stress byte", restore);
+  if (!restore.ok()) {
+    stressStats.errors++;
+    stressStats.lastError = restore;
   }
 
   const uint32_t successDelta = device.totalSuccess() - succBefore;
@@ -1032,6 +1058,17 @@ void runStressMix(int count) {
     LOGW("Active capacity is zero");
     return;
   }
+  static constexpr size_t STRESS_MIX_SCRATCH_LEN = 16U;
+  const uint32_t scratchAddr =
+      rangeFitsActiveCapacity(RW_SUITE_ADDR, STRESS_MIX_SCRATCH_LEN)
+          ? RW_SUITE_ADDR
+          : 0U;
+  uint8_t original[STRESS_MIX_SCRATCH_LEN] = {};
+  MB85RC::Status backup = device.read(scratchAddr, original, sizeof(original));
+  printCheckStatus("backup stress_mix scratch", backup);
+  if (!backup.ok()) {
+    return;
+  }
   uint32_t okTotal = 0;
   uint32_t failTotal = 0;
 
@@ -1041,27 +1078,30 @@ void runStressMix(int count) {
 
     switch (op) {
       case 0: {
-        const uint32_t addr = static_cast<uint32_t>(i) % capacity;
+        const uint32_t addr =
+            scratchAddr + (static_cast<uint32_t>(i) % STRESS_MIX_SCRATCH_LEN);
         st = device.writeByte(addr, static_cast<uint8_t>(i & 0xFF));
         break;
       }
       case 1: {
         uint8_t val = 0;
-        st = device.readByte(static_cast<uint32_t>(i) % capacity, val);
+        const uint32_t addr =
+            scratchAddr + (static_cast<uint32_t>(i) % STRESS_MIX_SCRATCH_LEN);
+        st = device.readByte(addr, val);
         break;
       }
       case 2: {
         uint8_t buf[4] = {0xDE, 0xAD, 0xBE, 0xEF};
-        st = device.write(0x0100, buf, 4);
+        st = device.write(scratchAddr, buf, sizeof(buf));
         break;
       }
       case 3: {
         uint8_t buf[4] = {};
-        st = device.read(0x0100, buf, 4);
+        st = device.read(scratchAddr, buf, sizeof(buf));
         break;
       }
       case 4: {
-        st = device.fill(0x0200, static_cast<uint8_t>(i & 0xFF), 8);
+        st = device.fill(scratchAddr + 8U, static_cast<uint8_t>(i & 0xFF), 8U);
         break;
       }
       case 5: {
@@ -1113,6 +1153,13 @@ void runStressMix(int count) {
                         static_cast<uint32_t>(count),
                         okTotal,
                         failTotal);
+  }
+
+  MB85RC::Status restore =
+      restoreVerified(scratchAddr, original, sizeof(original));
+  printCheckStatus("restore stress_mix scratch", restore);
+  if (!restore.ok()) {
+    failTotal++;
   }
 
   const uint32_t elapsed = millis() - startMs;
@@ -1508,20 +1555,19 @@ void runReadWriteSuite() {
 
   if (haveScratch) {
     reportStatus("restore scratch region",
-                 typed_memory::writeBytes(device,
-                                          RW_SUITE_ADDR,
-                                          originalScratch,
-                                          sizeof(originalScratch)));
+                 restoreVerified(RW_SUITE_ADDR,
+                                 originalScratch,
+                                 sizeof(originalScratch)));
   }
   if (haveFill) {
     reportStatus("restore fill region",
-                 typed_memory::writeBytes(device,
-                                          RW_SUITE_FILL_ADDR,
-                                          originalFill,
-                                          sizeof(originalFill)));
+                 restoreVerified(RW_SUITE_FILL_ADDR,
+                                 originalFill,
+                                 sizeof(originalFill)));
   }
   if (haveTail) {
-    reportStatus("restore tail region", device.write(tailAddr, originalTail, sizeof(originalTail)));
+    reportStatus("restore tail region",
+                 restoreVerified(tailAddr, originalTail, sizeof(originalTail)));
   }
 
   Serial.printf("Read/write suite result: pass=%s%lu%s fail=%s%lu%s\n",
@@ -1760,10 +1806,10 @@ void runRandomBench(int count) {
 
   if (!st.ok()) {
     printStatus(st);
-    (void)typed_memory::writeBytes(device,
-                                   benchAddr,
-                                   originalWindow,
-                                   sizeof(originalWindow));
+    printCheckStatus("restore benchmark window after write failure",
+                     restoreVerified(benchAddr,
+                                     originalWindow,
+                                     sizeof(originalWindow)));
     return;
   }
 
@@ -1785,10 +1831,10 @@ void runRandomBench(int count) {
 
   if (!st.ok()) {
     printStatus(st);
-    (void)typed_memory::writeBytes(device,
-                                   benchAddr,
-                                   originalWindow,
-                                   sizeof(originalWindow));
+    printCheckStatus("restore benchmark window after read failure",
+                     restoreVerified(benchAddr,
+                                     originalWindow,
+                                     sizeof(originalWindow)));
     return;
   }
 
@@ -1813,10 +1859,7 @@ void runRandomBench(int count) {
   printBenchmarkLine("random-read-byte", static_cast<uint32_t>(count), readElapsedUs, 1U);
   Serial.printf("  Read mismatches: %lu\n", static_cast<unsigned long>(mismatches));
 
-  st = typed_memory::writeBytes(device,
-                                benchAddr,
-                                originalWindow,
-                                sizeof(originalWindow));
+  st = restoreVerified(benchAddr, originalWindow, sizeof(originalWindow));
   printCheckStatus("restore benchmark window", st);
 }
 
@@ -1908,7 +1951,7 @@ void runTypedDemo() {
                 st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE ? "PASS" : "FAIL",
                 LOG_COLOR_RESET);
 
-  st = typed_memory::writeBytes(device, TYPED_DEMO_ADDR, original, sizeof(original));
+  st = restoreVerified(TYPED_DEMO_ADDR, original, sizeof(original));
   printCheckStatus("restore typed demo region", st);
 }
 
@@ -1937,10 +1980,10 @@ void printHelp() {
   cli::printHelpItem("variants", "List known family variants and driver support");
   cli::printHelpItem("size", "Print active variant capacity");
   cli::printHelpItem("hs / hs support", "Report active variant High-speed capability");
-  cli::printHelpItem("hs enter", "Enable HS-prefixed transfers if a raw special callback is configured");
+  cli::printHelpItem("hs enter / hs exit", "Enable or disable HS-prefixed transfers if supported by the transport");
   cli::printHelpItem("sleep / sleep support", "Report active variant Sleep capability and tREC");
-  cli::printHelpItem("sleep enter", "Send Sleep entry sequence if a raw special callback is configured");
-  cli::printHelpItem("sleep wake", "Send wake stimulus, wait tREC, then recover if supported");
+  cli::printHelpItem("sleep enter", "Send Sleep entry sequence if supported by the special transport");
+  cli::printHelpItem("sleep wake", "Wake, wait tREC, then recover if supported by the special transport");
 
   cli::printHelpSection("Diagnostics");
   cli::printHelpItem("heap", "Show example firmware heap telemetry");
@@ -1949,11 +1992,11 @@ void printHelp() {
   cli::printHelpItem("probe", "Probe device (no health tracking)");
   cli::printHelpItem("recover", "Manual recovery attempt");
   cli::printHelpItem("verbose [0|1]", "Enable/disable verbose output");
-  cli::printHelpItem("stress [N]", "Run N write/read/verify cycles (default 10)");
-  cli::printHelpItem("stress_mix [N]", "Run N mixed-operation cycles (default 10)");
+  cli::printHelpItem("stress [N]", "Run N write/read cycles on one backed-up byte (default 10)");
+  cli::printHelpItem("stress_mix [N]", "Run N mixed cycles on a backed-up 16-byte window (default 10)");
   cli::printHelpItem("selftest", "Run diagnostic self-test report with restore checks");
-  cli::printHelpItem("rw_suite", "Run read/write/fill/verify suite with best-effort restore");
-  cli::printHelpItem("xfer_demo", "Run poll-chunked transfer API demo with best-effort restore");
+  cli::printHelpItem("rw_suite", "Run read/write/fill/verify suite with readback-verified restore");
+  cli::printHelpItem("xfer_demo", "Run poll-chunked transfer API demo and verify restored bytes");
   cli::printHelpItem("randbench [N]", "Run N random writes + N random reads with timing (default 4096)");
   cli::printHelpItem("typed_demo", "Run fixed-width typed storage demo and restore data");
 }
@@ -1993,7 +2036,7 @@ void processCommand(const String& cmdLine) {
     return;
   }
 
-  if (cmd == "hs" || cmd == "hs support" || cmd == "hs enter") {
+  if (cmd == "hs" || cmd == "hs support" || cmd == "hs enter" || cmd == "hs exit") {
     handleHighSpeedCommand(cmd);
     return;
   }
@@ -2538,6 +2581,9 @@ void setup() {
   cfg.i2cUser = &Wire;
   cfg.i2cAddress = 0x50;
   cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
+  // Total TX includes the two address bytes, so both data limits are 124.
+  cfg.maxTxBytes = 126U;
+  cfg.maxRxBytes = 124U;
   cfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
   cfg.nowMs = exampleNowMs;
   cfg.offlineThreshold = 5;

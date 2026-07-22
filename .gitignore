@@ -1,4 +1,5 @@
 .pio
+__pycache__/
 *.tar.gz
 docs/doxygen/
 .vscode/.browse.c_cpp.db*

@@ -640,13 +640,24 @@ the application layer:
   - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware
   - `current` / `cur` for current-address reads
   - `id` / `idraw` for parsed and raw Device ID visibility
-  - `hs`, `hs support`, and `hs enter` for High-speed capability diagnostics
+  - `hs`, `hs support`, `hs enter`, and `hs exit` for High-speed capability diagnostics
   - `sleep`, `sleep support`, `sleep enter`, and `sleep wake` for Sleep mode diagnostics
-  - `drv`, `heap`, `probe`, `recover`, `selftest`, `stress`, `stress_mix` for diagnostics
-  - `rw_suite` for read/write/fill/verify diagnostics with best-effort restore
-  - `xfer_demo` for poll-chunked transfer API diagnostics with best-effort restore, including zero-budget, two-instruction, and high-budget-clamp polling checks
+  - `drv`, `heap`, `probe`, `recover`, and restore-verified `selftest`, `stress`, `stress_mix` diagnostics
+  - `rw_suite` for read/write/fill/verify diagnostics with readback-verified restore
+  - `xfer_demo` for poll-chunked transfer API diagnostics with a staged verify of the restored bytes, including zero-budget, two-instruction, and high-budget-clamp polling checks
   - `randbench [N]` for random-access timing over a scratch window with compact restore status
   - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
+
+The Arduino stress commands temporarily mutate only a bounded scratch byte or
+16-byte scratch window, back it up first, and write-verify restoration on every
+completed run. A failed restore is reported explicitly; the commands never
+claim that temporary writes are atomic or safe against power loss.
+
+The bundled board configuration uses a 5 ms controller/callback timeout and
+declares 126 TX bytes plus 124 RX bytes. On two-byte-address variants this
+exercises 124-byte read/write data chunks, matching a conservative external
+I2C-owner integration envelope while keeping timeout ownership in the example
+transport.
 
 - `examples/espidf_basic/`
   - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.
@@ -675,11 +686,17 @@ xfer_demo!                # Confirmed poll-chunked transfer API demo
 randbench! 4096           # Confirmed random writes + random reads timing
 typed_demo!               # Confirmed explicit typed value storage demo
 hs support                # Show active variant High-speed capability
-hs enter                  # Enable HS-prefixed transfers if supported by variant/transport
+hs enter / hs exit        # Enable/disable HS-prefixed transfers when the adapter supports raw HS
 sleep support             # Show active variant Sleep capability and tREC
 sleep enter               # Send Sleep entry sequence if supported
 sleep wake                # Wake, wait recovery interval, then recover
 ```
+
+The bundled Arduino `Wire` adapter implements the Device ID special operation
+only. Its CLI rejects `hs enter`, `sleep enter`, and `sleep wake` as
+`UNSUPPORTED` before bus traffic. Full HS/Sleep diagnostics
+require an application-owned raw special-operation adapter, such as the native
+ESP-IDF example transport.
 
 ### Example Helpers
 
@@ -737,6 +754,14 @@ idf.py -C examples/espidf_basic set-target esp32s3 build
 idf.py -C examples/espidf_basic set-target esp32s2 build
 doxygen Doxyfile
 ```
+
+Add `--include-stress` to a hardware run to include the temporarily mutating,
+restore-safe `stress` and `stress_mix` diagnostics. HIL reports distinguish
+target resets and serial reconnects from read-only `version` commands used to
+recover prompt framing on ESP32-S3 native USB. Integration fixtures can add
+`--require-timeout-ms`, `--require-max-write-data`, and
+`--require-max-read-data` to make their transport envelope part of the strict
+gate.
 
 ## Documentation
 

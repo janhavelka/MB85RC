@@ -19,6 +19,23 @@ code, another device variant, or another product target.
 These runs are evidence for this MB85RC64TA ESP32-S3 fixture only. They are not
 MB85RC256V production-readiness evidence.
 
+### 2026-07-22 COM20 qualification
+
+- Host port: `COM20`, baud `115200`; Arduino pinned ESP32-S3 build from the
+  v4.0.0 worktree at `219a6ab`.
+- MCU reported by esptool: ESP32-S3 QFN56 revision 0.2, 4 MB embedded flash,
+  2 MB embedded PSRAM. This generic fixture is not the production
+  TunnelMonitor-node N16R8 target.
+- FRAM: `MB85RC64TA`, address `0x50`, manufacturer `0x00A`, product `0x358`,
+  8192 bytes. The shared bus also contained devices at `0x3C` and `0x51`.
+- The one-hour broad run used the earlier 50 ms example-controller timeout.
+  The post-fix qualification used a 5 ms timeout, TX capacity 126, RX capacity
+  124, and therefore 124-byte read/write data limits.
+- Full-capacity CRC32 was `0xE30F00B8` before the run, after the one-hour run,
+  after the exact-envelope run, and after the application reboot check.
+- Raw transcripts and runner JSON/Markdown reports remain local under
+  `.pio/hil/`; they are intentionally not release artifacts.
+
 ## MB85RC256V fixture
 
 - Port: `COM5`, baud `115200`.
@@ -42,6 +59,15 @@ behavior, or controlled power loss.
 | 2026-06-23 | MB85RC64TA | 2 min | strict PASS | 29 PASS / 0 FAIL / 0 UNKNOWN | 219 PASS / 0 FAIL / 0 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline 344040, final 343784, min 340976 | Strict runner, heap command present, no resets or reconnects. |
 | 2026-06-23/24 | MB85RC64TA | 20 h | strict FAIL | 29 PASS / 0 FAIL / 0 UNKNOWN | 142816 PASS / 0 FAIL / 69 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline 344040, final 343784, min 340976 | Strict failed only because UNKNOWN count was nonzero; no FAIL, no target reset, no serial reconnect. |
 | 2026-06-26/28 | MB85RC256V v3.0.0 | 48 h | strict FAIL | 29 PASS / 0 FAIL / 0 UNKNOWN | 316112 PASS / 0 FAIL / 154 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline 344040, final 343784, min 340976 | Strict failed because UNKNOWN count was nonzero; no FAIL, target reset, or serial reconnect. |
+| 2026-07-22 | MB85RC64TA COM20, broad envelope | 1 h | strict PASS | 31 PASS / 0 FAIL / 0 UNKNOWN | 7372 PASS / 0 FAIL / 0 UNKNOWN | READY, 120769 successes, consecutive failures 0, total failures 0 | baseline/final 343012, min 340204, largest final 278516 | Zero target resets/reconnects; worst command 0.875 s; 31 bounded read-only framing syncs; full-chip CRC preserved. |
+| 2026-07-22 | MB85RC64TA COM20, 5 ms/124-byte envelope | 5 min | strict PASS | 32 PASS / 0 FAIL / 0 UNKNOWN | 610 PASS / 0 FAIL / 0 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline/final 343012, min 340204, largest final 278516 | Zero target resets/reconnects; worst command 0.750 s; four framing syncs; full-chip CRC preserved. |
+
+The exact-envelope soak was preceded by a strict 34-check functional run that
+also included 200-cycle backed-up/restored `stress` and `stress_mix` commands.
+A separate application-reset run passed 32 checks and preserved the same
+full-chip CRC. High-speed/Sleep electrical behavior, WP-high, device removal,
+and controlled power-loss cases were not run because this fixture provides no
+safe authority for those hardware manipulations.
 
 ## UNKNOWN results
 

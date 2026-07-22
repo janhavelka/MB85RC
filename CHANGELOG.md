@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `hs exit` diagnostic command parity for the Arduino and native ESP-IDF CLIs.
+- Native integration coverage for two independently bound owner instances using
+  the 5 ms, 124-byte staged-transfer contract planned by TunnelMonitor-node.
+
+### Fixed
+
+- The serial HIL runner now requires complete prompt-framed command responses,
+  treats non-OK terminal statuses as failures, recovers native-USB reset handles
+  with a bounded reconnect deadline, opens with DTR/RTS disabled before attach,
+  reports read-only framing syncs, and leaves mode diagnostics in a usable state
+  before memory tests.
+- The Arduino diagnostic CLI now rejects raw High-speed and Sleep operations
+  that its Device-ID-only special adapter cannot implement, before issuing bus
+  traffic or leaving the driver's Sleep state ambiguous.
+- Arduino `stress` and `stress_mix` now use bounded backed-up scratch regions and
+  verify restoration instead of overwriting application data across the active
+  capacity or trusting write acknowledgement alone.
+- Mutating Arduino and native ESP-IDF diagnostics now use readback-verified
+  restoration paths instead of treating a restore write ACK as persistence.
+- The Arduino bring-up fixture now exercises a 5 ms, 124-byte data envelope for
+  external-owner integration qualification, with strict HIL requirements and
+  settings output for those bounds.
 
 ## [4.0.0] - 2026-07-22
 
