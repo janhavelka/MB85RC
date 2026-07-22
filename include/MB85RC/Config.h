@@ -54,6 +54,26 @@ struct TransportResult {
   /// special-operation envelope bytes are not included.
   size_t completedRxBytes = 0;
 
+  /// Construct a terminal transport result.
+  ///
+  /// The explicit constructor keeps value construction available on C++11
+  /// toolchains, where a type with default member initializers is not an
+  /// aggregate.
+  /// @param resultCode Terminal transport classification.
+  /// @param detailCode Transport-owned numeric diagnostic detail.
+  /// @param commit Memory-write effect knowledge.
+  /// @param txBytes Callback-buffer TX bytes completed.
+  /// @param rxBytes Callback-buffer RX bytes completed.
+  constexpr TransportResult(TransportCode resultCode = TransportCode::IO_ERROR,
+                            int32_t detailCode = 0,
+                            WriteCommit commit = WriteCommit::INDETERMINATE,
+                            size_t txBytes = 0, size_t rxBytes = 0)
+      : code(resultCode),
+        detail(detailCode),
+        writeCommit(commit),
+        completedTxBytes(txBytes),
+        completedRxBytes(rxBytes) {}
+
   /// @return true only when the complete callback transaction succeeded.
   constexpr bool ok() const { return code == TransportCode::OK; }
 

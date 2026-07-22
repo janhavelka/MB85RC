@@ -7,19 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+No unreleased changes.
 
-- Consolidated maintained documentation around durable API, transport, and
-  qualification contracts; removed the obsolete product-specific report,
-  duplicate README release summaries, and transient audit/status narration.
-- Made Doxygen fail on undocumented public API, missing parameter/return
-  contracts, and documentation warnings; documented all public headers and
-  excluded internal agent instructions from generated docs.
-- Aligned README, native ESP-IDF adapter guidance, contribution validation,
-  release checks, documentation indexes, and the security policy with the v4
-  transport and lifecycle contracts.
-
-## [4.0.0] - 2026-07-19
+## [4.0.0] - 2026-07-22
 
 ### Added
 
@@ -59,9 +49,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passive binding, and retained staged-result consumption.
 - Public documentation distinguishes steady-state, multi-step runtime, and
   rare/maintenance operation bounds and scheduling suitability.
+- Consolidated maintained documentation around durable API, transport, and
+  qualification contracts; removed the obsolete product-specific report,
+  duplicate README release summaries, and transient audit/status narration.
+- Made Doxygen fail on undocumented public API, missing parameter/return
+  contracts, and documentation warnings; documented all public headers and
+  excluded internal agent instructions from generated docs.
+- Aligned README, native ESP-IDF adapter guidance, contribution validation,
+  release checks, documentation indexes, and the security policy with the v4
+  transport and lifecycle contracts.
 
 ### Fixed
 
+- Restored C++11 Arduino build compatibility for `TransportResult` value
+  construction while preserving its terminal-result defaults.
+- Made strict Doxygen generation portable without Graphviz and removed the
+  ambiguous second `README.md` main-page candidate.
 - Prevented a non-terminal callback status from replaying a staged write.
 - Corrected write-chunk terminology so configured TX capacity includes memory
   address bytes and data capacity does not.

@@ -31,7 +31,7 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md include docs/README.md docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md docs/reports/HIL_SUMMARY.md
+INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md include docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md docs/reports/HIL_SUMMARY.md
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*
@@ -50,6 +50,7 @@ GENERATE_LATEX         = NO
 GENERATE_XML           = NO
 GENERATE_RTF           = NO
 GENERATE_MAN           = NO
+HAVE_DOT               = NO
 
 WARN_IF_UNDOCUMENTED   = YES
 WARN_NO_PARAMDOC       = YES

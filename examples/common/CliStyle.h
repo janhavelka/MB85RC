@@ -14,7 +14,7 @@
 
 namespace cli {
 
-inline constexpr size_t HELP_COMMAND_WIDTH = 32U;
+static constexpr size_t HELP_COMMAND_WIDTH = 32U;
 
 inline const char* resetColor() { return LOG_COLOR_RESET; }
 inline const char* okColor(bool ok) { return LOG_COLOR_RESULT(ok); }

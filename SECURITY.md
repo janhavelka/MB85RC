@@ -4,13 +4,12 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| Current 4.x development line | :white_check_mark: |
-| Latest tagged 3.x release | :white_check_mark: |
+| Current 4.x release | :white_check_mark: |
+| Previous 3.x release | :white_check_mark: |
 | 2.x and older | :x: |
 
-Until the 4.0.0 tag is published, the current reviewed 4.x branch and latest
-tagged 3.x release are the supported reporting targets. Security fixes for
-older release lines are best effort only.
+The current 4.x release and previous 3.x release are supported reporting
+targets. Security fixes for older release lines are best effort only.
 
 ## Reporting a Vulnerability
 

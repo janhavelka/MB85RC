@@ -6,7 +6,7 @@
 
 namespace cli_shell {
 
-inline constexpr size_t MAX_LINE_LENGTH = 127U;
+static constexpr size_t MAX_LINE_LENGTH = 127U;
 
 inline bool readLine(String& outLine) {
   static String buffer;

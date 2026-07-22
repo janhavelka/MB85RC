@@ -4,7 +4,7 @@ Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using 
 
 Library version: `4.0.0`
 
-Latest published tag: `v3.0.0`
+Latest published tag: `v4.0.0`
 
 ## Features
 
@@ -43,8 +43,8 @@ lib_deps =
   https://github.com/janhavelka/MB85RC.git#<reviewed-immutable-commit>
 ```
 
-Use `#v4.0.0` after the release tag is published. Production integrations
-should pin the reviewed full commit, not a branch name.
+Use `#v4.0.0` for the reviewed release. Production integrations should pin the
+release tag or its full commit, not a branch name.
 
 ### Manual
 
