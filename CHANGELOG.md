@@ -65,6 +65,8 @@ No unreleased changes.
   construction while preserving its terminal-result defaults.
 - Made strict Doxygen generation portable without Graphviz and removed the
   ambiguous second `README.md` main-page candidate.
+- Isolated PlatformIO caches per Arduino build environment so pinned and generic
+  tool packages cannot overwrite or reuse incompatible package state in CI.
 - Prevented a non-terminal callback status from replaying a staged write.
 - Corrected write-chunk terminology so configured TX capacity includes memory
   address bytes and data capacity does not.

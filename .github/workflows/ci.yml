@@ -33,7 +33,7 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio
-          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'library.json') }}
+          key: ${{ runner.os }}-pio-${{ matrix.environment }}-${{ hashFiles('platformio.ini', 'library.json') }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
