@@ -2004,6 +2004,8 @@ void printHelp() {
 void printVersionInfo() {
   Serial.println("=== Version Info ===");
   Serial.printf("  Example firmware build: %s %s\n", __DATE__, __TIME__);
+  Serial.printf("  Arduino-ESP32: %s\n", ESP.getCoreVersion());
+  Serial.printf("  ESP-IDF: %s\n", ESP.getSdkVersion());
   Serial.printf("  MB85RC library version: %s\n", MB85RC::VERSION);
   Serial.printf("  MB85RC library full: %s\n", MB85RC::VERSION_FULL);
   Serial.printf("  MB85RC library build: %s\n", MB85RC::BUILD_TIMESTAMP);

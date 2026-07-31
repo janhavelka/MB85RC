@@ -10,14 +10,14 @@ Use this checklist before tagging and publishing a release.
 - Check package/release metadata consistency with
   `python tools/check_metadata_consistency.py`.
 - Run native tests: `python -m platformio test -e native`.
-- Run the stable Arduino reference build:
-  `python -m platformio run -e esp32s3dev_pinned` (PlatformIO 6.1.18 in CI,
-  pioarduino Espressif platform 54.03.20), then the broader compatibility
-  builds `python -m platformio run -e esp32s3dev` and
-  `python -m platformio run -e esp32s2dev`.
+- Run the exact Arduino reference builds with PlatformIO 6.1.19 and pioarduino
+  Espressif platform 55.03.311:
+  `python -m platformio run -e esp32s3dev` and
+  `python -m platformio run -e esp32s2dev`, then build the previous 54.03.20
+  stack with `python -m platformio run -e esp32s3dev_legacy_54`.
 - Run guard scripts:
   `python tools/hil_runner.py --parser-self-test`,
-  `python tools/hil_runner.py --dry-run --port COM27 --baud 115200 --timeout-s 5 --strict --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --soak-duration-s 28800`,
+  `python tools/hil_runner.py --dry-run --port COM4 --baud 115200 --timeout-s 5 --profile arduino --include-stress --sample-count 500 --strict --require-arduino-version 3.3.11 --require-idf-version v5.5.5 --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --require-timeout-ms 5 --require-max-write-data 124 --require-max-read-data 124 --heap-max-drop-bytes 1024 --heap-min-free-bytes 8192 --soak-duration-s 28800 --soak-pacing-s 0.1 --soak-max-consecutive-failures 3`,
   `python tools/check_core_timing_guard.py`,
   `python tools/check_cli_contract.py`, and
   `python tools/check_idf_example_contract.py`.
@@ -46,6 +46,6 @@ Use this checklist before tagging and publishing a release.
   evidence are recorded. Production HIL evidence must use strict mode, the
   required variant/product/capacity gates, zero FAIL, zero UNKNOWN, final READY
   health, zero total failures, zero target resets/reconnects, and documented
-  heap thresholds. The diagnostic examples default to a maximum heap drop of
+  heap thresholds. The reference production gates use a maximum heap drop of
   1024 bytes and a minimum free heap of 8192 bytes; record the rationale for
   board-specific changes.

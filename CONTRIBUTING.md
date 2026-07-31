@@ -52,11 +52,11 @@ python -m platformio test -e native
 doxygen Doxyfile
 ```
 
-Changes affecting Arduino compilation should also build `esp32s3dev_pinned`,
-`esp32s3dev`, and `esp32s2dev`. Changes affecting the native ESP-IDF example
-should build both configured IDF targets when `idf.py` is available. Doxygen is
-strict: undocumented public members, missing parameter/return documentation,
-and documentation errors fail the build.
+Changes affecting Arduino compilation should also build `esp32s3dev`,
+`esp32s2dev`, and `esp32s3dev_legacy_54`. Changes affecting the native ESP-IDF
+example should build both configured IDF targets when `idf.py` is available.
+Doxygen is strict: undocumented public members, missing parameter/return
+documentation, and documentation errors fail the build.
 
 ### What We Accept
 

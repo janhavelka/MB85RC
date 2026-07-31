@@ -51,6 +51,31 @@ release artifact. It does not exercise the later passive-core API,
 external-owner shared-bus scheduling, write-timeout reconciliation, WP-high
 behavior, or controlled power loss.
 
+### 2026-07-31 COM4 pioarduino 55.03.311 platform-upgrade regression
+
+- Host port: `COM4`, baud `115200`; Arduino ESP32-S3 build from the dirty
+  `ffcb95e` worktree containing the pioarduino migration.
+- Toolchain: PlatformIO 6.1.19, pioarduino Espressif platform 55.03.311,
+  Arduino-ESP32 3.3.11, ESP-IDF v5.5.5, and esptool 5.3.0.
+- MCU reported by esptool: ESP32-S3 QFN56 revision 0.1, 4 MB embedded XMC
+  flash, 2 MB embedded PSRAM, and USB Serial/JTAG.
+- FRAM: `MB85RC256V`, address `0x50`, manufacturer `0x00A`, product `0x510`,
+  capacity 32768 bytes. The configured owner envelope was a 5 ms timeout,
+  126-byte TX, 124-byte RX, and 124-byte read/write data limits.
+- The strict restore-safe run passed all 34 functional checks, including 500
+  random writes plus reads, 500 stress cycles, and 500 mixed-operation cycles.
+  Its 300.2-second soak passed 770/770 commands with no FAIL or UNKNOWN result.
+- Final health was READY with 15920 successes, zero failures, and no last
+  error. Free heap was unchanged at 340016 bytes; observed minimum free heap
+  was 334712 bytes and final largest block was 278516 bytes.
+- No target reset, serial reconnect, or read-only framing sync occurred after
+  boot. Raw transcript, JSON, and Markdown evidence remain local under
+  `.pio/hil/55.03.311-COM4*`.
+- This is platform-upgrade regression evidence, not production hardware
+  qualification. The five-minute run does not record the FRAM package/date
+  code, supply voltage, pull-ups, address straps, or WP wiring required by the
+  production hardware matrix.
+
 ## Runs
 
 | Date | Fixture | Duration | Gate | Functional | Soak | Final health | Heap | Notes |
@@ -61,9 +86,11 @@ behavior, or controlled power loss.
 | 2026-06-26/28 | MB85RC256V v3.0.0 | 48 h | strict FAIL | 29 PASS / 0 FAIL / 0 UNKNOWN | 316112 PASS / 0 FAIL / 154 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline 344040, final 343784, min 340976 | Strict failed because UNKNOWN count was nonzero; no FAIL, target reset, or serial reconnect. |
 | 2026-07-22 | MB85RC64TA COM20, broad envelope | 1 h | strict PASS | 31 PASS / 0 FAIL / 0 UNKNOWN | 7372 PASS / 0 FAIL / 0 UNKNOWN | READY, 120769 successes, consecutive failures 0, total failures 0 | baseline/final 343012, min 340204, largest final 278516 | Zero target resets/reconnects; worst command 0.875 s; 31 bounded read-only framing syncs; full-chip CRC preserved. |
 | 2026-07-22 | MB85RC64TA COM20, 5 ms/124-byte envelope | 5 min | strict PASS | 32 PASS / 0 FAIL / 0 UNKNOWN | 610 PASS / 0 FAIL / 0 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline/final 343012, min 340204, largest final 278516 | Zero target resets/reconnects; worst command 0.750 s; four framing syncs; full-chip CRC preserved. |
+| 2026-07-31 | MB85RC256V COM4, pioarduino 55.03.311 regression | 5 min | strict PASS | 34 PASS / 0 FAIL / 0 UNKNOWN | 770 PASS / 0 FAIL / 0 UNKNOWN | READY, 15920 successes, consecutive failures 0, total failures 0 | baseline/final 340016, min 334712, largest final 278516 | Platform regression only; stress 500/500 and mixed stress 500/500; zero target resets/reconnects/framing syncs; exact Arduino 3.3.11 and IDF v5.5.5 runtime gates passed. |
 
-The exact-envelope soak was preceded by a strict 34-check functional run that
-also included 200-cycle backed-up/restored `stress` and `stress_mix` commands.
+The 2026-07-22 COM20 exact-envelope soak was preceded by a strict 34-check
+functional run that also included 200-cycle backed-up/restored `stress` and
+`stress_mix` commands.
 A separate application-reset run passed 32 checks and preserved the same
 full-chip CRC. High-speed/Sleep electrical behavior, WP-high, device removal,
 and controlled power-loss cases were not run because this fixture provides no

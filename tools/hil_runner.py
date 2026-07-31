@@ -82,6 +82,8 @@ DATA_CAPACITY_PATTERNS = (
     re.compile(r"\bOne-transaction data:\s*write=(\d+)\s+read=(\d+)\s+bytes\b", re.IGNORECASE),
     re.compile(r"\bwrite_data=(\d+)\s+read_data=(\d+)\b", re.IGNORECASE),
 )
+ARDUINO_CORE_RE = re.compile(r"\bArduino-ESP32:\s*(\S+)", re.IGNORECASE)
+ESP_IDF_RE = re.compile(r"\bESP-IDF:\s*(\S+)", re.IGNORECASE)
 STATE_NUMBERS = {
     0: "UNINIT",
     1: "READY",
@@ -146,6 +148,8 @@ class SoakSummary:
 
 @dataclass
 class Observations:
+    arduino_core_version: str | None = None
+    esp_idf_version: str | None = None
     variant: str | None = None
     manufacturer_id: int | None = None
     product_id: int | None = None
@@ -261,6 +265,13 @@ def update_observations(observations: Observations, output: str, *, count_resets
     clean = normalize_output(output)
     if count_resets:
         observations.target_reset_count += count_target_resets(clean)
+
+    match = ARDUINO_CORE_RE.search(clean)
+    if match is not None:
+        observations.arduino_core_version = match.group(1)
+    match = ESP_IDF_RE.search(clean)
+    if match is not None:
+        observations.esp_idf_version = match.group(1)
 
     for match in HEAP_RE.finditer(clean):
         free = int(match.group(1))
@@ -903,6 +914,8 @@ def write_markdown(
         "",
         "## Observations",
         "",
+        f"- Arduino-ESP32: `{observations.arduino_core_version or 'unknown'}`",
+        f"- ESP-IDF: `{observations.esp_idf_version or 'unknown'}`",
         f"- Variant: `{observations.variant or 'unknown'}`",
         f"- Product ID: `{('unknown' if observations.product_id is None else f'0x{observations.product_id:03X}')}`",
         f"- Capacity: `{observations.capacity if observations.capacity is not None else 'unknown'}`",
@@ -970,6 +983,8 @@ def observations_to_dict(observations: Observations) -> dict:
     if observations.heap_baseline_free is not None and observations.heap_final_free is not None:
         heap_drop = observations.heap_baseline_free - observations.heap_final_free
     return {
+        "arduino_core_version": observations.arduino_core_version,
+        "esp_idf_version": observations.esp_idf_version,
         "variant": observations.variant,
         "manufacturer_id": observations.manufacturer_id,
         "manufacturer_id_hex": None if observations.manufacturer_id is None else f"0x{observations.manufacturer_id:03X}",
@@ -1018,6 +1033,16 @@ def strict_failure_reasons(
             reasons.append(f"soak UNKNOWN count is {soak.unknown_count}")
         if soak.status != "PASS":
             reasons.append(f"soak status is {soak.status}")
+
+    required_frameworks = (
+        ("Arduino-ESP32", args.require_arduino_version, observations.arduino_core_version),
+        ("ESP-IDF", args.require_idf_version, observations.esp_idf_version),
+    )
+    for label, expected, observed in required_frameworks:
+        if expected is not None and observed != expected:
+            reasons.append(
+                f"required {label} {expected}, observed {observed or 'unknown'}"
+            )
 
     if args.require_variant is not None:
         expected = args.require_variant.upper()
@@ -1138,12 +1163,18 @@ def parser_self_test() -> int:
         "  I2C timeout: 5 ms\n"
         "  Transport capacity: TX=126 RX=124 bytes\n"
         "  One-transaction data: write=124 read=124 bytes\n"
+        "  Arduino-ESP32: 3.3.11\n"
+        "  ESP-IDF: v5.5.5\n"
         "heap: free=240000 min_free=230000 largest=120000\n> ",
         count_resets=True,
     )
     if observations.variant != "MB85RC256V" or observations.product_id != 0x510:
         ok = False
         print("parser self-test failed for observations: identity not parsed")
+    if (observations.arduino_core_version != "3.3.11" or
+            observations.esp_idf_version != "v5.5.5"):
+        ok = False
+        print("parser self-test failed for observations: framework versions not parsed")
     if observations.capacity != 32768 or observations.final_state != "READY":
         ok = False
         print("parser self-test failed for observations: capacity/health not parsed")
@@ -1169,6 +1200,53 @@ def parser_self_test() -> int:
     if count_target_resets("rst:0x1 (POWERON_RESET),boot:0x8\n> ") != 1:
         ok = False
         print("parser self-test failed for reset detection")
+
+    gate_args = argparse.Namespace(
+        strict=True,
+        require_arduino_version="3.3.11",
+        require_idf_version="v5.5.5",
+        require_variant=None,
+        require_product_id=None,
+        require_capacity=None,
+        require_timeout_ms=None,
+        require_max_write_data=None,
+        require_max_read_data=None,
+        heap_max_drop_bytes=None,
+        heap_min_free_bytes=None,
+    )
+    gate_counts = {"PASS": 1, "FAIL": 0, "UNKNOWN": 0}
+    if strict_failure_reasons(gate_args, gate_counts, SoakSummary(), observations):
+        ok = False
+        print("parser self-test failed for matching framework strict gates")
+
+    gate_args.require_arduino_version = "3.3.10"
+    gate_args.require_idf_version = "v5.5.4"
+    mismatch_reasons = strict_failure_reasons(
+        gate_args, gate_counts, SoakSummary(), observations
+    )
+    if not any("required Arduino-ESP32 3.3.10" in reason for reason in mismatch_reasons):
+        ok = False
+        print("parser self-test failed for mismatched Arduino framework gate")
+    if not any("required ESP-IDF v5.5.4" in reason for reason in mismatch_reasons):
+        ok = False
+        print("parser self-test failed for mismatched ESP-IDF framework gate")
+
+    missing_observations = Observations(
+        final_state="READY",
+        final_consecutive_failures=0,
+        final_total_failures=0,
+    )
+    missing_reasons = strict_failure_reasons(
+        gate_args, gate_counts, SoakSummary(), missing_observations
+    )
+    if not any("required Arduino-ESP32" in reason and "unknown" in reason
+               for reason in missing_reasons):
+        ok = False
+        print("parser self-test failed for missing Arduino framework telemetry")
+    if not any("required ESP-IDF" in reason and "unknown" in reason
+               for reason in missing_reasons):
+        ok = False
+        print("parser self-test failed for missing ESP-IDF framework telemetry")
     if ok:
         print("HIL parser self-test PASSED")
         return 0
@@ -1197,6 +1275,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--require-variant")
+    parser.add_argument("--require-arduino-version")
+    parser.add_argument("--require-idf-version")
     parser.add_argument("--require-product-id", type=lambda value: int(value, 0))
     parser.add_argument("--require-capacity", type=int)
     parser.add_argument("--require-timeout-ms", type=int)
@@ -1315,6 +1395,8 @@ def main(argv: list[str]) -> int:
         "strict_gate": "PASS" if not strict_reasons else "FAIL",
         "strict_failures": strict_reasons,
         "requirements": {
+            "arduino_core_version": args.require_arduino_version,
+            "esp_idf_version": args.require_idf_version,
             "variant": args.require_variant,
             "product_id": None if args.require_product_id is None else f"0x{args.require_product_id:03X}",
             "capacity": args.require_capacity,

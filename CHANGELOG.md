@@ -12,9 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hs exit` diagnostic command parity for the Arduino and native ESP-IDF CLIs.
 - Native integration coverage for two independently bound owner instances using
   the 5 ms, 124-byte staged-transfer contract planned by TunnelMonitor-node.
+- Runtime Arduino-ESP32 and ESP-IDF version reporting in the Arduino diagnostic
+  CLI, plus optional strict HIL gates for both versions, so evidence identifies
+  the framework that was actually flashed.
+
+### Changed
+
+- The exact Arduino baseline is now pioarduino Espressif platform `55.03.311`
+  (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) with PlatformIO Core `6.1.19` in
+  CI. The previous `54.03.20` stack remains a named build-only compatibility
+  environment.
 
 ### Fixed
 
+- Updated the ESP32-S2 post-upload reset spelling for esptool 5 (`no-reset-stub`).
 - The serial HIL runner now requires complete prompt-framed command responses,
   treats non-OK terminal statuses as failures, recovers native-USB reset handles
   with a bounded reconnect deadline, opens with DTR/RTS disabled before attach,

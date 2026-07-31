@@ -735,18 +735,29 @@ ESP-IDF example transport.
 
 ## Validation
 
+Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino Espressif platform
+`55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and require PlatformIO
+Core `6.1.19` or newer. The `esp32s3dev_legacy_54` environment is a build-only
+source-compatibility check for the previous `54.03.20` stack; normal builds and
+HIL use the current pin.
+
+On Windows hosts where long-path support is disabled, the Arduino 3.3.11
+package can exceed the default PlatformIO extraction path. Enable Windows long
+paths or use a short session-local core path, for example
+`$env:PLATFORMIO_CORE_DIR='C:/pio'`, before installing/building the environment.
+
 ```bash
 python -m platformio test -e native
 python tools/hil_runner.py --parser-self-test
-python tools/hil_runner.py --dry-run --port COM27 --baud 115200 --timeout-s 5 --strict --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --soak-duration-s 28800
+python tools/hil_runner.py --dry-run --port COM4 --baud 115200 --timeout-s 5 --profile arduino --include-stress --sample-count 500 --strict --require-arduino-version 3.3.11 --require-idf-version v5.5.5 --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --require-timeout-ms 5 --require-max-write-data 124 --require-max-read-data 124 --heap-max-drop-bytes 1024 --heap-min-free-bytes 8192 --soak-duration-s 28800 --soak-pacing-s 0.1 --soak-max-consecutive-failures 3
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_idf_example_contract.py
 python scripts/generate_version.py check
 python tools/check_metadata_consistency.py
-python -m platformio run -e esp32s3dev_pinned
 python -m platformio run -e esp32s3dev
 python -m platformio run -e esp32s2dev
+python -m platformio run -e esp32s3dev_legacy_54
 python -m platformio pkg pack
 
 # Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
@@ -761,7 +772,8 @@ target resets and serial reconnects from read-only `version` commands used to
 recover prompt framing on ESP32-S3 native USB. Integration fixtures can add
 `--require-timeout-ms`, `--require-max-write-data`, and
 `--require-max-read-data` to make their transport envelope part of the strict
-gate.
+gate. `--require-arduino-version` and `--require-idf-version` make the runtime
+framework versions part of the recorded qualification.
 
 ## Documentation
 
