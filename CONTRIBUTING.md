@@ -15,7 +15,7 @@ Thank you for considering contributing to this project!
 
 ### Code Style
 
-- Follow existing code style (see `.clang-format`)
+- Follow the existing local formatting and naming style
 - Use `constexpr` instead of macros for constants
 - Prefer explicit over implicit
 - No heap allocations in steady-state library code
@@ -46,17 +46,20 @@ Run at least:
 python scripts/generate_version.py check
 python tools/check_metadata_consistency.py
 python tools/check_core_timing_guard.py
+python tools/hil_runner.py --parser-self-test
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python -m platformio test -e native
 doxygen Doxyfile
 ```
 
-Changes affecting Arduino compilation should also build `esp32s3dev`,
+Arduino build validation uses PlatformIO Core 6.1.19. Changes affecting Arduino compilation should also build `esp32s3dev`,
 `esp32s2dev`, and `esp32s3dev_legacy_54`. Changes affecting the native ESP-IDF
 example should build both configured IDF targets when `idf.py` is available.
 Doxygen is strict: undocumented public members, missing parameter/return
 documentation, and documentation errors fail the build.
+The complete packaging and hardware qualification commands live in the
+[release checklist](docs/RELEASE_CHECKLIST.md).
 
 ### What We Accept
 

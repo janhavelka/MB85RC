@@ -943,9 +943,6 @@ private:
   /// Return OK only when public bus access is allowed by Sleep state.
   Status _ensureAwakeForI2c();
 
-  /// Return OK only when a staged transfer may be queued without I2C traffic.
-  Status _canQueueTransfer();
-
   /// Advance WAKING -> AWAKE when the caller-supplied time reaches the deadline.
   void _advanceWakeState(uint32_t nowMs);
 

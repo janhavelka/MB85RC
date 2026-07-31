@@ -4,7 +4,6 @@
 #include <unity.h>
 
 #include <limits>
-#include <type_traits>
 
 #include "Arduino.h"
 #include "Wire.h"
@@ -20,14 +19,6 @@ TwoWire Wire;
 
 using namespace MB85RC;
 
-static_assert(!std::is_copy_constructible_v<::MB85RC::MB85RC>,
-              "MB85RC driver instances must not be copy constructible");
-static_assert(!std::is_copy_assignable_v<::MB85RC::MB85RC>,
-              "MB85RC driver instances must not be copy assignable");
-static_assert(!std::is_move_constructible_v<::MB85RC::MB85RC>,
-              "MB85RC driver instances must not be move constructible");
-static_assert(!std::is_move_assignable_v<::MB85RC::MB85RC>,
-              "MB85RC driver instances must not be move assignable");
 static_assert(static_cast<uint8_t>(Err::OK) == 0);
 static_assert(static_cast<uint8_t>(Err::NOT_INITIALIZED) == 1);
 static_assert(static_cast<uint8_t>(Err::INVALID_CONFIG) == 2);
@@ -3962,6 +3953,9 @@ void test_example_transport_maps_wire_errors() {
   Wire._clearRequestFromOverride();
   Wire._clearWriteReturnOverride();
 
+  Wire._setBeginResult(false);
+  TEST_ASSERT_FALSE(transport::initWire(8, 9, 400000, 77));
+  Wire._setBeginResult(true);
   TEST_ASSERT_TRUE(transport::initWire(8, 9, 400000, 77));
   TEST_ASSERT_EQUAL_UINT32(77u, Wire.getTimeOut());
 
@@ -4373,7 +4367,9 @@ void test_once_preflight_errors_emit_zero_callbacks() {
   TEST_ASSERT_TRUE(dev.verifyOnce(0U, data, sizeof(data), verify).is(Err::INVALID_PARAM));
   TEST_ASSERT_TRUE(dev.readOnce(0x1FFFU, data, 2U).is(Err::ADDRESS_OUT_OF_RANGE));
   TEST_ASSERT_TRUE(dev.writeOnce(0x1FFFU, data, 2U).is(Err::ADDRESS_OUT_OF_RANGE));
-  TEST_ASSERT_TRUE(dev.readOnce(UINT32_MAX, data, 1U).is(Err::ADDRESS_OUT_OF_RANGE));
+  const Status maxAddressStatus = dev.readOnce(UINT32_MAX, data, 1U);
+  TEST_ASSERT_TRUE(maxAddressStatus.is(Err::ADDRESS_OUT_OF_RANGE));
+  TEST_ASSERT_EQUAL_INT32(std::numeric_limits<int32_t>::max(), maxAddressStatus.detail);
   TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
 }
 

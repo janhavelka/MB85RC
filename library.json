@@ -52,5 +52,28 @@
   "build": {
     "includeDir": "include",
     "srcDir": "src"
+  },
+  "export": {
+    "include": [
+      "include/MB85RC/*.h",
+      "src/*.cpp",
+      "examples/01_basic_bringup_cli/main.cpp",
+      "examples/common/*.h",
+      "examples/espidf_basic/CMakeLists.txt",
+      "examples/espidf_basic/main/CMakeLists.txt",
+      "examples/espidf_basic/main/main.cpp",
+      "CMakeLists.txt",
+      "idf_component.yml",
+      "README.md",
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      "LICENSE",
+      "docs/README.md",
+      "docs/DEVICE_REFERENCE.md",
+      "docs/IDF_PORT.md",
+      "docs/RELEASE_CHECKLIST.md",
+      "docs/reports/HIL_SUMMARY.md"
+    ]
   }
 }

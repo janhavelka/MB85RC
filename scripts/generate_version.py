@@ -12,21 +12,20 @@ Standalone commands:
   check
       Exit with code 1 when generated headers are out of date.
   bump patch|minor|major
-      Update library.json, then regenerate generated headers.
+      Update synchronized package/docs metadata, then regenerate headers.
   set X.Y.Z
-      Set an explicit semantic version, then regenerate generated headers.
+      Set synchronized package/docs metadata, then regenerate headers.
 """
 
 from __future__ import annotations
 
-import configparser
 import json
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 ENV = None
 try:
@@ -36,9 +35,6 @@ except Exception:
     ENV = None
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-DEPENDENCY_VERSION_TARGETS = ()
-
-
 def _find_project_root() -> Path:
     if ENV is not None:
         return Path(ENV["PROJECT_DIR"]).resolve()
@@ -125,7 +121,7 @@ def _get_git_info(project_root: Path) -> Tuple[str, str]:
         commit = commit_result.stdout.strip() if commit_result.returncode == 0 else "unknown"
 
         status_result = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
+            ["git", "status", "--porcelain"],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -302,6 +298,31 @@ def _set_version(project_root: Path, new_version: str) -> str:
     data = _load_library_json(library_json)
     data["version"] = new_version
     _write_library_json(library_json, data)
+
+    replacements = {
+        "idf_component.yml": [
+            (r'^version:\s*"[^"]+"$', f'version: "{new_version}"'),
+        ],
+        "Doxyfile": [
+            (r'^PROJECT_NUMBER\s*=.*$', f'PROJECT_NUMBER         = "{new_version}"'),
+            (r'^PROJECT_BRIEF\s*=.*$',
+             f'PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for version {new_version}"'),
+        ],
+        "README.md": [
+            (r'^Library version:\s*`[^`]+`$', f'Library version: `{new_version}`'),
+        ],
+    }
+    for relative_path, rules in replacements.items():
+        path = project_root / relative_path
+        content = _read_text(path)
+        for pattern, replacement in rules:
+            content, count = re.subn(pattern, replacement, content,
+                                     count=1, flags=re.MULTILINE)
+            if count != 1:
+                raise RuntimeError(
+                    f"Unable to update version metadata in {relative_path}: {pattern}"
+                )
+        _write_text(path, content)
     return new_version
 
 

@@ -43,16 +43,13 @@ REQUIRED_CI_TOKENS = [
     "esp32s2",
 ]
 
-REQUIRED_README_TOKENS = [
+REQUIRED_IDF_DOC_TOKENS = [
     "idf.py -C examples/espidf_basic set-target esp32s3 build",
     "idf.py -C examples/espidf_basic set-target esp32s2 build",
     "diagnostic-only",
-    "console input can block",
-    "production systems must serialize",
-    "High-Speed And Sleep Modes",
-    "MB85RC64TA, MB85RC512T, and MB85RC1MT",
-    "MB85RC core does not change the MCU I2C clock",
-    "tREC >= 400 us",
+    "fixed C buffers",
+    "Config::i2cSpecial",
+    "esp_get_idf_version()",
 ]
 
 REQUIRED_CONFIRMATION_TOKENS = [
@@ -113,14 +110,17 @@ def main() -> int:
     commands = ns.get("MANDATORY_COMMANDS", [])
     components = ns.get("IDF_REQUIRED_COMPONENTS", [])
     device_id_idf_tokens = ns.get("DEVICE_ID_IDF_TOKENS", [])
+    mode_contract_tokens = ns.get("MODE_CONTRACT_TOKENS", [])
     main_path = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
     readme_path = ROOT / "README.md"
+    idf_doc_path = ROOT / "docs" / "IDF_PORT.md"
     text = main_path.read_text(encoding="utf-8", errors="replace")
     cmake = cmake_path.read_text(encoding="utf-8", errors="replace")
     workflow = workflow_path.read_text(encoding="utf-8", errors="replace")
     readme = readme_path.read_text(encoding="utf-8", errors="replace")
+    idf_doc = idf_doc_path.read_text(encoding="utf-8", errors="replace")
 
     for path in example_contract_files(ROOT):
         rel = path.relative_to(ROOT)
@@ -137,6 +137,9 @@ def main() -> int:
     for token in REQUIRED_MODE_TOKENS:
         if token not in text:
             fail(f"HS/Sleep native token missing: {token}")
+    for token in mode_contract_tokens:
+        if token not in text:
+            fail(f"ESP-IDF HS/Sleep diagnostic wording missing: {token}")
     for token in REQUIRED_CONSERVATIVE_TRANSPORT_TOKENS:
         if token not in text:
             fail(f"conservative transport token missing: {token}")
@@ -161,9 +164,11 @@ def main() -> int:
     for token in REQUIRED_CI_TOKENS:
         if token not in workflow:
             fail(f"CI workflow missing ESP-IDF token: {token}")
-    for token in REQUIRED_README_TOKENS:
-        if token not in readme:
-            fail(f"README missing ESP-IDF verification/diagnostic wording: {token}")
+    if "docs/IDF_PORT.md" not in readme:
+        fail("README must link the canonical ESP-IDF port notes")
+    for token in REQUIRED_IDF_DOC_TOKENS:
+        if token not in idf_doc:
+            fail(f"IDF port notes missing verification/diagnostic wording: {token}")
 
     print("IDF example contract PASSED")
     return 0

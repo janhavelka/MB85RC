@@ -30,6 +30,9 @@ static_assert(std::is_standard_layout<::MB85RC::TransportResult>::value,
               "Transport results must remain portable terminal values");
 static_assert(std::is_trivially_copyable<::MB85RC::TransportResult>::value,
               "Transport results must not own memory or framework state");
+static_assert(std::is_convertible<::MB85RC::TransportCode,
+                                  ::MB85RC::TransportResult>::value,
+              "Keep the historical TransportCode conversion source-compatible");
 static_assert(std::is_standard_layout<::MB85RC::TransferResult>::value,
               "Retained results must be portable values with no caller buffer ownership");
 static_assert(std::is_trivially_copyable<::MB85RC::TransferResult>::value,

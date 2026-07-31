@@ -6,6 +6,10 @@ Library version: `4.0.0`
 
 Latest published tag: `v4.0.0`
 
+The published `v4.0.0` tag uses the previous pioarduino `54.03.20` baseline.
+The `55.03.311` migration and cleanup described under `[Unreleased]` in the
+[changelog](CHANGELOG.md) apply to current `main` until the next release is tagged.
+
 ## Features
 
 - Injected, terminal I2C transport with no `Wire` dependency in library code
@@ -57,8 +61,9 @@ Add the repo as an extra component or dependency, then include
 `MB85RC/MB85RC.h` and provide `Config::i2cWrite` / `Config::i2cWriteRead`
 callbacks from your project-owned I2C master bus. Provide `Config::i2cSpecial`
 when using `DeviceVariant::AUTO`, Device ID, High-speed, or Sleep operations.
-The component metadata requires ESP-IDF 6.0.1 or newer. Local ESP-IDF build
-validation requires `idf.py` on PATH.
+The component metadata requires ESP-IDF 6.0.1 or newer. CI builds the declared
+6.0.1 floor and 6.0.2 for both supported targets. Local validation requires
+`idf.py` on PATH.
 
 The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
 with matching diagnostic coverage. Build it with:
@@ -68,26 +73,9 @@ idf.py -C examples/espidf_basic set-target esp32s3 build
 idf.py -C examples/espidf_basic set-target esp32s2 build
 ```
 
-The ESP-IDF example uses `app_main`, `driver/i2c_master.h`, `esp_timer`,
-`vTaskDelay`, and fixed C command buffers. It does not include Arduino CLI
-sources or compatibility facades. The command contract covers Device ID reads,
-current-address reads, active-capacity-bounded memory commands, HS/Sleep
-diagnostics, typed demo, random benchmark, self-test, and stress diagnostics.
-
-Mutating ESP-IDF CLI commands use explicit `!` confirmation forms such as
-`write!`, `fill!`, `rw_suite!`, and `typed_demo!`.
-
-The ESP-IDF CLI owns its I2C bus; console input can block the example loop
-before `tick()` runs. This is acceptable for the current diagnostic CLI because
-`tick()` does no asynchronous I2C or write-delay work. It only advances Sleep
-`WAKING` to `AWAKE` from caller-supplied time after a wake operation.
-
-Production systems must serialize shared-bus access in their injected transport
-or application bus manager and should call `tick()` from their own scheduler
-cadence if future devices need periodic work.
-
-Command parity is checked by repo-local contract scripts. Hardware evidence and
-its revision-specific limits are recorded separately in the
+The native boundary, command/confirmation policy, transport mapping, and runtime
+version telemetry are maintained in the [ESP-IDF port notes](docs/IDF_PORT.md).
+Revision-specific hardware evidence is recorded in the
 [HIL summary](docs/reports/HIL_SUMMARY.md).
 
 ## Quick Start
@@ -557,7 +545,7 @@ derives runtime transaction addresses from `Config::i2cAddress` plus the active
 variant's address model, and rejects ambiguous base addresses before normal
 operation.
 
-The maintained device reference in `docs/DEVICE_REFERENCE.md` lists endurance
+The maintained [device reference](docs/DEVICE_REFERENCE.md) lists endurance
 and retention claims by variant. Use the exact part datasheet for production
 lifetime budgets: the local reference shows 10^12 writes/byte for
 `MB85RC04V`, `MB85RC16V`, and `MB85RC256V`, and 10^13 writes/byte for
@@ -707,15 +695,10 @@ ESP-IDF example transport.
 | `BoardConfig.h` | Board-specific pin defaults and `Wire` setup |
 | `BuildConfig.h` | Compile-time log-level configuration |
 | `Log.h` | Serial logging helpers |
-| `I2cTransport.h` | Wire-backed transport adapter |
-| `I2cScanner.h` | Bus scan helper |
-| `BusDiag.h` | Bus diagnostics wrapper |
+| `I2cTransport.h` | Wire-backed transport adapter and owner-level interface reset |
+| `I2cScanner.h` | Bus scan helper that preserves owner clock/timeout settings |
 | `CliStyle.h` | CLI prompt, help, and color formatting helpers |
 | `CliShell.h` | Simple serial shell helper |
-| `CommandHandler.h` | Legacy char-buffer command parsing helpers |
-| `HealthView.h` | Compact health display helper |
-| `HealthDiag.h` | Verbose health diagnostics helper |
-| `TransportAdapter.h` | Transport alias helper |
 | `TypedMemory.h` | Example-only fixed-width integer/float/double codec on top of the raw driver |
 
 ## Behavioral Contracts
@@ -735,11 +718,12 @@ ESP-IDF example transport.
 
 ## Validation
 
-Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino Espressif platform
+Current `main` / `[Unreleased]` Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino Espressif platform
 `55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and require PlatformIO
 Core `6.1.19` or newer. The `esp32s3dev_legacy_54` environment is a build-only
 source-compatibility check for the previous `54.03.20` stack; normal builds and
-HIL use the current pin.
+HIL on current `main` use the current pin. The published `v4.0.0` tag predates
+this migration and uses `54.03.20`.
 
 On Windows hosts where long-path support is disabled, the Arduino 3.3.11
 package can exceed the default PlatformIO extraction path. Enable Windows long
@@ -749,31 +733,18 @@ paths or use a short session-local core path, for example
 ```bash
 python -m platformio test -e native
 python tools/hil_runner.py --parser-self-test
-python tools/hil_runner.py --dry-run --port COM4 --baud 115200 --timeout-s 5 --profile arduino --include-stress --sample-count 500 --strict --require-arduino-version 3.3.11 --require-idf-version v5.5.5 --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --require-timeout-ms 5 --require-max-write-data 124 --require-max-read-data 124 --heap-max-drop-bytes 1024 --heap-min-free-bytes 8192 --soak-duration-s 28800 --soak-pacing-s 0.1 --soak-max-consecutive-failures 3
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_idf_example_contract.py
 python scripts/generate_version.py check
 python tools/check_metadata_consistency.py
-python -m platformio run -e esp32s3dev
-python -m platformio run -e esp32s2dev
-python -m platformio run -e esp32s3dev_legacy_54
-python -m platformio pkg pack
-
-# Build the ESP-IDF full CLI example (requires ESP-IDF on PATH)
-idf.py -C examples/espidf_basic set-target esp32s3 build
-idf.py -C examples/espidf_basic set-target esp32s2 build
 doxygen Doxyfile
 ```
 
-Add `--include-stress` to a hardware run to include the temporarily mutating,
-restore-safe `stress` and `stress_mix` diagnostics. HIL reports distinguish
-target resets and serial reconnects from read-only `version` commands used to
-recover prompt framing on ESP32-S3 native USB. Integration fixtures can add
-`--require-timeout-ms`, `--require-max-write-data`, and
-`--require-max-read-data` to make their transport envelope part of the strict
-gate. `--require-arduino-version` and `--require-idf-version` make the runtime
-framework versions part of the recorded qualification.
+`hil_runner.py` requires an explicit `--port` for both plan-only and real runs;
+`--dry-run` never opens hardware. The canonical full build, package, and real
+strict-HIL commands—including framework, transport-envelope, heap, and soak
+gates—are in the [release checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Documentation
 

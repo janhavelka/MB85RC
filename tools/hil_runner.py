@@ -1255,7 +1255,7 @@ def parser_self_test() -> int:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bounded serial HIL runner for the MB85RC CLI examples.")
-    parser.add_argument("--port", default="COM27")
+    parser.add_argument("--port", help="serial port for a dry-run plan or hardware run")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout-s", type=float, default=5.0)
     parser.add_argument("--idle-timeout-s", type=float, default=0.25)
@@ -1309,6 +1309,9 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     if args.parser_self_test:
         return parser_self_test()
+    if not args.port:
+        print("HIL runner requires --port unless --parser-self-test is used")
+        return 2
 
     transcript_path, json_path, markdown_path = default_artifact_paths(args.port)
     transcript_path = args.transcript_path or transcript_path

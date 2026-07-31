@@ -11,7 +11,6 @@
 #include "examples/common/CliStyle.h"
 #include "examples/common/Log.h"
 #include "examples/common/BoardConfig.h"
-#include "examples/common/BusDiag.h"
 #include "examples/common/CliShell.h"
 #include "examples/common/I2cTransport.h"
 #include "examples/common/I2cScanner.h"
@@ -2034,7 +2033,7 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd == "scan") {
-    bus_diag::scan();
+    i2c_scanner::scan(Wire);
     return;
   }
 
@@ -2445,7 +2444,8 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd == "iface_reset") {
-    if (!transport::interfaceReset(board::I2C_SDA, board::I2C_SCL)) {
+    if (!transport::interfaceReset(board::I2C_SDA, board::I2C_SCL,
+                                   board::I2C_FREQ_HZ, board::I2C_TIMEOUT_MS)) {
       LOGE("Interface reset failed");
       return;
     }
@@ -2574,7 +2574,7 @@ void setup() {
   }
   LOGI("I2C initialized (SDA=%d, SCL=%d)", board::I2C_SDA, board::I2C_SCL);
 
-  bus_diag::scan();
+  i2c_scanner::scan(Wire);
 
   MB85RC::Config cfg;
   cfg.i2cWrite = transport::wireWrite;

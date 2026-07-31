@@ -1239,6 +1239,7 @@ void handleCommand(char* line) {
   if (strcmp(full, "help") == 0 || strcmp(full, "?") == 0) {
     printHelp();
   } else if (strcmp(full, "version") == 0 || strcmp(full, "ver") == 0) {
+    printf("ESP-IDF: %s\n", esp_get_idf_version());
     printf("MB85RC %s %s\n", MB85RC::VERSION, MB85RC::VERSION_FULL);
   } else if (strcmp(full, "scan") == 0) {
     scanBus();

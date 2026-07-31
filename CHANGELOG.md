@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime Arduino-ESP32 and ESP-IDF version reporting in the Arduino diagnostic
   CLI, plus optional strict HIL gates for both versions, so evidence identifies
   the framework that was actually flashed.
+- Runtime ESP-IDF version reporting in the native diagnostic CLI.
+- PlatformIO archive-content validation, including packaged Markdown link
+  checks and an explicit public-package allowlist.
 
 ### Changed
 
@@ -22,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) with PlatformIO Core `6.1.19` in
   CI. The previous `54.03.20` stack remains a named build-only compatibility
   environment.
+- GitHub Actions now use current Node 24 action majors, an explicit Ubuntu 24.04
+  runner, versioned PlatformIO cache keys, and pinned native ESP-IDF 6.0.1-floor
+  plus 6.0.2 compatibility builds.
+- Release documentation now separates HIL plan-only dry runs from real strict
+  hardware execution and makes the release checklist the canonical full matrix.
+- Version bump/set tooling now synchronizes package, ESP-IDF, README, Doxygen,
+  and generated-header version fields.
 
 ### Fixed
 
@@ -42,6 +52,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Arduino bring-up fixture now exercises a 5 ms, 124-byte data envelope for
   external-owner integration qualification, with strict HIL requirements and
   settings output for those bounds.
+- The Arduino scanner no longer overwrites the application-owned Wire timeout;
+  interface reset now reinitializes the controller with the configured clock and
+  timeout and propagates `Wire.begin()` failure.
+- Out-of-range `uint32_t` addresses now saturate `Status::detail` at
+  `INT32_MAX` instead of wrapping to a negative diagnostic value.
+- The example Device-ID adapter preserves terminal transport progress evidence
+  instead of reconstructing and truncating failures.
+
+### Removed
+
+- Unused legacy example helpers (`CommandHandler`, `HealthDiag`, `HealthView`,
+  `TransportAdapter`), the one-line `BusDiag` wrapper, duplicate scanner bus
+  recovery, unused CLI/logging helpers, and uncalled signed typed codecs.
+- Misleading manual `BOARD_HAS_PSRAM` enablement from the generic ESP32-S3
+  example configuration.
 
 ## [4.0.0] - 2026-07-22
 

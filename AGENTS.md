@@ -21,8 +21,7 @@ include/MB85RC/          - Public API headers only (Doxygen)
 src/                     - Implementation (.cpp)
 examples/
   01_*/
-  common/                - Example-only helpers (Log.h, BoardConfig.h, I2cTransport.h,
-                           I2cScanner.h, CommandHandler.h)
+  common/                - Example-only board, transport, CLI, and codec helpers
 platformio.ini
 library.json
 README.md
@@ -129,7 +128,8 @@ struct Status {
 The driver follows a **managed synchronous** model with health tracking:
 
 - All public I2C operations are **blocking** (no async needed — FRAM has no write delays).
-- `tick()` is a no-op for this device (reserved for future use or application-level periodic tasks).
+- `tick()` is bus-silent. It advances only cached Sleep wake recovery state and
+  is a practical no-op for non-Sleep variants such as MB85RC256V.
 - Health is tracked via **tracked transport wrappers** -- public API never calls `_updateHealth()` directly.
 - Recovery is **manual** via `recover()` - the application controls retry strategy.
 

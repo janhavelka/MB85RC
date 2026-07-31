@@ -10,3 +10,8 @@ docs/prompts/
 docs/reports/hil-runner-*
 docs/reports/hil-validation-*.md
 !docs/reports/HIL_SUMMARY.md
+examples/espidf_basic/build/
+examples/espidf_basic/managed_components/
+examples/espidf_basic/sdkconfig
+examples/espidf_basic/sdkconfig.old
+examples/espidf_basic/dependencies.lock

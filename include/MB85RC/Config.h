@@ -56,7 +56,7 @@ struct TransportResult {
 
   /// Construct a terminal transport result.
   ///
-  /// The explicit constructor keeps value construction available on C++11
+  /// This value constructor keeps construction available on C++11
   /// toolchains, where a type with default member initializers is not an
   /// aggregate.
   /// @param resultCode Terminal transport classification.
@@ -64,6 +64,8 @@ struct TransportResult {
   /// @param commit Memory-write effect knowledge.
   /// @param txBytes Callback-buffer TX bytes completed.
   /// @param rxBytes Callback-buffer RX bytes completed.
+  // Keep the historical TransportCode conversion source-compatible.
+  // cppcheck-suppress noExplicitConstructor
   constexpr TransportResult(TransportCode resultCode = TransportCode::IO_ERROR,
                             int32_t detailCode = 0,
                             WriteCommit commit = WriteCommit::INDETERMINATE,

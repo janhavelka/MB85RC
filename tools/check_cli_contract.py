@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-import runpy
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -14,13 +13,9 @@ REQUIRED_COMMON = [
     "Log.h",
     "I2cTransport.h",
     "I2cScanner.h",
-    "CommandHandler.h",
-    "TransportAdapter.h",
-    "BusDiag.h",
     "CliShell.h",
     "CliStyle.h",
-    "HealthView.h",
-    "HealthDiag.h",
+    "TypedMemory.h",
 ]
 
 MANDATORY_COMMANDS = [
@@ -115,11 +110,6 @@ def ensure_exists(path: pathlib.Path, label: str) -> None:
         fail(f"missing {label}: {path.as_posix()}")
 
 
-def ensure_missing(path: pathlib.Path, label: str) -> None:
-    if path.exists():
-        fail(f"forbidden {label} still present: {path.as_posix()}")
-
-
 def require_token(text: str, token: str, label: str) -> None:
     if token == "?":
         if '"?"' not in text:
@@ -156,19 +146,8 @@ def require_help(text: str, token: str) -> None:
 def main() -> int:
     common_dir = ROOT / "examples" / "common"
     bringup_main = ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp"
-    idf_main = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
-    idf_cmake = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
-
     ensure_exists(common_dir, "common example directory")
     ensure_exists(bringup_main, "bringup CLI example")
-    ensure_exists(idf_main, "ESP-IDF bringup entry point")
-    ensure_exists(idf_cmake, "ESP-IDF bringup CMake file")
-
-    ensure_missing(ROOT / "examples" / "00_smoke_boot", "deprecated example 00_smoke_boot")
-    ensure_missing(
-        ROOT / "examples" / "03_feature_walkthrough",
-        "deprecated example 03_feature_walkthrough",
-    )
 
     for name in REQUIRED_COMMON:
         ensure_exists(common_dir / name, f"common helper {name}")
@@ -180,21 +159,8 @@ def main() -> int:
         require_dispatch(text, cmd)
         require_help(text, cmd)
 
-    idf_text = idf_main.read_text(encoding="utf-8", errors="replace")
     for token in MODE_CONTRACT_TOKENS:
         require_literal(text, token, "Arduino HS/Sleep diagnostic wording")
-        require_literal(idf_text, token, "ESP-IDF HS/Sleep diagnostic wording")
-
-    if 'extern "C" void app_main(void)' not in idf_text:
-        fail("ESP-IDF entry point must define app_main()")
-
-    cmake_text = idf_cmake.read_text(encoding="utf-8", errors="replace")
-    for component in IDF_REQUIRED_COMPONENTS:
-        if re.search(rf"\b{re.escape(component)}\b", cmake_text) is None:
-            fail(f"ESP-IDF CMake file missing required component '{component}'")
-
-    idf_contract = runpy.run_path(str(ROOT / "tools" / "check_idf_example_contract.py"))
-    idf_contract["main"]()
 
     core_text = (ROOT / "src" / "MB85RC.cpp").read_text(
         encoding="utf-8", errors="replace"

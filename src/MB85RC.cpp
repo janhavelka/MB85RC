@@ -529,7 +529,7 @@ Status MB85RC::recover() {
     return busy;
   }
 
-  Status st = Status::Ok();
+  Status st;
   if (_variant != nullptr && !_variant->hasDeviceId) {
     uint8_t scratch = 0;
     st = _readMemory(0, &scratch, 1);
@@ -555,7 +555,8 @@ Status MB85RC::readByte(uint32_t address, uint8_t& value) {
     return busy;
   }
   if (!_isValidAddress(address)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity", address);
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity",
+                         detailFromU32(address));
   }
 
   return _readMemory(address, &value, 1);
@@ -574,7 +575,7 @@ Status MB85RC::readOnce(uint32_t address, uint8_t* buf, size_t len) {
   }
   if (!_fitsRange(address, len)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
-                         "Read range exceeds active capacity", address);
+                         "Read range exceeds active capacity", detailFromU32(address));
   }
   return _readMemory(address, buf, len);
 }
@@ -591,7 +592,8 @@ Status MB85RC::read(uint32_t address, uint8_t* buf, size_t len) {
     return Status::Error(Err::INVALID_PARAM, "Invalid read buffer");
   }
   if (!_fitsRange(address, len)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Read range exceeds active capacity", address);
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Read range exceeds active capacity",
+                         detailFromU32(address));
   }
 
   // Break large reads into chunks to stay within I2C buffer limits
@@ -627,7 +629,8 @@ Status MB85RC::writeByte(uint32_t address, uint8_t value) {
     return busy;
   }
   if (!_isValidAddress(address)) {
-    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity", address);
+    return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity",
+                         detailFromU32(address));
   }
 
   return _writeMemory(address, &value, 1);
@@ -650,7 +653,7 @@ Status MB85RC::writeOnce(uint32_t address, const uint8_t* buf, size_t len,
   }
   if (!_fitsRange(address, len)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
-                         "Write range exceeds active capacity", address);
+                         "Write range exceeds active capacity", detailFromU32(address));
   }
   return _writeMemory(address, buf, len, writeCommit);
 }
@@ -680,7 +683,7 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
   if (!_fitsRange(address, len)) {
     result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                                   "Write range exceeds active capacity",
-                                  address);
+                                  detailFromU32(address));
     return result;
   }
 
@@ -744,7 +747,7 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
   if (!_fitsRange(address, len)) {
     result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                                   "Fill range exceeds active capacity",
-                                  address);
+                                  detailFromU32(address));
     return result;
   }
 
@@ -886,7 +889,7 @@ Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   if (!_fitsRange(_currentAddress, len)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                          "Current-address range exceeds active capacity",
-                         _currentAddress);
+                         detailFromU32(_currentAddress));
   }
 
   for (size_t offset = 0; offset < len; ++offset) {
@@ -942,7 +945,7 @@ Status MB85RC::verifyOnce(uint32_t address, const uint8_t* expected, size_t len,
   }
   if (!_fitsRange(address, len)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
-                         "Verify range exceeds active capacity", address);
+                         "Verify range exceeds active capacity", detailFromU32(address));
   }
 
   uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
@@ -986,7 +989,7 @@ VerifyDetailedResult MB85RC::verifyDetailed(uint32_t address, const uint8_t* exp
   if (!_fitsRange(address, len)) {
     result.status = Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                                   "Verify range exceeds active capacity",
-                                  address);
+                                  detailFromU32(address));
     return result;
   }
 
@@ -1433,8 +1436,6 @@ Status MB85RC::_mapTransportResult(const TransportResult& result,
                result.writeCommit == WriteCommit::ACCEPTED &&
                result.completedTxBytes == expectedTx) {
       *writeCommit = WriteCommit::ACCEPTED;
-    } else if (result.writeCommit == WriteCommit::INDETERMINATE) {
-      *writeCommit = WriteCommit::INDETERMINATE;
     } else {
       *writeCommit = WriteCommit::INDETERMINATE;
     }
@@ -1488,10 +1489,6 @@ Status MB85RC::_ensureNoTransferActive() const {
   return Status::Ok();
 }
 
-Status MB85RC::_canQueueTransfer() {
-  return _ensureAwakeForI2c();
-}
-
 void MB85RC::_finishTransfer(TransferState state, const Status& status) {
   _transfer.result.state = state;
   _transfer.result.status = status;
@@ -1514,7 +1511,7 @@ Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
     return busyStatus(BusyDetail::RESULT_PENDING,
                       "Terminal transfer result not consumed");
   }
-  Status ready = _canQueueTransfer();
+  Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
   }
@@ -1881,7 +1878,7 @@ Status MB85RC::_readDeviceIdBytesRaw(DeviceIdRaw& raw) {
   //
   // The device address word sent after 0xF8 tells the device which
   // chip on the bus should respond.  R/W bit is don't-care.
-  uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
+  const uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
@@ -1892,7 +1889,7 @@ Status MB85RC::_readDeviceIdBytesRaw(DeviceIdRaw& raw) {
 }
 
 Status MB85RC::_readDeviceIdBytesTracked(DeviceIdRaw& raw) {
-  uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
+  const uint8_t txBuf[1] = { static_cast<uint8_t>(_config.i2cAddress << 1) };
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
     return ready;
@@ -1911,9 +1908,6 @@ bool MB85RC::_fitsRange(uint32_t address, size_t len) const {
     return false;
   }
   const uint32_t capacity = capacityBytes();
-  if (address >= capacity) {
-    return false;
-  }
   const size_t remaining = static_cast<size_t>(capacity - address);
   return len <= remaining;
 }

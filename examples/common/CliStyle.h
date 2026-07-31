@@ -16,22 +16,11 @@ namespace cli {
 
 static constexpr size_t HELP_COMMAND_WIDTH = 32U;
 
-inline const char* resetColor() { return LOG_COLOR_RESET; }
-inline const char* okColor(bool ok) { return LOG_COLOR_RESULT(ok); }
-inline const char* enabledColor(bool enabled) {
-  return enabled ? LOG_COLOR_GREEN : LOG_COLOR_RESET;
-}
-inline const char* yesNoColor(bool value) {
-  return value ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
-}
 inline const char* zeroGoodColor(uint32_t value) {
   return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED;
 }
 inline const char* nonZeroGoodColor(uint32_t value) {
   return (value > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
-}
-inline const char* warningIfNonZeroColor(uint32_t value) {
-  return (value > 0U) ? LOG_COLOR_YELLOW : LOG_COLOR_RESET;
 }
 inline const char* successRateColor(float pct) {
   if (pct >= 99.9f) return LOG_COLOR_GREEN;
@@ -58,10 +47,6 @@ inline void printHelpItem(const char* command, const char* description) {
 
 inline void printPrompt() {
   LOG_SERIAL.print("> ");
-}
-
-inline void printUnknownCommand(const char* command) {
-  LOGW("Unknown command: %s", command ? command : "(null)");
 }
 
 }  // namespace cli

@@ -18,7 +18,8 @@
 
 namespace transport {
 
-inline bool interfaceReset(int sda, int scl) {
+inline bool interfaceReset(int sda, int scl, uint32_t freq, uint16_t timeoutMs) {
+  Wire.end();
 #if defined(ARDUINO_ARCH_ESP32)
   // 9 SCL pulses + STOP is the standard bus recovery / interface-reset sequence.
   pinMode(scl, OUTPUT);
@@ -37,11 +38,16 @@ inline bool interfaceReset(int sda, int scl) {
   delayMicroseconds(5);
   digitalWrite(sda, HIGH);
   delayMicroseconds(5);
+  pinMode(sda, INPUT_PULLUP);
+  const bool sdaReleased = digitalRead(sda) != LOW;
 #else
   (void)sda;
   (void)scl;
+  const bool sdaReleased = true;
 #endif
-  return true;
+  const bool started = Wire.begin(sda, scl, freq);
+  Wire.setTimeOut(timeoutMs);
+  return started && sdaReleased;
 }
 
 inline MB85RC::TransportResult mapWireResult(uint8_t result, size_t txBytes,
@@ -107,8 +113,8 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
         MB85RC::WriteCommit::NOT_COMMITTED);
   }
 
-  // Check for oversized writes (ESP32 Wire buffer is 128 bytes)
-  if (len > 128) {
+  // Check for oversized writes against the library's fixed transport bound.
+  if (len > MB85RC::MAX_TRANSPORT_TX_BYTES) {
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(len),
         MB85RC::WriteCommit::NOT_COMMITTED);
@@ -157,7 +163,8 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
   if (txLen == 0 && rxLen == 0) {
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -3);
   }
-  if (txLen > 128 || rxLen > 128) {
+  if (txLen > MB85RC::MAX_TRANSPORT_TX_BYTES ||
+      rxLen > MB85RC::MAX_TRANSPORT_RX_BYTES) {
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -4);
   }
 
@@ -213,12 +220,8 @@ inline MB85RC::TransportResult wireSpecial(
       transfer.rxData == nullptr || transfer.rxLen != MB85RC::cmd::DEVICE_ID_LEN) {
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -5);
   }
-  const MB85RC::TransportResult result =
-      wireWriteRead(0x7CU, transfer.txData, transfer.txLen, transfer.rxData,
-                    transfer.rxLen, timeoutMs, user);
-  return result.ok()
-             ? MB85RC::TransportResult::Ok(transfer.txLen, transfer.rxLen)
-             : MB85RC::TransportResult::Error(result.code, result.detail);
+  return wireWriteRead(0x7CU, transfer.txData, transfer.txLen, transfer.rxData,
+                       transfer.rxLen, timeoutMs, user);
 }
 
 /**
@@ -231,11 +234,7 @@ inline MB85RC::TransportResult wireSpecial(
  * @return true on success
  */
 inline bool initWire(int sda, int scl, uint32_t freq = 400000, uint16_t timeoutMs = 50) {
-  interfaceReset(sda, scl);
-  Wire.begin(sda, scl);
-  Wire.setClock(freq);
-  Wire.setTimeOut(timeoutMs);
-  return true;
+  return interfaceReset(sda, scl, freq, timeoutMs);
 }
 
 }  // namespace transport

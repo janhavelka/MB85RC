@@ -37,6 +37,7 @@ def main() -> int:
     require_contains("idf_component.yml", f'version: "{version}"')
     require_contains("include/MB85RC/Version.h", f'#define MB85RC_VERSION_STRING "{version}"')
     require_contains("Doxyfile", f'PROJECT_NUMBER         = "{version}"')
+    require_contains("Doxyfile", f'documentation for version {version}"')
     require_contains("README.md", f"Library version: `{version}`")
 
     frameworks = set(library.get("frameworks", []))

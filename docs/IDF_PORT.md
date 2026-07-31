@@ -4,8 +4,13 @@ The core library is framework-neutral. Public headers and `src/` do not include
 Arduino or ESP-IDF framework headers, and all hardware access is supplied
 through `Config` callbacks.
 
+The bundled native application is a diagnostic-only bring-up example, not a
+production shared-bus manager or storage service.
+
 `idf_component.yml` declares ESP-IDF 6.0.1 or newer and the `esp32s2` and
-`esp32s3` targets. Build the native example with an initialized ESP-IDF shell:
+`esp32s3` targets. CI pins both the declared 6.0.1 floor and 6.0.2 for each
+target rather than following a mutable release branch. Build the native example
+with an initialized ESP-IDF shell:
 
 ```bash
 idf.py -C examples/espidf_basic set-target esp32s3 build
@@ -23,6 +28,7 @@ resources:
   `heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)`
 - CLI loop delay: `vTaskDelay()`
 - command input: fixed C buffers and `fgets()`
+- runtime framework telemetry: `esp_get_idf_version()` in `version` / `ver`
 
 The Arduino and ESP-IDF examples share a command contract, not implementation
 source. The IDF example must not include Arduino sources or compatibility

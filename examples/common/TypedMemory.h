@@ -21,15 +21,23 @@
 
 namespace typed_memory {
 
+static_assert(sizeof(float) == sizeof(uint32_t), "float must be 32-bit");
+static_assert(std::numeric_limits<float>::is_iec559, "float must use IEEE-754 encoding");
+static_assert(sizeof(double) == sizeof(uint64_t), "double must be 64-bit");
+static_assert(std::numeric_limits<double>::is_iec559, "double must use IEEE-754 encoding");
+
+inline int32_t addressDetail(uint32_t address) {
+  const uint32_t maxDetail = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
+  return address > maxDetail ? std::numeric_limits<int32_t>::max()
+                             : static_cast<int32_t>(address);
+}
+
 inline bool fitsContiguous(const MB85RC::MB85RC& device, uint32_t address, size_t len) {
-  if (len == 0U || address > device.maxAddress()) {
-    return false;
-  }
   const uint32_t capacity = device.capacityBytes();
-  if (static_cast<uint32_t>(address) >= capacity) {
+  if (len == 0U || capacity == 0U || address >= capacity) {
     return false;
   }
-  const size_t remaining = static_cast<size_t>(capacity - static_cast<uint32_t>(address));
+  const size_t remaining = static_cast<size_t>(capacity - address);
   return len <= remaining;
 }
 
@@ -43,7 +51,7 @@ inline MB85RC::Status writeBytes(MB85RC::MB85RC& device,
   if (!fitsContiguous(device, address, len)) {
     return MB85RC::Status::Error(MB85RC::Err::ADDRESS_OUT_OF_RANGE,
                                  "Typed value crosses active capacity",
-                                 static_cast<int32_t>(address));
+                                 addressDetail(address));
   }
   return device.write(address, data, len);
 }
@@ -58,7 +66,7 @@ inline MB85RC::Status readBytes(MB85RC::MB85RC& device,
   if (!fitsContiguous(device, address, len)) {
     return MB85RC::Status::Error(MB85RC::Err::ADDRESS_OUT_OF_RANGE,
                                  "Typed value crosses active capacity",
-                                 static_cast<int32_t>(address));
+                                 addressDetail(address));
   }
   return device.read(address, data, len);
 }
@@ -123,20 +131,6 @@ inline MB85RC::Status readUint8(MB85RC::MB85RC& device, uint32_t address, uint8_
   return device.readByte(address, value);
 }
 
-inline MB85RC::Status writeInt8(MB85RC::MB85RC& device, uint32_t address, int8_t value) {
-  return device.writeByte(address, static_cast<uint8_t>(value));
-}
-
-inline MB85RC::Status readInt8(MB85RC::MB85RC& device, uint32_t address, int8_t& value) {
-  uint8_t raw = 0;
-  MB85RC::Status st = device.readByte(address, raw);
-  if (!st.ok()) {
-    return st;
-  }
-  value = static_cast<int8_t>(raw);
-  return MB85RC::Status::Ok();
-}
-
 inline MB85RC::Status writeUint16Le(MB85RC::MB85RC& device, uint32_t address, uint16_t value) {
   uint8_t raw[2];
   encodeUint16Le(value, raw);
@@ -150,20 +144,6 @@ inline MB85RC::Status readUint16Le(MB85RC::MB85RC& device, uint32_t address, uin
     return st;
   }
   value = decodeUint16Le(raw);
-  return MB85RC::Status::Ok();
-}
-
-inline MB85RC::Status writeInt16Le(MB85RC::MB85RC& device, uint32_t address, int16_t value) {
-  return writeUint16Le(device, address, static_cast<uint16_t>(value));
-}
-
-inline MB85RC::Status readInt16Le(MB85RC::MB85RC& device, uint32_t address, int16_t& value) {
-  uint16_t raw = 0;
-  MB85RC::Status st = readUint16Le(device, address, raw);
-  if (!st.ok()) {
-    return st;
-  }
-  value = static_cast<int16_t>(raw);
   return MB85RC::Status::Ok();
 }
 
@@ -213,33 +193,13 @@ inline MB85RC::Status readUint64Le(MB85RC::MB85RC& device, uint32_t address, uin
   return MB85RC::Status::Ok();
 }
 
-inline MB85RC::Status writeInt64Le(MB85RC::MB85RC& device, uint32_t address, int64_t value) {
-  return writeUint64Le(device, address, static_cast<uint64_t>(value));
-}
-
-inline MB85RC::Status readInt64Le(MB85RC::MB85RC& device, uint32_t address, int64_t& value) {
-  uint64_t raw = 0;
-  MB85RC::Status st = readUint64Le(device, address, raw);
-  if (!st.ok()) {
-    return st;
-  }
-  value = static_cast<int64_t>(raw);
-  return MB85RC::Status::Ok();
-}
-
 inline MB85RC::Status writeFloat32Le(MB85RC::MB85RC& device, uint32_t address, float value) {
-  static_assert(sizeof(float) == sizeof(uint32_t), "float must be 32-bit");
-  static_assert(std::numeric_limits<float>::is_iec559, "float must use IEEE-754 encoding");
-
   uint32_t raw = 0;
   memcpy(&raw, &value, sizeof(raw));
   return writeUint32Le(device, address, raw);
 }
 
 inline MB85RC::Status readFloat32Le(MB85RC::MB85RC& device, uint32_t address, float& value) {
-  static_assert(sizeof(float) == sizeof(uint32_t), "float must be 32-bit");
-  static_assert(std::numeric_limits<float>::is_iec559, "float must use IEEE-754 encoding");
-
   uint32_t raw = 0;
   MB85RC::Status st = readUint32Le(device, address, raw);
   if (!st.ok()) {
@@ -250,18 +210,12 @@ inline MB85RC::Status readFloat32Le(MB85RC::MB85RC& device, uint32_t address, fl
 }
 
 inline MB85RC::Status writeFloat64Le(MB85RC::MB85RC& device, uint32_t address, double value) {
-  static_assert(sizeof(double) == sizeof(uint64_t), "double must be 64-bit");
-  static_assert(std::numeric_limits<double>::is_iec559, "double must use IEEE-754 encoding");
-
   uint64_t raw = 0;
   memcpy(&raw, &value, sizeof(raw));
   return writeUint64Le(device, address, raw);
 }
 
 inline MB85RC::Status readFloat64Le(MB85RC::MB85RC& device, uint32_t address, double& value) {
-  static_assert(sizeof(double) == sizeof(uint64_t), "double must be 64-bit");
-  static_assert(std::numeric_limits<double>::is_iec559, "double must use IEEE-754 encoding");
-
   uint64_t raw = 0;
   MB85RC::Status st = readUint64Le(device, address, raw);
   if (!st.ok()) {

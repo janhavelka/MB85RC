@@ -16,12 +16,13 @@ contracts belong in the README, public API comments, and the files listed here.
 Project-level maintained documents are [README.md](../README.md),
 [CHANGELOG.md](../CHANGELOG.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and
 [SECURITY.md](../SECURITY.md). Public API documentation is generated from the
-headers under `include/MB85RC/` with [Doxyfile](../Doxyfile).
+headers under `include/MB85RC/` with the source checkout's `Doxyfile`.
 
 ## Vendor References
 
-Vendor PDFs live under [reference-pdfs/](reference-pdfs/). They are retained as
-source evidence for device behavior and variant differences.
+Vendor PDFs live under `reference-pdfs/` in a source checkout. They are retained
+as source evidence for device behavior and variant differences, but are omitted
+from the PlatformIO registry archive to keep that package focused and small.
 
 | PDF | Notes |
 | --- | --- |
