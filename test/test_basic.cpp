@@ -3,19 +3,16 @@
 
 #include <unity.h>
 
+#include <initializer_list>
 #include <limits>
-
-#include "Arduino.h"
-#include "Wire.h"
-
-SerialClass Serial;
-TwoWire Wire;
 
 #define private public
 #include "MB85RC/MB85RC.h"
 #undef private
 #include "common/I2cTransport.h"
 #include "common/TypedMemory.h"
+
+TwoWire Wire;
 
 using namespace MB85RC;
 
@@ -153,7 +150,7 @@ uint8_t memoryAddressLen(cmd::AddressModel model) {
   }
 }
 
-uint32_t decodeMemoryAddress(FakeBus* bus, uint8_t addr, const uint8_t* data) {
+uint32_t decodeMemoryAddress(const FakeBus* bus, uint8_t addr, const uint8_t* data) {
   switch (bus->addressModel) {
     case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
       return static_cast<uint32_t>(((addr & 0x01U) << 8) | data[0]);
@@ -694,9 +691,7 @@ void assertTransferInProgress(const Status& status) {
 }  // namespace
 
 void setUp() {
-  setMillis(0);
   Wire._clearEndTransmissionResult();
-  Wire._clearRequestFromOverride();
 }
 
 void tearDown() {}
@@ -1262,7 +1257,6 @@ void test_now_ms_missing_callback_keeps_health_timestamps_zero() {
   cfg.timeUser = nullptr;
   TEST_ASSERT_TRUE(dev.begin(cfg).ok());
 
-  setMillis(4321);
   Status st = dev.recover();
   TEST_ASSERT_TRUE(st.ok());
   TEST_ASSERT_EQUAL_UINT32(0u, dev.lastOkMs());
@@ -1626,7 +1620,7 @@ void test_write_read_multi_byte() {
   MB85RC::MB85RC dev;
   TEST_ASSERT_TRUE(dev.begin(makeConfig(bus)).ok());
 
-  uint8_t wbuf[4] = {0x11, 0x22, 0x33, 0x44};
+  const uint8_t wbuf[4] = {0x11, 0x22, 0x33, 0x44};
   TEST_ASSERT_TRUE(dev.write(0x0100, wbuf, 4).ok());
 
   uint8_t rbuf[4] = {};
@@ -3950,7 +3944,6 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 
 void test_example_transport_maps_wire_errors() {
   Wire._clearEndTransmissionResult();
-  Wire._clearRequestFromOverride();
   Wire._clearWriteReturnOverride();
 
   Wire._setBeginResult(false);
@@ -3995,9 +3988,8 @@ void test_example_transport_maps_wire_errors() {
 
 void test_example_transport_supports_read_only_transactions() {
   Wire._clearEndTransmissionResult();
-  Wire._clearRequestFromOverride();
 
-  uint8_t rxSeed[2] = {0xDE, 0xAD};
+  const uint8_t rxSeed[2] = {0xDE, 0xAD};
   Wire._setRxBuffer(rxSeed, 2);
 
   uint8_t rx[2] = {};

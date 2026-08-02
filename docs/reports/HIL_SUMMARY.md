@@ -35,8 +35,8 @@ MB85RC256V production-readiness evidence.
   controller-timeout claim is invalidated by the 2026-07-31 audit.
 - Full-capacity CRC32 was `0xE30F00B8` before the run, after the one-hour run,
   after the exact-envelope run, and after the application reboot check.
-- Raw transcripts and runner JSON/Markdown reports remain local under
-  `.pio/hil/`; they are intentionally not release artifacts.
+- The original raw transcripts and runner outputs were removed after their
+  concise results were consolidated here; they were never release artifacts.
 
 ## MB85RC256V fixture
 
@@ -72,8 +72,7 @@ behavior, or controlled power loss.
   error. Free heap was unchanged at 340016 bytes; observed minimum free heap
   was 334712 bytes and final largest block was 278516 bytes.
 - No target reset, serial reconnect, or read-only framing sync occurred after
-  boot. Raw transcript, JSON, and Markdown evidence remain local under
-  `.pio/hil/55.03.311-COM4*`.
+  boot. The original local runner artifacts were removed after consolidation.
 - This is platform-upgrade regression evidence, not production hardware
   qualification. The five-minute run does not record the FRAM package/date
   code, supply voltage, pull-ups, address straps, or WP wiring required by the
@@ -96,8 +95,54 @@ behavior, or controlled power loss.
 - Final health was READY with 15921 total successes, zero consecutive or total
   failures, and no last error. Heap changed from 340148 to 339988 bytes (160-byte
   drop), with 334720-byte observed minimum and 278516-byte final largest block.
-- Raw evidence is local under `.pio/hil/55.03.311-cleanup-COM4*`. This remains
-  dirty-worktree regression evidence, not immutable release qualification.
+- The original local runner artifacts were removed after consolidation. This
+  remains dirty-worktree regression evidence, not immutable release
+  qualification.
+
+### 2026-07-31 aborted COM4 long-soak attempt
+
+- The run named `55.03.311-48h-COM4-20260731` was configured for 48 hours but
+  stopped after 1972.7 seconds (32.9 minutes). It must not be reported as a
+  completed 48-hour soak.
+- Its 32 functional checks passed. The partial soak recorded 4996 PASS, zero
+  FAIL, and one UNKNOWN result before Windows rejected a serial write with
+  `WriteFile failed (PermissionError(13), "The device does not recognize the
+  command")` while issuing `crc 0x0000 64`.
+- The strict gate correctly failed because the aborted command produced one
+  UNKNOWN result and one serial reconnect. Before the host-path failure, the
+  most recently observed target health was READY with zero driver failures;
+  the runner observed no target reset, and heap remained at 339988 bytes.
+- This is evidence of an interrupted host USB/serial path, not a completed
+  endurance result. It did not demonstrate a FRAM, driver, or target-reset
+  failure. The later uninterrupted 24-hour run makes a transient host-path
+  interruption the most likely explanation, but that diagnosis is an
+  inference rather than a hardware fault-injection result.
+
+### 2026-07-31/2026-08-01 COM4 24-hour strict soak
+
+- Firmware identified itself as library v4.0.0 from the dirty `d31d2b4`
+  worktree, built on 2026-07-31. The run used the same MB85RC256V COM4 fixture,
+  Arduino-ESP32 3.3.11, ESP-IDF v5.5.5, a declared 5 ms Wire timeout, 126-byte
+  TX capacity, 124-byte RX capacity, and 124-byte one-transaction data limits.
+- All 34 functional checks passed. The 86400.2-second soak then passed
+  221222/221222 commands with zero FAIL or UNKNOWN result, including 18435
+  recovery commands. Maximum command latency was 0.454 seconds and maximum
+  read latency was 0.329 seconds.
+- Final health was READY after 3837088 successful operations, with zero
+  consecutive or total failures and no last error. The runner observed zero
+  target resets, serial reconnects, or read-only framing syncs after boot.
+- Heap changed from 340148 to 339988 bytes (160-byte drop), with a 334720-byte
+  observed minimum and a 278516-byte final largest block. This passed the
+  configured 1024-byte maximum-drop and 8192-byte minimum-free gates.
+- The strict runner result is PASS for this fixture and firmware image. It is
+  strong endurance and regression evidence, but not immutable source-release
+  qualification: `d31d2b4-dirty` does not identify the uncommitted source
+  delta, so the binary cannot be proven equivalent to commit `d31d2b4`, to a
+  later commit, or to a reproducible clean release build. The complete raw
+  evidence sets for this pass and the aborted attempt are retained only as
+  checksum-listed ZIP archives under ignored `.pio/hil/archive/`; readable
+  Markdown reports remain beside them. They are not versioned release
+  artifacts.
 
 ## Runs
 
@@ -111,6 +156,8 @@ behavior, or controlled power loss.
 | 2026-07-22 | MB85RC64TA COM20, configured 5 ms / actual 50 ms, 124-byte envelope | 5 min | strict PASS except invalidated timeout claim | 32 PASS / 0 FAIL / 0 UNKNOWN | 610 PASS / 0 FAIL / 0 UNKNOWN | READY, consecutive failures 0, total failures 0 | baseline/final 343012, min 340204, largest final 278516 | 124-byte and restore/CRC evidence retained; scanner bug invalidates only the physical 5 ms timeout claim. |
 | 2026-07-31 | MB85RC256V COM4, pioarduino 55.03.311 regression, actual 50 ms | 5 min | strict PASS except invalidated timeout claim | 34 PASS / 0 FAIL / 0 UNKNOWN | 770 PASS / 0 FAIL / 0 UNKNOWN | READY, 15920 successes, consecutive failures 0, total failures 0 | baseline/final 340016, min 334712, largest final 278516 | Platform/framework and functional regression evidence retained; scanner bug invalidates only the physical 5 ms timeout claim. |
 | 2026-07-31 | MB85RC256V COM4, scanner-timeout cleanup | 5 min | strict PASS | 34 PASS / 0 FAIL / 0 UNKNOWN | 771 PASS / 0 FAIL / 0 UNKNOWN | READY, 15921 successes, consecutive failures 0, total failures 0 | baseline 340148, final 339988, drop 160, min 334720, largest final 278516 | Scanner preserved the owner's 5 ms Wire setting; zero target resets/reconnects/framing syncs; exact Arduino 3.3.11 and IDF v5.5.5 gates passed. |
+| 2026-07-31 | MB85RC256V COM4, attempted 48 h soak | 32.9 min | strict FAIL (aborted) | 32 PASS / 0 FAIL / 0 UNKNOWN | 4996 PASS / 0 FAIL / 1 UNKNOWN | Last observed READY, consecutive failures 0, total failures 0 | baseline/final 339988, min 334684, largest final 278516 | Windows serial write failed and the runner recorded one reconnect; no target reset or device failure was observed. Not a 48-hour result. |
+| 2026-07-31/08-01 | MB85RC256V COM4, scanner-timeout cleanup | 24 h | strict PASS | 34 PASS / 0 FAIL / 0 UNKNOWN | 221222 PASS / 0 FAIL / 0 UNKNOWN | READY, 3837088 successes, consecutive failures 0, total failures 0 | baseline 340148, final 339988, drop 160, min 334720, largest final 278516 | Zero target resets/reconnects/framing syncs; dirty `d31d2b4` worktree limits immutable traceability. |
 
 The 2026-07-22 COM20 exact-envelope soak was preceded by a strict 34-check
 functional run that also included 200-cycle backed-up/restored `stress` and
@@ -138,9 +185,28 @@ complete command output.
 The practical diagnosis was PC-side serial/prompt framing under long soak load,
 not a demonstrated FRAM data, firmware, reset, or driver-health failure.
 
-The later 48-hour MB85RC256V run likewise ended with 154 UNKNOWN command
-windows and no target failure, reset, reconnect, or health failure. Because the
-strict gate requires zero UNKNOWN results, both long soaks remain strict-gate
-failures and are not release qualification. Current qualification requirements
-are maintained in the [README hardware matrix](../../README.md#hardware-validation-matrix)
-and [release checklist](../RELEASE_CHECKLIST.md), rather than duplicated here.
+The 2026-06-26/28 48-hour MB85RC256V run likewise ended with 154 UNKNOWN
+command windows and no target failure, reset, reconnect, or health failure.
+Because the strict gate requires zero UNKNOWN results, both of those historical
+long soaks remain strict-gate failures and are not release qualification.
+Current qualification requirements are maintained in the
+[README hardware matrix](../../README.md#hardware-validation-matrix) and
+[release checklist](../RELEASE_CHECKLIST.md), rather than duplicated here.
+
+## Qualification limits after the 24-hour pass
+
+The 24-hour result does not qualify behavior that the fixture did not exercise:
+
+- a physically stuck bus or an external measurement of the configured 5 ms
+  controller timeout;
+- WP-high writes and write-timeout reconciliation;
+- device removal, I2C NACK injection, or unplug/replug recovery;
+- controlled power loss during access and post-power-cycle data validation;
+- high-speed or Sleep electrical operation (MB85RC256V reports both features
+  unsupported; the run verified that software response only); or
+- a documented production fixture with recorded supply voltage, pull-ups,
+  address straps, WP wiring, FRAM package/date code, and production N16R8 board.
+
+A release-qualification run should be made from a clean, uniquely identified
+commit and should preserve a checksum-linked firmware binary, runner arguments,
+machine-readable result, and raw transcript in an immutable evidence archive.

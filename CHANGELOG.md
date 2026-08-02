@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime ESP-IDF version reporting in the native diagnostic CLI.
 - PlatformIO archive-content validation, including packaged Markdown link
   checks and an explicit public-package allowlist.
+- Revision-specific evidence for the completed 24-hour MB85RC256V strict soak:
+  34/34 functional checks and 221,222 soak checks passed with zero failures,
+  unknowns, target resets, reconnects, or framing recoveries; the driver ended
+  `READY` after 3,837,088 successful operations and zero failures.
 
 ### Changed
 
@@ -32,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardware execution and makes the release checklist the canonical full matrix.
 - Version bump/set tooling now synchronizes package, ESP-IDF, README, Doxygen,
   and generated-header version fields.
+- Documentation now separates API reference, device facts, release
+  qualification, and revision-specific HIL evidence into their canonical
+  owners. The 24-hour result is recorded as strong fixture regression/endurance
+  evidence, not clean-release qualification, because the firmware identified
+  itself as `d31d2b4-dirty`; the aborted "48-hour" attempt is classified as a
+  host serial-write interruption rather than a device failure or completed soak.
+- Strict Doxygen generation now also rejects undocumented public enum values and
+  reports warnings in file/line form.
 
 ### Fixed
 
@@ -67,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recovery, unused CLI/logging helpers, and uncalled signed typed codecs.
 - Misleading manual `BOARD_HAS_PSRAM` enablement from the generic ESP32-S3
   example configuration.
+- Redundant private transport plumbing and buffer aliases, plus obsolete
+  Arduino/Wire native-test stubs and their no-op setup state.
+- The duplicate `docs/README.md` navigation page and redundant README API and
+  hardware-matrix inventories; the README now routes those details to Doxygen,
+  the device reference, release checklist, and HIL evidence ledger.
 
 ## [4.0.0] - 2026-07-22
 

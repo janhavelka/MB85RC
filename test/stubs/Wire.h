@@ -13,12 +13,10 @@ public:
     (void)frequency;
     return _beginResult;
   }
-  void setClock(uint32_t freq) { (void)freq; }
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
   uint32_t getTimeOut() const { return _timeoutMs; }
   
   void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; }
-  size_t write(uint8_t data) { _txBuf[_txLen++] = data; return 1; }
   size_t write(const uint8_t* data, size_t len) {
     size_t accepted = _writeReturnOverrideEnabled ? _writeReturnOverride : len;
     if (accepted > len) accepted = len;
@@ -31,11 +29,7 @@ public:
   
   size_t requestFrom(uint8_t addr, size_t len) { 
     (void)addr;
-    if (_requestFromOverrideEnabled) {
-      _rxLen = _requestFromOverride;
-    } else {
-      _rxLen = len;
-    }
+    _rxLen = len;
     _rxPos = 0;
     return _rxLen;
   }
@@ -54,14 +48,6 @@ public:
     }
     _rxLen = len;
     _rxPos = 0;
-  }
-  void _setRequestFromOverride(size_t len) {
-    _requestFromOverrideEnabled = true;
-    _requestFromOverride = len;
-  }
-  void _clearRequestFromOverride() {
-    _requestFromOverrideEnabled = false;
-    _requestFromOverride = 0;
   }
   void _setWriteReturnOverride(size_t len) {
     _writeReturnOverrideEnabled = true;
@@ -84,8 +70,6 @@ private:
   uint8_t _rxBuf[256] = {};
   size_t _rxLen = 0;
   size_t _rxPos = 0;
-  bool _requestFromOverrideEnabled = false;
-  size_t _requestFromOverride = 0;
   bool _writeReturnOverrideEnabled = false;
   size_t _writeReturnOverride = 0;
 };

@@ -30,7 +30,6 @@ REQUIRED_FILES = {
     "examples/01_basic_bringup_cli/main.cpp",
     "examples/espidf_basic/main/main.cpp",
     "examples/common/TypedMemory.h",
-    "docs/README.md",
     "docs/DEVICE_REFERENCE.md",
     "docs/IDF_PORT.md",
     "docs/RELEASE_CHECKLIST.md",
@@ -51,15 +50,9 @@ FORBIDDEN_PREFIXES = (
 FORBIDDEN_FILES = {
     ".gitignore",
     ".gitattributes",
-    "AGENTS.md",
     "CODEOWNERS",
     "Doxyfile",
     "platformio.ini",
-    "examples/common/BusDiag.h",
-    "examples/common/CommandHandler.h",
-    "examples/common/HealthDiag.h",
-    "examples/common/HealthView.h",
-    "examples/common/TransportAdapter.h",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\((?P<target>[^)]+)\)")

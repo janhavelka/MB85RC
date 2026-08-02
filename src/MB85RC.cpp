@@ -11,8 +11,6 @@
 namespace MB85RC {
 namespace {
 
-static constexpr size_t MAX_WRITE_BUF = MAX_TRANSPORT_TX_BYTES;
-
 void parseDeviceId(const uint8_t (&raw)[cmd::DEVICE_ID_LEN], DeviceId& id) {
   id.manufacturerId = static_cast<uint16_t>((raw[0] << 4) | (raw[1] >> 4));
   id.productId = static_cast<uint16_t>(((raw[1] & 0x0F) << 8) | raw[2]);
@@ -51,7 +49,7 @@ bool isSupportedRuntimeVariant(const cmd::VariantInfo& variant) {
 }
 
 int32_t deviceIdDetail(const DeviceId& id) {
-  return static_cast<int32_t>((id.manufacturerId << 12) | id.productId);
+  return (id.manufacturerId << 12) | id.productId;
 }
 
 bool isValidHighSpeedMasterCode(uint8_t value) {
@@ -1355,11 +1353,6 @@ Status MB85RC::_i2cSpecialRaw(I2cSpecialOp op, const I2cSpecialTransfer& transfe
                              memoryAddressBytes, writeCommit);
 }
 
-Status MB85RC::_i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
-                                    uint8_t* rxBuf, size_t rxLen) {
-  return _i2cWriteReadTrackedAddr(_config.i2cAddress, txBuf, txLen, rxBuf, rxLen);
-}
-
 Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                         uint8_t* rxBuf, size_t rxLen) {
   Status ready = _ensureAwakeForI2c();
@@ -1412,7 +1405,7 @@ Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op,
 Status MB85RC::_mapTransportResult(const TransportResult& result,
                                    size_t expectedTx, size_t expectedRx,
                                    bool memoryWrite, size_t memoryAddressBytes,
-                                   WriteCommit* writeCommit) const {
+                                   WriteCommit* writeCommit) {
   const bool knownFailureCode =
       result.code == TransportCode::NACK_ADDRESS ||
       result.code == TransportCode::NACK_DATA ||
@@ -1827,7 +1820,7 @@ Status MB85RC::_writeMemory(uint32_t address, const uint8_t* buf, size_t len,
     return Status::Error(Err::INVALID_PARAM, "Write chunk too large");
   }
 
-  uint8_t payload[MAX_WRITE_BUF];
+  uint8_t payload[MAX_TRANSPORT_TX_BYTES];
   EncodedMemoryAddress enc;
   Status st = _encodeMemoryAddress(address, enc);
   if (!st.ok()) {

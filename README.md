@@ -30,11 +30,12 @@ framework-neutral, uses injected I2C callbacks, rejects invalid ranges before
 bus traffic, tracks health, and documents FRAM-specific write semantics. Native
 unit tests and CI builds cover the supported runtime variants and examples.
 
-Hardware validation remains board- and variant-dependent. Do not treat CI,
-native tests, or fake-bus WP simulation as proof that a specific FRAM device,
-address-pin strap, pull-up network, WP wiring, brownout profile, or shared-bus
-topology has been validated. Record the hardware matrix below for each target
-board before relying on the library for production storage.
+Hardware validation remains board- and variant-dependent. Recorded runs and
+their limitations live in the [HIL evidence ledger](docs/reports/HIL_SUMMARY.md);
+the [release checklist](docs/RELEASE_CHECKLIST.md) is the canonical outstanding
+qualification matrix. Do not treat CI, native tests, fake-bus WP simulation, or
+evidence from one fixture as proof for a different FRAM variant, board, address
+strap, pull-up network, WP wiring, power profile, or shared-bus topology.
 
 ## Installation
 
@@ -301,152 +302,20 @@ entry can leave the hardware effect ambiguous; the driver then reports
 `SleepState::UNKNOWN`, blocks normal I2C, and requires an explicit `wake()`.
 A failed wake remains `UNKNOWN`; a successful wake enters `WAKING` until tREC.
 
-## API Reference
+## API Documentation
 
 The public headers under `include/MB85RC/` are the authoritative API contract.
-`doxygen Doxyfile` builds the complete reference and fails when a public member,
-parameter, return contract, or documentation link produces a warning.
-Release history and migration notes live in [CHANGELOG.md](CHANGELOG.md).
+Run `doxygen Doxyfile` to build the complete reference; strict generation fails
+on undocumented public members and enum values, missing parameter/return
+contracts, invalid commands, and unresolved documentation links. Release and
+migration history lives in [CHANGELOG.md](CHANGELOG.md).
 
-### Transport And Configuration
-
-- `Config::i2cWrite` and `Config::i2cWriteRead` are required synchronous,
-  terminal callbacks. They perform one physical attempt with no hidden retry or
-  recovery.
-- `Config::i2cSpecial` is required for `AUTO` identity selection and for any
-  Device ID, High-speed, Sleep, or wake operation used by the application.
-- `TransportResult` reports a typed terminal `TransportCode`, exact callback-
-  buffer TX/RX progress, numeric transport detail, and conservative
-  `WriteCommit` evidence.
-- `Config::maxTxBytes` includes memory-address bytes; `maxRxBytes` is the total
-  callback RX capacity. The active one-transaction data limits are exposed by
-  `maxWriteDataBytes()` and `maxReadDataBytes()`.
-- `Config::i2cUser`, `Config::timeUser`, and referenced state remain caller-
-  owned and valid until `end()` or a later successful replacement binding.
-- `Status::msg` and all retained driver diagnostics use static-lifetime library
-  text; callback-owned message pointers are not accepted.
-
-### Lifecycle
-
-- `Status bind(const Config& config)` - validate and retain configuration with zero I2C
-- `Status begin(const Config& config)` - compatibility composition of passive bind plus one explicit presence/identity transaction; binding survives I/O failure
-- `void tick(uint32_t nowMs)` - bounded maintenance hook; no async I2C or write-delay work, but advances Sleep `WAKING` to `AWAKE` from caller-supplied time
-- `void end()` - shut down without bus traffic; active work becomes a retained
-  `CANCELLED` result that must be consumed before rebinding
-
-### Variant Selection
-
-- `Config::expectedVariant` - `AUTO` by default, or an explicit `DeviceVariant` for fixed-BOM validation.
-- `const cmd::VariantInfo* variantInfo() const` - active variant metadata after fixed-variant bind or AUTO identity selection.
-- `const char* variantName() const` - active variant name, or `unknown` before selection.
-- `DeviceId deviceId() const` - cached Device ID from the last successful identity validation.
-- `uint32_t capacityBytes() const` - active runtime capacity.
-- `uint32_t maxAddress() const` - active highest valid memory address.
-- `uint32_t maxNormalBusHz() const` - active variant normal-mode I2C bus limit.
-- `uint32_t maxHighSpeedBusHz() const` - active variant HS bus limit, or `0` when unsupported.
-- `size_t maxWriteDataBytes() const` - active address-adjusted data limit for one write callback.
-- `size_t maxReadDataBytes() const` - active data limit for one read/verify callback.
-- `static constexpr uint16_t memorySize()` - legacy MB85RC256V size helper retained for existing users.
-
-### High-Speed And Sleep APIs
-
-- `bool supportsHighSpeedMode() const` - true only for variants with local HS-mode datasheet support.
-- `bool highSpeedModeEnabled() const` - true when memory transfers currently use the HS-prefixed special path.
-- `Status enterHighSpeedMode()` / `Status exitHighSpeedMode()` - enable or disable HS-prefixed memory/current-address transfers; the MCU bus clock remains application-owned.
-- `Status setHighSpeedMode(bool enabled)` - explicit form of the same HS transfer-mode toggle.
-- `bool supportsSleepMode() const` - true only for variants with local Sleep-mode datasheet support.
-- `SleepState sleepState() const` - `AWAKE`, `ASLEEP`, `WAKING`, or ambiguity-safe `UNKNOWN`, separate from driver health.
-- `uint16_t sleepRecoveryUs() const` - active variant `tREC` contract in microseconds.
-- `Status enterSleep()` - send the Sleep entry sequence; ambiguous failure enters `UNKNOWN` and blocks normal access.
-- `Status wake()` / `Status wakeFromSleep()` - reconcile `ASLEEP`/`UNKNOWN`, send the wake stimulus, and enter `WAKING`; call `tick()` after the recovery interval before normal access.
-
-### Memory Operations
-
-- `Status readOnce(uint32_t addr, uint8_t* data, size_t len)` - exactly one addressed read transaction
-- `Status writeOnce(uint32_t addr, const uint8_t* data, size_t len, WriteCommit* out = nullptr)` - exactly one addressed write transaction with commit knowledge
-- `Status verifyOnce(uint32_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - exactly one addressed read/compare transaction
-- `Status readByte(uint32_t addr, uint8_t& out)` - read one byte
-- `Status read(uint32_t addr, uint8_t* buf, size_t len)` - synchronously read a contiguous block with internal chunking
-- `Status readCurrentAddress(uint8_t& out)` - read from the device's current internal address pointer
-- `Status readCurrentAddress(uint8_t* buf, size_t len)` - repeat documented current-address reads into a buffer
-- `Status writeByte(uint32_t addr, uint8_t value)` - write one byte; success means the I2C transaction was accepted
-- `Status write(uint32_t addr, const uint8_t* data, size_t len)` - synchronously write a contiguous block with non-atomic chunking
-- `WriteResult writeDetailed(uint32_t addr, const uint8_t* data, size_t len)` - write and report requested bytes, accepted prefix, and first failed chunk
-- `Status fill(uint32_t addr, uint8_t value, size_t len)` - synchronously fill a region with a constant byte using non-atomic chunking
-- `WriteResult fillDetailed(uint32_t addr, uint8_t value, size_t len)` - fill and report requested bytes, accepted prefix, and first failed chunk
-- `Status verify(uint32_t addr, const uint8_t* expected, size_t len, VerifyResult& out)` - synchronously read back and compare FRAM contents against expected bytes
-- `VerifyDetailedResult verifyDetailed(uint32_t addr, const uint8_t* expected, size_t len)` - verify with requested and verified byte counts
-- `Status writeVerify(uint32_t addr, const uint8_t* data, size_t len, VerifyDetailedResult* out = nullptr)` - write then verify, returning `VERIFY_MISMATCH` on readback mismatch
-- `Status fillVerify(uint32_t addr, uint8_t value, size_t len, VerifyDetailedResult* out = nullptr)` - fill then verify, returning `VERIFY_MISMATCH` on readback mismatch
-- `Status requestRead(uint32_t id, uint32_t addr, uint8_t* data, size_t len)` - queue a request-qualified addressed read
-- `Status requestWrite(uint32_t id, uint32_t addr, const uint8_t* data, size_t len)` - queue a request-qualified addressed write
-- `Status requestFill(uint32_t id, uint32_t addr, uint8_t value, size_t len)` - queue a request-qualified fill
-- `Status requestVerify(uint32_t id, uint32_t addr, const uint8_t* expected, size_t len)` - queue a request-qualified verify
-- `Status requestVerifiedWrite(uint32_t id, uint32_t addr, const uint8_t* data, size_t len)` - queue a single-chunk write/readback job with ambiguity reconciliation
-- `Status pollTransfer(uint32_t nowMs, uint8_t maxInstructions)` - execute up to the requested number of queued chunks
-- `bool isTransferBusy() const` - true while a queued transfer remains active
-- `Status getTransferStatus() const` - current or terminal staged-transfer status
-- `Status getTransferProgress(TransferResult& out) const` - copy progress/terminal state without retaining caller-buffer pointers
-- `Status takeTransferResult(TransferResult& out)` - consume one retained terminal result exactly once
-- `Status resumeVerifiedWrite(uint32_t id)` - authorize verify-only readback after an indeterminate write
-- `Status cancelTransfer(uint32_t id)` - cancel between callbacks without rolling back accepted chunks
-- `Status timeoutTransfer(uint32_t id)` - owner-directed deadline expiry without I2C
-
-The request overloads without an explicit ID allocate an internal nonzero ID
-for source compatibility. External owners should use the request-qualified
-overloads so their own identity can be matched through progress, cancellation,
-timeout, reconciliation, and exactly-once result consumption. The no-argument
-`cancelTransfer()` compatibility overload cancels whichever request is active;
-owner-managed code should use `cancelTransfer(id)`.
-
-### Synchronous Bulk Convenience APIs
-
-The whole-range helpers are blocking convenience APIs: `read()`, `write()`,
-`fill()`, `verify()`, `writeDetailed()`, `fillDetailed()`,
-`verifyDetailed()`, `writeVerify()`, `fillVerify()`, and
-`readCurrentAddress(uint8_t*, size_t)`. They may perform several backend I2C
-transactions before returning. That is appropriate for simple applications and
-diagnostics, but it does not preserve a scheduler model that advances one
-backend transfer per poll. Poll-budgeted external-owner integrations should
-treat these helpers as convenience-only and use the one-transaction or staged
-API for poll-budgeted FRAM work. Their maximum callback counts are the formulas
-in Bounded Operation Classes; no helper retries or waits for FRAM programming.
-
-### Poll-Chunked Transfer API
-
-The `request*()` / `pollTransfer()` API preserves a poll-budgeted scheduler
-model. Requests validate request identity, buffer, length, active-capacity
-range, bound state, result/transfer exclusivity, and Sleep gating, then return
-without I2C traffic. Diagnostic OFFLINE classification never blocks a request.
-Caller-owned write/verify input buffers must remain valid and unmodified until
-the request reaches a terminal state; read output buffers must remain valid and
-may contain the completed prefix after each poll. The core clears all retained
-caller-buffer pointers when a request terminalizes.
-`pollTransfer(nowMs, maxInstructions)` advances Sleep wake state from `nowMs`
-and executes whole addressed chunks only: one random-read chunk, one
-sequential-write chunk, or one verify readback chunk is one instruction.
-`maxInstructions == 0` emits no bus traffic and leaves the job in progress.
-Large reads/verifies use the smaller of configured RX capacity and the core's
-128-byte buffer. Writes subtract active memory-address bytes from configured TX
-capacity, up to the core's 126 data-byte ceiling. Fills additionally cap chunks
-at `cmd::MAX_FILL_CHUNK` (`64` bytes). `pollTransfer()` clamps high budgets to
-`cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL` (`8`) chunks per call. Every chunk
-encodes its own memory address and does not rely on current-address state across
-polls.
-
-While a staged transfer is active, other public bus-touching APIs return
-`Err::BUSY` without I2C so the queued job cannot be interleaved with synchronous
-operations. A transport failure ends the transfer and preserves the transport
-status. `requestVerify()` returns `Err::VERIFY_MISMATCH` from
-`pollTransfer()` when readback differs, with `Status::detail` set to the first
-mismatching offset.
-
-External-owner firmware should queue with its own nonzero request ID, retain its
-original absolute deadline, call `pollTransfer(nowMs, 1)` when one physical
-transaction per owner poll is required, and consume the matching terminal once.
-Use `requestVerifiedWrite()` for critical single-chunk writes so an ambiguous
-failure can pause for owner recovery and resume as readback only. Application
-journaling remains required when atomic multi-record durability matters.
+For orientation, the API is grouped into passive lifecycle and variant
+selection, one-transaction primitives, synchronous chunked convenience calls,
+request-qualified cooperative jobs, High-speed/Sleep control, and bus-silent
+diagnostics. The operation bounds and scheduling guidance above explain when to
+use each group. Prefer the generated reference over copying method inventories
+into integration documentation.
 
 ### FRAM Write Semantics
 
@@ -530,14 +399,14 @@ transaction or claims bus-recovery authority.
 
 ## Supported Runtime Variants
 
-| Variant | Capacity | I2C address model | Memory address bytes/model | Device ID | Max bus speed claimed | Notes |
-| --- | ---: | --- | --- | --- | --- | --- |
-| `MB85RC04V` | 512 B | Base strap must be even (`0x50`, `0x52`, `0x54`, `0x56`); A8 selects the per-transaction address | 1 byte plus A8 in I2C address | Yes, product `0x010`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
-| `MB85RC16V` | 2 KB | Base must be `0x50`; transaction address encodes memory A10:A8 and there are no external address-select pins in the local model | 1 byte plus A10:A8 in I2C address | No; select `DeviceVariant::MB85RC16V` explicitly | 1 MHz | Memory-probe diagnostics only; `AUTO` cannot discover it. |
-| `MB85RC64TA` | 8 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x1FFF` | Yes, product `0x358`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
-| `MB85RC256V` | 32 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0x7FFF` | Yes, product `0x510`; `AUTO` supported | 1 MHz | No high-speed or sleep command support documented in local summary. |
-| `MB85RC512T` | 64 KB | `0x50`-`0x57`; A2/A1/A0 pins select device | 2 bytes, active range `0x0000`-`0xFFFF` | Yes, product `0x658`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
-| `MB85RC1MT` | 128 KB | Base strap must be even (`0x50`, `0x52`, `0x54`, `0x56`); A16 selects the per-transaction address | 2 bytes plus A16 in I2C address | Yes, product `0x758`; `AUTO` supported | 1 MHz normal, 3.4 MHz high-speed after entry command | High-speed transfer mode and sleep entry/wake are variant-gated; application controls the MCU bus clock and wake delay. |
+| Variant | Capacity | Identity selection | High-speed / Sleep |
+| --- | ---: | --- | --- |
+| `MB85RC04V` | 512 B | Device ID, `AUTO` supported | No |
+| `MB85RC16V` | 2 KiB | Explicit selection only | No |
+| `MB85RC64TA` | 8 KiB | Device ID, `AUTO` supported | Yes |
+| `MB85RC256V` | 32 KiB | Device ID, `AUTO` supported | No |
+| `MB85RC512T` | 64 KiB | Device ID, `AUTO` supported | Yes |
+| `MB85RC1MT` | 128 KiB | Device ID, `AUTO` supported | Yes |
 
 `AUTO` uses the Device ID command and therefore works only on variants that
 implement Device ID. `MB85RC16V` must be selected explicitly. The driver
@@ -545,62 +414,25 @@ derives runtime transaction addresses from `Config::i2cAddress` plus the active
 variant's address model, and rejects ambiguous base addresses before normal
 operation.
 
-The maintained [device reference](docs/DEVICE_REFERENCE.md) lists endurance
-and retention claims by variant. Use the exact part datasheet for production
-lifetime budgets: the local reference shows 10^12 writes/byte for
-`MB85RC04V`, `MB85RC16V`, and `MB85RC256V`, and 10^13 writes/byte for
-`MB85RC64TA`, `MB85RC512T`, and `MB85RC1MT`. Retention statements vary by part
-and temperature.
+The maintained [device reference](docs/DEVICE_REFERENCE.md) is the canonical
+source for address encoding, product IDs, electrical limits, bus modes,
+endurance, and retention notes. Use the exact BOM datasheet for final design
+decisions.
 
-## Hardware Validation Matrix
+## Hardware Validation
 
-Status values below are planning states, not claims. Mark rows complete only
-after recording board, MCU, FRAM package/date code, supply voltage, pull-ups,
-bus speed, address-pin straps, WP wiring, command log, and captured evidence.
-For strict HIL acceptance criteria and suggested heap thresholds, use the
-[release checklist](docs/RELEASE_CHECKLIST.md).
+The latest completed run is the 24-hour MB85RC256V strict soak ending
+2026-08-01: 34/34 functional checks and 221,222 soak checks passed, with no
+failures, unknowns, target resets, serial reconnects, or framing recoveries. The
+driver finished `READY` after 3,837,088 successful operations and zero failures;
+the final heap drop was 160 bytes.
 
-| Scenario | Variant(s) | Address pins | Command/test | Expected evidence | Status |
-| --- | --- | --- | --- | --- | --- |
-| Passive bind plus explicit Device ID | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | Each board's selected strap | `bind(AUTO)`, `id`, `idraw` | Bind emits no traffic; special ID operation returns manufacturer `0x00A`, expected product ID, and selects capacity | Pending hardware |
-| No-ID explicit variant | `MB85RC16V` | A10:A8 encoded in transaction address | `bind(MB85RC16V)`, memory probe, `readDeviceId()` negative check | Explicit bind succeeds without I2C; probe can run later; Device ID APIs reject as unsupported | Pending hardware |
-| High-speed entry and 3.4 MHz access | `MB85RC64TA`, `MB85RC512T`, `MB85RC1MT` | Production straps | `hs support`, `hs enter`, reconfigure application bus to 3.4 MHz, `read`/`writeVerify` on sacrificial range | HS entry prefix observed; 3.4 MHz transactions verify; STOP exit behavior understood | Pending hardware |
-| Unsupported High-speed rejection | `MB85RC04V`, `MB85RC16V`, `MB85RC256V` | Any valid strap | `hs support`, `hs enter` | CLI/API report unsupported; no HS bus sequence is emitted | Pending hardware |
-| Sleep enter/wake/recover | `MB85RC64TA`, `MB85RC512T`, `MB85RC1MT` | Production straps | `sleep support`, `sleep enter`, `sleep wake`, `recover`, then `read`/`writeVerify` | Sleep current/reduced activity observed if measured; wake waits `tREC >= 400 us`; access recovers | Pending hardware |
-| Unsupported Sleep rejection | `MB85RC04V`, `MB85RC16V`, `MB85RC256V` | Any valid strap | `sleep support`, `sleep enter`, `sleep wake` | CLI/API report unsupported; no sleep bus sequence is emitted | Pending hardware |
-| Address pin combinations | `MB85RC04V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, `MB85RC1MT` | A1/A2 or A0/A1/A2 low/high combinations as applicable | I2C scan plus `begin()` at each strapped address | Only strapped address responds; wrong addresses NACK | Pending hardware |
-| Upper-address bits in I2C address | `MB85RC16V` | No external address-select pins | Write/read across `0x00FF`, `0x0100`, and `0x07FF` | A10:A8 transaction address selection works and exact-end byte verifies | Pending hardware |
-| Exact-end read/write | All supported variants | Default and at least one nonzero strap | `writeVerify(maxAddress - n + 1, n)` and `read()` | Last valid byte range succeeds and verifies | Pending hardware |
-| Boundary rejection | All supported variants | Any valid strap | Cross-end `read`, `write`, `fill`, `verify` | Driver returns `ADDRESS_OUT_OF_RANGE` before bus traffic when observable | Pending hardware |
-| Sequential public no-wrap contract | All supported variants | Any valid strap | Attempt bulk range crossing capacity | Public API rejects; no reliance on datasheet rollover | Pending hardware |
-| WP high behavior | At least `MB85RC256V`, plus each production BOM variant | WP low/open, then WP high | `write()`, `verify()`, `writeVerify()` | WP low/open persists; WP high may ACK but memory remains unchanged; verify catches mismatch | Pending hardware |
-| Bulk write/fill/verify | All supported variants | Any valid strap | `writeDetailed()`, `fillDetailed()`, `verifyDetailed()` over multi-chunk ranges | Full accepted counts and readback match | Pending hardware |
-| Current-address read after explicit set | All supported variants | Any valid strap | Addressed `read()` or `write()`, then `readCurrentAddress()` | Pointer advances only after known address-setting transaction | Pending hardware |
-| Unplug/NACK and recovery | Representative Device-ID and no-ID variants | Any valid strap | Disconnect device or force wrong address, then explicit identity/probe after owner recovery | Transport error retained, health observation degrades/offlines, and later owner attempt is never gated | Pending hardware |
-| Brownout/power-cycle persistence | Each production BOM variant | Production straps and WP wiring | Write record, verify, power-cycle/brownout, read/verify | Data persists or application journal rejects torn record | Pending hardware |
-| Pure ESP-IDF CLI | ESP32-S2 and ESP32-S3 with production BOM variant | Production straps | `idf.py` build, flash, `id`, `idraw`, `settings`, `rw_suite!`, `xfer_demo!`, `typed_demo!`, `heap` | Native IDF CLI runs without Arduino compatibility and commands pass | Pending hardware |
-| Shared bus with another device | Production board topology | Production straps | Concurrent application bus manager test with another I2C device | External serialization prevents interleaved transactions and recovers from peer failures | Pending hardware |
-| Long soak on sacrificial range | Each production BOM variant | Production straps | Repeated write/read/verify with CRC/generation counter | No mismatches over planned duration; failures logged with supply and temperature | Pending hardware |
-
-## Notes
-
-- `read()`, `write()`, `fill()`, and `verify()` reject ranges where `address + len > capacityBytes()`; they do not silently wrap bulk operations.
-- `write()` and `fill()` are not atomic across internal chunks. A failed later chunk can leave an accepted prefix in the target range; the driver does not roll back earlier chunks.
-- Successful write/fill status means I2C acceptance, not verified persistence. Use `verify()` for readback confidence, especially when the hardware `WP` pin may be asserted.
-- `readCurrentAddress()` is only meaningful after a successful addressed memory read/write because the current address is undefined after power-on.
-- The bulk `readCurrentAddress(uint8_t*, size_t)` helper repeats the documented current-address read primitive while preserving tracked pointer behavior and rejecting cross-capacity reads.
-- Argument validation errors reject null buffers, zero lengths, and out-of-range start addresses before touching the bus or health counters.
-- `recover()` invalidates current-address tracking and records transport
-  failures in health. A successful identity transaction followed by a semantic
-  Device ID mismatch returns that mismatch but remains health-neutral.
-- `verify()` reports the first mismatch without inventing a synthetic device error code; transport failures still return normal `Status` errors.
-- Use `I2C_TIMEOUT` for injected transport transaction timeouts. The generic
-  `TIMEOUT` code records owner-declared staged deadline expiry through
-  `timeoutTransfer()`.
-- The `WP` pin is hardware-only and non-permanent. High disables writes to the entire array, low or open enables writes, and reads still work.
-- There is no software block-protect register, OTP lock region, or permanent write lock in this device family.
-- The datasheet software-reset bus sequence is transport-owned by design because the library never drives SDA/SCL directly.
-- Typed storage policy is intentionally kept out of the core driver. If you need fixed-width numeric encoding, use an explicit codec layer such as `examples/common/TypedMemory.h`.
+That firmware identified itself as `d31d2b4-dirty`, so the result is strong
+fixture regression and endurance evidence, not immutable clean-release
+qualification. WP-high behavior, unplug/NACK recovery, controlled power loss,
+native ESP-IDF hardware execution, and full variant/strap coverage remain open.
+See the [HIL evidence ledger](docs/reports/HIL_SUMMARY.md) for exact provenance
+and the [release checklist](docs/RELEASE_CHECKLIST.md) for the remaining matrix.
 
 ## Production Storage Pattern
 
@@ -608,8 +440,8 @@ For configuration records or other critical data, keep the transaction policy in
 the application layer:
 
 1. Use fixed-size slots or a small journal. Start each record with
-   magic/version/length/sequence/CRC fields and a validity marker that is erased
-   or invalid while the record is being written.
+   magic/version/length/sequence/CRC fields and keep its validity marker invalid
+   while the record is being written.
 2. Write the header and payload, with CRC covering the payload and any fields
    needed to reject torn records.
 3. Read back with `verify()` and reject the update if any byte mismatches.
@@ -701,21 +533,6 @@ ESP-IDF example transport.
 | `CliShell.h` | Simple serial shell helper |
 | `TypedMemory.h` | Example-only fixed-width integer/float/double codec on top of the raw driver |
 
-## Behavioral Contracts
-
-1. Concurrency: `MB85RC` instances are not internally thread-safe. Use one task, or provide external serialization around all public methods that can touch driver state or I2C.
-2. ISR safety: public APIs are not ISR-safe because they can call I2C transport callbacks and may block until the transport timeout.
-3. Transport non-recursion: injected transport callbacks must not recursively call back into the same `MB85RC` instance.
-4. Timing model: `tick()` is bounded and performs no async I2C or write-delay work; it only advances Sleep `WAKING` to `AWAKE` from caller-supplied time. Public I2C operations are blocking.
-5. Shared-bus ownership: bus, pins, locking, timeout policy, retry policy, and recovery policy remain application-owned via `Config` and the injected transport. The core never initializes or owns `Wire`, ESP-IDF I2C handles, pins, or a global bus.
-6. Memory behavior: no heap allocation in steady-state library operation; bulk memory APIs reject cross-end ranges instead of relying on device rollover.
-7. Current-address reads: use `readCurrentAddress()` only after a known address-setting transaction, such as a successful addressed `read()`, `readByte()`, `write()`, `writeByte()`, or `fill()` by the same instance. Current-address state is undefined after power-up and is conservatively invalidated after failed I2C memory/current-address transactions and `recover()`. Raw diagnostics such as `probe()` are not address-setting contracts and may disturb the device pointer; use an addressed read after them if current-address state matters.
-8. Error handling: all fallible APIs return `Status`; no exceptions and no silent failures. Public enum numeric values are part of the embedded API contract and future additions are append-only.
-9. High-speed and Sleep: HS/Sleep APIs are variant-gated and require the optional special transport callback. The core does not change the MCU bus clock or insert Sleep wake delays; the application bus manager owns those policies.
-10. Health behavior: `READY`, `DEGRADED`, and optional `OFFLINE` are diagnostics only. A previous failure never blocks the next owner-requested transaction. Validation/precondition errors, `WRITE_PROTECTED`, `VERIFY_MISMATCH`, and raw `probe()` diagnostics do not increment transport-health counters.
-11. Result lifetime: cooperative terminal results retain no caller-buffer pointers, are request-qualified, remain until one successful `takeTransferResult()`, and are never silently replaced. Any `Status::msg` is library-owned static text.
-12. Cancellation/deadline: cancel and timeout act only between synchronous callbacks, issue no I2C, preserve accepted-prefix/indeterminate-write evidence, and cannot interrupt a callback already in flight.
-
 ## Validation
 
 Current `main` / `[Unreleased]` Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino Espressif platform
@@ -749,10 +566,10 @@ gates—are in the [release checklist](docs/RELEASE_CHECKLIST.md).
 ## Documentation
 
 - `CHANGELOG.md` - release history and GitHub release note source
-- `docs/README.md` - documentation index and vendor PDF map
 - `docs/DEVICE_REFERENCE.md` - maintained MB85RC-family behavior reference
 - `docs/IDF_PORT.md` - ESP-IDF portability and native example notes
 - `docs/RELEASE_CHECKLIST.md` - release verification checklist
+- `docs/reports/HIL_SUMMARY.md` - revision-specific hardware evidence ledger
 - `docs/reference-pdfs/` - retained vendor datasheets and fact sheet
 - `CONTRIBUTING.md` - contribution workflow and required validation
 - `SECURITY.md` - supported-version and vulnerability-reporting policy

@@ -9,13 +9,13 @@ namespace MB85RC {
 
 /// @brief Runtime device variant selection and decoded identity.
 enum class DeviceVariant : uint8_t {
-  AUTO = 0,
-  MB85RC256V = 1,
-  MB85RC64TA = 2,
-  MB85RC04V = 3,
-  MB85RC16V = 4,
-  MB85RC512T = 5,
-  MB85RC1MT = 6
+  AUTO = 0,        ///< Select a Device-ID-capable variant from explicit identity readback.
+  MB85RC256V = 1, ///< 32 KiB, two-byte-address variant with Device ID.
+  MB85RC64TA = 2, ///< 8 KiB, two-byte-address variant with High-speed and Sleep support.
+  MB85RC04V = 3,  ///< 512-byte, one-byte-address variant with Device ID.
+  MB85RC16V = 4,  ///< 2 KiB, one-byte-address variant without Device ID.
+  MB85RC512T = 5, ///< 64 KiB, two-byte-address variant with High-speed and Sleep support.
+  MB85RC1MT = 6   ///< 128 KiB banked variant with High-speed and Sleep support.
 };
 
 namespace cmd {

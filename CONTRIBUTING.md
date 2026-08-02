@@ -56,8 +56,8 @@ doxygen Doxyfile
 Arduino build validation uses PlatformIO Core 6.1.19. Changes affecting Arduino compilation should also build `esp32s3dev`,
 `esp32s2dev`, and `esp32s3dev_legacy_54`. Changes affecting the native ESP-IDF
 example should build both configured IDF targets when `idf.py` is available.
-Doxygen is strict: undocumented public members, missing parameter/return
-documentation, and documentation errors fail the build.
+Doxygen is strict: undocumented public members or enum values, missing
+parameter/return documentation, and documentation errors fail the build.
 The complete packaging and hardware qualification commands live in the
 [release checklist](docs/RELEASE_CHECKLIST.md).
 

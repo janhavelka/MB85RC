@@ -139,23 +139,23 @@ struct VerifyDetailedResult {
 
 /// @brief Kind of cooperative transfer request.
 enum class TransferKind : uint8_t {
-  NONE = 0,
-  READ,
-  WRITE,
-  FILL,
-  VERIFY,
-  VERIFIED_WRITE
+  NONE = 0,      ///< No cooperative request is active or retained.
+  READ,          ///< Addressed memory read into a caller-owned output buffer.
+  WRITE,         ///< Addressed memory write from a caller-owned input buffer.
+  FILL,          ///< Addressed fill with one repeated byte value.
+  VERIFY,        ///< Addressed readback comparison against caller-owned bytes.
+  VERIFIED_WRITE ///< Single-chunk write with readback and ambiguity reconciliation.
 };
 
 /// @brief Observable lifecycle of a cooperative transfer request.
 enum class TransferState : uint8_t {
-  IDLE = 0,
-  ACTIVE,
-  WAITING_FOR_RECONCILIATION,
-  SUCCEEDED,
-  FAILED,
-  CANCELLED,
-  TIMED_OUT
+  IDLE = 0,                    ///< No request is active and no result is retained.
+  ACTIVE,                      ///< A request is queued and may advance when polled.
+  WAITING_FOR_RECONCILIATION,  ///< An ambiguous write awaits owner-authorized readback.
+  SUCCEEDED,                   ///< The request completed successfully.
+  FAILED,                      ///< The request ended with an operation failure.
+  CANCELLED,                   ///< The owner cancelled the request between callbacks.
+  TIMED_OUT                    ///< The owner declared the request deadline expired.
 };
 
 /// @brief Snapshot/result retaining no caller-owned transfer-buffer pointers.
@@ -857,10 +857,6 @@ private:
   Status _i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size_t txLen,
                                   uint8_t* rxBuf, size_t rxLen);
 
-  /// Tracked I2C write-read (updates health)
-  Status _i2cWriteReadTracked(const uint8_t* txBuf, size_t txLen,
-                              uint8_t* rxBuf, size_t rxLen);
-  
   /// Tracked I2C write to an explicit address (updates health)
   Status _i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len,
                               size_t memoryAddressBytes,
@@ -871,10 +867,10 @@ private:
                             WriteCommit* writeCommit = nullptr);
 
   /// Validate callback completion counts and map terminal transport codes.
-  Status _mapTransportResult(const TransportResult& result,
-                             size_t expectedTx, size_t expectedRx,
-                             bool memoryWrite, size_t memoryAddressBytes,
-                             WriteCommit* writeCommit = nullptr) const;
+  static Status _mapTransportResult(const TransportResult& result,
+                                    size_t expectedTx, size_t expectedRx,
+                                    bool memoryWrite, size_t memoryAddressBytes,
+                                    WriteCommit* writeCommit = nullptr);
   
   // =========================================================================
   // Internal Helpers

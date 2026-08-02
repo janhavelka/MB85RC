@@ -15,13 +15,13 @@ MB85RC-family driver surface. It summarizes the vendor PDFs kept in
 | MB85RC512T | 64 KiB | `0xFFFF` | Two address bytes; A2:A1:A0 select the device. | Manufacturer `0x00A`, Product `0x658` | 1 MHz normal, 3.4 MHz HS | 1.7 V to 3.6 V | High-speed and Sleep documented. |
 | MB85RC1MT | 128 KiB | `0x1FFFF` | Two address bytes; A16 is encoded in the I2C address word with A2:A1 as device-select bits. | Manufacturer `0x00A`, Product `0x758` | 1 MHz normal, 3.4 MHz HS | 1.8 V to 3.6 V | High-speed and Sleep documented. |
 
-Endurance, retention, and operating temperature are variant-specific. The older
-extracted notes recorded these page-1 retention summaries from the local PDFs:
+Endurance, retention, and operating temperature are variant-specific. The local
+vendor PDFs give these page-1 endurance and retention summaries:
 
 - `MB85RC04V` and `MB85RC256V`: `10^12` writes/byte; 10 years at +85 degC,
   95 years at +55 degC, and over 200 years at +35 degC.
 - `MB85RC16V`: `10^12` writes/byte with the same family retention statement in
-  the local extraction.
+  the local datasheet.
 - `MB85RC64TA`: `10^13` writes/byte; 19.1 years at +105 degC and 70.4 years at
   +85 degC.
 - `MB85RC512T`: `10^13` writes/byte; 10 years at +85 degC and 95 years at
@@ -114,10 +114,10 @@ don't-care in the local PDFs. For `MB85RC1MT`, A16 is also don't-care in those
 command forms; do not over-interpret those bits in custom special transports.
 
 For Sleep-capable variants, wake recovery starts on the ninth wake clock in the
-local extracted notes and requires `tREC` before normal access. The driver
+local datasheets and requires `tREC` before normal access. The driver
 records this state contract but does not insert a hidden delay.
 
-## Operational Checklist From The Extracted Notes
+## Datasheet Operational Checklist
 
 - Select the exact variant profile for density, supply range, address-pin
   layout, memory-address format, supported maximum bus speed, and HS/Sleep
@@ -135,7 +135,7 @@ records this state contract but does not insert a hidden delay.
   `I2cSpecialOp::READ_DEVICE_ID`; do not make `0x7C` a normal scanned device
   address.
 - Datasheet bus recovery/software reset, when needed, is transport-owned. The
-  extracted notes describe nine repetitions of `START` plus one data `1` before
+  local datasheets describe nine repetitions of `START` plus one data `1` before
   read/write retry, and warn not to force SDA high while a slave may be holding
   it low.
 

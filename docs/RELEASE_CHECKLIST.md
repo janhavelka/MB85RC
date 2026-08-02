@@ -36,7 +36,7 @@ Use this checklist before tagging and publishing a release.
   undocumented-public-API, parameter/return, or documentation warnings. Remove
   generated `docs/doxygen` output unless the repository intentionally starts
   tracking it.
-- Check maintained Markdown links and ensure `README.md`, `docs/README.md`,
+- Check maintained Markdown links and ensure `README.md`,
   `CONTRIBUTING.md`, and `SECURITY.md` describe the same supported release and
   validation commands.
 - Review GitHub Actions results, including pure ESP-IDF 6.0.1-floor and 6.0.2
@@ -51,10 +51,42 @@ Use this checklist before tagging and publishing a release.
 - Treat the exact production BOM, immutable downstream dependency pin, target
   firmware build, and hardware qualification as external release gates; never
   infer them from native tests or generic-board examples.
-- Keep hardware-validation matrix rows pending unless actual board logs and
-  evidence are recorded. Production HIL evidence must use strict mode, the
-  required variant/product/capacity gates, zero FAIL, zero UNKNOWN, final READY
-  health, zero total failures, zero target resets/reconnects, and documented
-  heap thresholds. The reference production gates use a maximum heap drop of
-  1024 bytes and a minimum free heap of 8192 bytes; record the rationale for
-  board-specific changes.
+
+## Hardware Qualification
+
+Keep each item pending until board logs and evidence are recorded in the
+[HIL evidence ledger](reports/HIL_SUMMARY.md). A pass applies only to the tested
+revision, BOM, wiring, voltage, bus settings, framework, and firmware identity;
+do not project one fixture's result onto another configuration.
+
+Production HIL must use strict mode, required variant/product/capacity gates,
+zero FAIL, zero UNKNOWN, final `READY` health, zero total driver failures, zero
+target resets/reconnects, and documented heap thresholds. The reference gates
+use a maximum heap drop of 1024 bytes and minimum free heap of 8192 bytes;
+record the rationale for board-specific changes.
+
+- [ ] Identity, addressing, and boundaries: cover every production variant and
+  strap, Device-ID `AUTO` selection where supported, explicit `MB85RC16V`
+  selection, wrong-address NACK, bank/address-bit transitions, exact-end access,
+  and bus-silent cross-capacity rejection.
+- [ ] Write protection: prove WP-low/open persistence and WP-high behavior with
+  readback verification; never infer persistence from write acknowledgement.
+- [ ] Disconnect/NACK recovery: exercise representative Device-ID and no-ID
+  variants, retain the original terminal error/commit evidence, recover in the
+  application-owned bus layer, and prove later owner work is admitted without a
+  blind replay of an indeterminate write.
+- [ ] Power interruption: exercise controlled power loss and brownout during
+  updates, then prove the application journal either selects a valid record or
+  rejects the torn one.
+- [ ] Shared bus: run with the production peer devices and serialization policy,
+  including peer failure and owner-directed bus recovery.
+- [ ] High-speed and Sleep: validate entry, 3.4 MHz electrical operation, STOP
+  exit behavior, Sleep current, wake stimulus, and `tREC` on each production
+  HS/Sleep-capable variant (`MB85RC64TA`, `MB85RC512T`, `MB85RC1MT`); also prove
+  unsupported variants reject these requests without bus traffic.
+- [ ] Native ESP-IDF hardware: flash the pure-IDF diagnostic on both ESP32-S2
+  and ESP32-S3 production targets and run identity, settings, memory/restore,
+  staged-transfer, typed-codec, and heap checks without Arduino compatibility.
+- [ ] Soak: run the approved duration and stress mix on each production BOM
+  variant, preserve the scratch/full-chip integrity contract, and record command
+  counts, health, heap, resets/reconnects, supply, and temperature.
