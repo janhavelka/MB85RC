@@ -42,20 +42,22 @@ Thank you for considering contributing to this project!
 
 Run at least:
 
-```bash
+```powershell
 python scripts/generate_version.py check
 python tools/check_metadata_consistency.py
 python tools/check_core_timing_guard.py
 python tools/hil_runner.py --parser-self-test
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
-python -m platformio test -e native
+.\scripts\pio.cmd test -e native
 doxygen Doxyfile
 ```
 
-Arduino build validation uses PlatformIO Core 6.1.19. Changes affecting Arduino compilation should also build `esp32s3dev`,
-`esp32s2dev`, and `esp32s3dev_legacy_54`. Changes affecting the native ESP-IDF
-example should build both configured IDF targets when `idf.py` is available.
+Arduino build validation uses PlatformIO Core 6.1.19. Changes affecting Arduino
+compilation should also build `esp32s3dev`, `esp32s2dev`, and
+`esp32s3dev_legacy_54` through `.\scripts\pio.cmd`. Changes affecting the native
+ESP-IDF example should build both configured IDF targets when `idf.py` is
+available.
 Doxygen is strict: undocumented public members or enum values, missing
 parameter/return documentation, and documentation errors fail the build.
 The complete packaging and hardware qualification commands live in the

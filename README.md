@@ -2,13 +2,12 @@
 
 Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
 
-Library version: `4.0.0`
+Library version: `4.1.0`
 
-Latest published tag: `v4.0.0`
+Latest published tag: `v4.1.0`
 
-The published `v4.0.0` tag uses the previous pioarduino `54.03.20` baseline.
-The `55.03.311` migration and cleanup described under `[Unreleased]` in the
-[changelog](CHANGELOG.md) apply to current `main` until the next release is tagged.
+Release `v4.1.0` uses pioarduino `55.03.311`. The previous `54.03.20` stack
+remains available as a named build-only compatibility environment.
 
 ## Features
 
@@ -48,7 +47,7 @@ lib_deps =
   https://github.com/janhavelka/MB85RC.git#<reviewed-immutable-commit>
 ```
 
-Use `#v4.0.0` for the reviewed release. Production integrations should pin the
+Use `#v4.1.0` for the reviewed release. Production integrations should pin the
 release tag or its full commit, not a branch name.
 
 ### Manual
@@ -535,20 +534,19 @@ ESP-IDF example transport.
 
 ## Validation
 
-Current `main` / `[Unreleased]` Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino Espressif platform
-`55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and require PlatformIO
-Core `6.1.19` or newer. The `esp32s3dev_legacy_54` environment is a build-only
-source-compatibility check for the previous `54.03.20` stack; normal builds and
-HIL on current `main` use the current pin. The published `v4.0.0` tag predates
-this migration and uses `54.03.20`.
+Release `v4.1.0` Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino
+Espressif platform `55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and
+require PlatformIO Core `6.1.19` or newer. The `esp32s3dev_legacy_54`
+environment is a build-only source-compatibility check for the previous
+`54.03.20` stack; normal builds and HIL use the current pin.
 
 On Windows hosts where long-path support is disabled, the Arduino 3.3.11
 package can exceed the default PlatformIO extraction path. Enable Windows long
 paths or use a short session-local core path, for example
 `$env:PLATFORMIO_CORE_DIR='C:/pio'`, before installing/building the environment.
 
-```bash
-python -m platformio test -e native
+```powershell
+.\scripts\pio.cmd test -e native
 python tools/hil_runner.py --parser-self-test
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py

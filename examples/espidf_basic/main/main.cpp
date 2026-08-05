@@ -906,8 +906,8 @@ void runSelfTest() {
   }
   st = gFram.writeByte(0, 0xA5U);
   printStatus("selftest write", st);
-  uint8_t readBack = 0;
   if (st.ok()) {
+    uint8_t readBack = 0;
     st = gFram.readByte(0, readBack);
     printStatus("selftest readback", st);
     printf("selftest_pattern=%s\n", (st.ok() && readBack == 0xA5U) ? "PASS" : "FAIL");

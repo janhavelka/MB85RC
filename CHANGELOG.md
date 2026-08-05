@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [4.1.0] - 2026-08-05
+
 ### Added
 
 - `hs exit` diagnostic command parity for the Arduino and native ESP-IDF CLIs.
 - Native integration coverage for two independently bound owner instances using
-  the 5 ms, 124-byte staged-transfer contract planned by TunnelMonitor-node.
+  a representative 5 ms, 124-byte staged-transfer contract.
 - Runtime Arduino-ESP32 and ESP-IDF version reporting in the Arduino diagnostic
   CLI, plus optional strict HIL gates for both versions, so evidence identifies
   the framework that was actually flashed.
@@ -44,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host serial-write interruption rather than a device failure or completed soak.
 - Strict Doxygen generation now also rejects undocumented public enum values and
   reports warnings in file/line form.
+- Contributor and release commands now consistently use the repository's
+  Windows PlatformIO wrapper; unused Doxygen example-search configuration was
+  removed.
 
 ### Fixed
 
@@ -71,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INT32_MAX` instead of wrapping to a negative diagnostic value.
 - The example Device-ID adapter preserves terminal transport progress evidence
   instead of reconstructing and truncating failures.
+- Corrected the HIL evidence ledger's README hardware-validation link after the
+  documentation consolidation.
 
 ### Removed
 
@@ -84,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The duplicate `docs/README.md` navigation page and redundant README API and
   hardware-matrix inventories; the README now routes those details to Doxygen,
   the device reference, release checklist, and HIL evidence ledger.
+- Duplicate Arduino CLI color pass-through wrappers and an unnecessary example
+  forward declaration; temporary diagnostic objects now use narrower scopes.
 
 ## [4.0.0] - 2026-07-22
 
@@ -403,7 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/janhavelka/MB85RC/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/janhavelka/MB85RC/compare/v1.1.1...v2.0.0

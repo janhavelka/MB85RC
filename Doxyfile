@@ -1,9 +1,8 @@
-# Doxygen configuration for MB85RC
-# Generated and maintained for unified API documentation.
+# Strict Doxygen configuration for the MB85RC API documentation.
 
 PROJECT_NAME           = "MB85RC"
-PROJECT_NUMBER         = "4.0.0"
-PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for version 4.0.0"
+PROJECT_NUMBER         = "4.1.0"
+PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for version 4.1.0"
 OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO
@@ -35,8 +34,6 @@ INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md incl
 FILE_PATTERNS          = *.h *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*
-EXAMPLE_PATH           = examples/01_basic_bringup_cli examples/espidf_basic examples/common
-
 USE_MDFILE_AS_MAINPAGE = README.md
 FULL_PATH_NAMES        = NO
 SORT_MEMBER_DOCS       = YES

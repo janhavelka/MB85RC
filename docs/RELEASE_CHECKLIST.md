@@ -11,12 +11,12 @@ Use this checklist before tagging and publishing a release.
   `python scripts/generate_version.py check`.
 - Check package/release metadata consistency with
   `python tools/check_metadata_consistency.py`.
-- Run native tests: `python -m platformio test -e native`.
+- Run native tests: `.\scripts\pio.cmd test -e native`.
 - Run the exact Arduino reference builds with PlatformIO 6.1.19 and pioarduino
   Espressif platform 55.03.311:
-  `python -m platformio run -e esp32s3dev` and
-  `python -m platformio run -e esp32s2dev`, then build the previous 54.03.20
-  stack with `python -m platformio run -e esp32s3dev_legacy_54`.
+  `.\scripts\pio.cmd run -e esp32s3dev` and
+  `.\scripts\pio.cmd run -e esp32s2dev`, then build the previous 54.03.20
+  stack with `.\scripts\pio.cmd run -e esp32s3dev_legacy_54`.
 - Run guard scripts: `python tools/hil_runner.py --parser-self-test`,
   `python tools/check_core_timing_guard.py`,
   `python tools/check_cli_contract.py`, and
@@ -29,7 +29,7 @@ Use this checklist before tagging and publishing a release.
   Adapt the port, identity, capacity, and documented heap thresholds for another
   fixture; never relax a gate silently.
 - Run package validation:
-  `python -m platformio pkg pack --output MB85RC.tar.gz`, then
+  `.\scripts\pio.cmd pkg pack --output MB85RC.tar.gz`, then
   `python tools/check_package_contents.py MB85RC.tar.gz`. Remove the generated
   artifact after inspection.
 - Run `doxygen Doxyfile`. The strict configuration must complete with no

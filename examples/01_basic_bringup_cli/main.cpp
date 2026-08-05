@@ -58,6 +58,10 @@ static constexpr size_t XFER_DEMO_LEN = 640;
 // Helper Functions
 // ============================================================================
 
+using cli::nonZeroGoodColor;
+using cli::successRateColor;
+using cli::zeroGoodColor;
+
 uint32_t exampleNowMs(void*) {
   return millis();
 }
@@ -191,20 +195,8 @@ void printVariantCatalog() {
   }
 }
 
-const char* goodIfZeroColor(uint32_t value) {
-  return cli::zeroGoodColor(value);
-}
-
-const char* goodIfNonZeroColor(uint32_t value) {
-  return cli::nonZeroGoodColor(value);
-}
-
 const char* skipCountColor(uint32_t value) {
   return (value == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
-}
-
-const char* successRateColor(float pct) {
-  return cli::successRateColor(pct);
 }
 
 uint32_t stressProgressStep(uint32_t total) {
@@ -228,10 +220,10 @@ void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, u
                 static_cast<unsigned long>(completed),
                 static_cast<unsigned long>(total),
                 pct,
-                goodIfNonZeroColor(okCount),
+                nonZeroGoodColor(okCount),
                 static_cast<unsigned long>(okCount),
                 LOG_COLOR_RESET,
-                goodIfZeroColor(failCount),
+                zeroGoodColor(failCount),
                 static_cast<unsigned long>(failCount),
                 LOG_COLOR_RESET);
 }
@@ -281,15 +273,15 @@ void printDriverHealth() {
                 log_bool_str(online),
                 LOG_COLOR_RESET);
   Serial.printf("  Consecutive failures: %s%u%s\n",
-                goodIfZeroColor(device.consecutiveFailures()),
+                zeroGoodColor(device.consecutiveFailures()),
                 device.consecutiveFailures(),
                 LOG_COLOR_RESET);
   Serial.printf("  Total success: %s%lu%s\n",
-                goodIfNonZeroColor(totalOk),
+                nonZeroGoodColor(totalOk),
                 static_cast<unsigned long>(totalOk),
                 LOG_COLOR_RESET);
   Serial.printf("  Total failures: %s%lu%s\n",
-                goodIfZeroColor(totalFail),
+                zeroGoodColor(totalFail),
                 static_cast<unsigned long>(totalFail),
                 LOG_COLOR_RESET);
   Serial.printf("  Success rate: %s%.1f%%%s\n",
@@ -327,7 +319,9 @@ void printDriverHealth() {
   }
 }
 
-uint32_t memoryAddressAtOffset(uint32_t address, size_t offset);
+uint32_t memoryAddressAtOffset(uint32_t address, size_t offset) {
+  return address + static_cast<uint32_t>(offset);
+}
 
 void printHexDump(uint32_t startAddr, const uint8_t* data, size_t len) {
   for (size_t offset = 0; offset < len;) {
@@ -414,10 +408,6 @@ bool parseCountArg(const String& token, int& outCount) {
   }
   outCount = static_cast<int>(value);
   return true;
-}
-
-uint32_t memoryAddressAtOffset(uint32_t address, size_t offset) {
-  return address + static_cast<uint32_t>(offset);
 }
 
 bool rangeFitsActiveCapacity(uint32_t address, size_t len) {
@@ -926,11 +916,11 @@ void finishStressStats() {
   Serial.printf("  Target: %d\n", stressStats.target);
   Serial.printf("  Attempts: %d\n", stressStats.attempts);
   Serial.printf("  Success: %s%d%s\n",
-                goodIfNonZeroColor(static_cast<uint32_t>(stressStats.success)),
+                nonZeroGoodColor(static_cast<uint32_t>(stressStats.success)),
                 stressStats.success,
                 LOG_COLOR_RESET);
   Serial.printf("  Errors: %s%lu%s\n",
-                goodIfZeroColor(stressStats.errors),
+                zeroGoodColor(stressStats.errors),
                 static_cast<unsigned long>(stressStats.errors),
                 LOG_COLOR_RESET);
   Serial.printf("  Success rate: %s%.2f%%%s\n",
@@ -1022,10 +1012,10 @@ void runStress(int count) {
 
   finishStressStats();
   Serial.printf("  Tracked I2C health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
-                goodIfNonZeroColor(successDelta),
+                nonZeroGoodColor(successDelta),
                 static_cast<unsigned long>(successDelta),
                 LOG_COLOR_RESET,
-                goodIfZeroColor(failDelta),
+                zeroGoodColor(failDelta),
                 static_cast<unsigned long>(failDelta),
                 LOG_COLOR_RESET);
 }
@@ -1104,11 +1094,11 @@ void runStressMix(int count) {
         break;
       }
       case 5: {
-        MB85RC::DeviceId id;
         const MB85RC::cmd::VariantInfo* info = device.variantInfo();
         if (info != nullptr && !info->hasDeviceId) {
           st = MB85RC::Status::Ok();
         } else {
+          MB85RC::DeviceId id;
           st = device.readDeviceId(id);
           if (st.ok() && id.manufacturerId != MB85RC::cmd::MANUFACTURER_ID) {
             st = MB85RC::Status::Error(MB85RC::Err::DEVICE_ID_MISMATCH, "unexpected manufacturer");
@@ -1167,10 +1157,10 @@ void runStressMix(int count) {
   const float successPct =
       (count > 0) ? (100.0f * static_cast<float>(okTotal) / static_cast<float>(count)) : 0.0f;
   Serial.printf("  Total: %sok=%lu%s %sfail=%lu%s (%s%.2f%%%s)\n",
-                goodIfNonZeroColor(okTotal),
+                nonZeroGoodColor(okTotal),
                 static_cast<unsigned long>(okTotal),
                 LOG_COLOR_RESET,
-                goodIfZeroColor(failTotal),
+                zeroGoodColor(failTotal),
                 static_cast<unsigned long>(failTotal),
                 LOG_COLOR_RESET,
                 successRateColor(successPct),
@@ -1183,20 +1173,20 @@ void runStressMix(int count) {
   for (int i = 0; i < opCount; ++i) {
     Serial.printf("  %-14s %sok=%lu%s %sfail=%lu%s\n",
                   stats[i].name,
-                  goodIfNonZeroColor(stats[i].ok),
+                  nonZeroGoodColor(stats[i].ok),
                   static_cast<unsigned long>(stats[i].ok),
                   LOG_COLOR_RESET,
-                  goodIfZeroColor(stats[i].fail),
+                  zeroGoodColor(stats[i].fail),
                   static_cast<unsigned long>(stats[i].fail),
                   LOG_COLOR_RESET);
   }
   const uint32_t successDelta = device.totalSuccess() - succBefore;
   const uint32_t failDelta = device.totalFailures() - failBefore;
   Serial.printf("  Tracked I2C health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
-                goodIfNonZeroColor(successDelta),
+                nonZeroGoodColor(successDelta),
                 static_cast<unsigned long>(successDelta),
                 LOG_COLOR_RESET,
-                goodIfZeroColor(failDelta),
+                zeroGoodColor(failDelta),
                 static_cast<unsigned long>(failDelta),
                 LOG_COLOR_RESET);
 }
@@ -1250,8 +1240,8 @@ void runSelfTest() {
     reportSkip("probe responds", "driver not initialized");
     reportSkip("remaining checks", "selftest aborted");
     Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
-                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
+                  nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
                   skipCountColor(result.skip), static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
     return;
   }
@@ -1446,8 +1436,8 @@ void runSelfTest() {
               activeVariant != nullptr && capacity == activeVariant->memoryBytes, "");
 
   Serial.printf("Selftest result: pass=%s%lu%s fail=%s%lu%s skip=%s%lu%s\n",
-                goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
+                nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET,
                 skipCountColor(result.skip),
                 static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
 }
@@ -1570,8 +1560,8 @@ void runReadWriteSuite() {
   }
 
   Serial.printf("Read/write suite result: pass=%s%lu%s fail=%s%lu%s\n",
-                goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+                nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
 }
 
 struct XferDemoResult {
@@ -1659,8 +1649,8 @@ void runTransferDemo() {
   if (len == 0U) {
     reportXferDemoCheck(result, "select scratch range", false, "active capacity is zero");
     Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
-                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+                  nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
     return;
   }
 
@@ -1681,8 +1671,8 @@ void runTransferDemo() {
   reportXferDemoStatus(result, "backup staged scratch region", st);
   if (!st.ok()) {
     Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
-                  goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                  goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+                  nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                  zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
     return;
   }
 
@@ -1759,8 +1749,8 @@ void runTransferDemo() {
   }
 
   Serial.printf("Transfer demo result: pass=%s%lu%s fail=%s%lu%s\n",
-                goodIfNonZeroColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
-                goodIfZeroColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
+                nonZeroGoodColor(result.pass), static_cast<unsigned long>(result.pass), LOG_COLOR_RESET,
+                zeroGoodColor(result.fail), static_cast<unsigned long>(result.fail), LOG_COLOR_RESET);
 }
 
 void runRandomBench(int count) {

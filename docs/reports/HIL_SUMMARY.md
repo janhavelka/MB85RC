@@ -32,7 +32,7 @@ MB85RC256V production-readiness evidence.
   declared 5 ms in `Config`, TX capacity 126, RX capacity 124, and therefore
   124-byte read/write data limits, but the startup scanner silently reset the
   physical Wire timeout to 50 ms. Its 124-byte result remains valid; its 5 ms
-  controller-timeout claim is invalidated by the 2026-07-31 audit.
+  controller-timeout claim is invalidated by the 2026-07-31 follow-up analysis.
 - Full-capacity CRC32 was `0xE30F00B8` before the run, after the one-hour run,
   after the exact-envelope run, and after the application reboot check.
 - The original raw transcripts and runner outputs were removed after their
@@ -190,7 +190,7 @@ command windows and no target failure, reset, reconnect, or health failure.
 Because the strict gate requires zero UNKNOWN results, both of those historical
 long soaks remain strict-gate failures and are not release qualification.
 Current qualification requirements are maintained in the
-[README hardware matrix](../../README.md#hardware-validation-matrix) and
+[README hardware-validation summary](../../README.md#hardware-validation) and
 [release checklist](../RELEASE_CHECKLIST.md), rather than duplicated here.
 
 ## Qualification limits after the 24-hour pass

@@ -2,8 +2,8 @@
 /// @brief Minimal Wire stub for native testing
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 class TwoWire {
 public:
@@ -15,30 +15,38 @@ public:
   }
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
   uint32_t getTimeOut() const { return _timeoutMs; }
-  
-  void beginTransmission(uint8_t addr) { _addr = addr; _txLen = 0; }
+
+  void beginTransmission(uint8_t addr) {
+    _addr = addr;
+    _txLen = 0;
+  }
   size_t write(const uint8_t* data, size_t len) {
     size_t accepted = _writeReturnOverrideEnabled ? _writeReturnOverride : len;
-    if (accepted > len) accepted = len;
+    if (accepted > len) {
+      accepted = len;
+    }
     for (size_t i = 0; i < accepted && _txLen < sizeof(_txBuf); i++) {
       _txBuf[_txLen++] = data[i];
     }
     return accepted;
   }
-  uint8_t endTransmission(bool stop = true) { (void)stop; return _endTransmissionResult; }
-  
-  size_t requestFrom(uint8_t addr, size_t len) { 
+  uint8_t endTransmission(bool stop = true) {
+    (void)stop;
+    return _endTransmissionResult;
+  }
+
+  size_t requestFrom(uint8_t addr, size_t len) {
     (void)addr;
     _rxLen = len;
     _rxPos = 0;
     return _rxLen;
   }
-  
+
   int available() { return _rxPos < _rxLen ? 1 : 0; }
   int read() { return _rxPos < _rxLen ? _rxBuf[_rxPos++] : -1; }
-  
+
   void end() {}
-  
+
   // Test helpers
   void _setEndTransmissionResult(uint8_t result) { _endTransmissionResult = result; }
   void _clearEndTransmissionResult() { _endTransmissionResult = 0; }
@@ -58,11 +66,11 @@ public:
     _writeReturnOverride = 0;
   }
   void _setBeginResult(bool result) { _beginResult = result; }
-  
+
   uint8_t _addr = 0;
   uint8_t _txBuf[256] = {};
   size_t _txLen = 0;
-  
+
 private:
   uint32_t _timeoutMs = 50;
   bool _beginResult = true;
