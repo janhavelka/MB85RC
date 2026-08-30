@@ -286,7 +286,7 @@ public:
   /// @return true while bound, including DEGRADED/OFFLINE diagnostic states.
   bool isOnline() const { return _initialized; }
 
-  /// Get a copy of the active configuration.
+  /// Get the active cached configuration.
   /// @return Reference to the cached configuration supplied to bind()/begin().
   const Config& getConfig() const { return _config; }
 
@@ -597,6 +597,8 @@ public:
   /// address-setting transaction, such as a successful addressed memory
   /// read/write by this instance. Failed transactions and recovery paths
   /// conservatively invalidate cached current-address state.
+  /// Performs exactly `len` one-byte transport callbacks; use read() for bulk
+  /// transfers that should use bounded multi-byte chunks.
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success

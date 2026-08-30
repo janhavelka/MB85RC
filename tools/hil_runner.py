@@ -39,7 +39,7 @@ DEFAULT_FAIL_PATTERNS = (
     re.compile(r"\bfinal_match=no\b", re.IGNORECASE),
     re.compile(
         r"\b(?:Status|[a-z_][a-z_ ]*):\s*"
-        r"(?:BUSY|INVALID_CONFIG|INVALID_PARAM|UNSUPPORTED|I2C_[A-Z_]+|"
+        r"(?P<status>BUSY|INVALID_CONFIG|INVALID_PARAM|UNSUPPORTED|I2C_[A-Z_]+|"
         r"DEVICE_ID_MISMATCH|NOT_INITIALIZED|VERIFY_MISMATCH|CANCELLED|TIMEOUT)\b",
         re.IGNORECASE,
     ),
@@ -101,6 +101,7 @@ class CommandStep:
     expected_any: tuple[tuple[str, ...], ...] = ()
     fail_tokens: tuple[str, ...] = DEFAULT_FAIL_TOKENS
     fail_patterns: tuple[re.Pattern[str], ...] = DEFAULT_FAIL_PATTERNS
+    allowed_failure_statuses: tuple[str, ...] = ()
     timeout_s: float | None = None
     notes: str = ""
 
@@ -213,9 +214,21 @@ def classify(
             break
     if not failure_notes:
         for pattern in step.fail_patterns:
-            match = pattern.search(clean)
-            if match is not None:
+            for match in pattern.finditer(clean):
+                status = match.groupdict().get("status")
+                if status is not None and status.upper() in step.allowed_failure_statuses:
+                    matched_status_line = match.group(0).strip().upper()
+                    expected_status_outcome = any(
+                        all(token in clean for token in group) and
+                        any(matched_status_line == token.strip().upper()
+                            for token in group)
+                        for group in step.expected_any
+                    )
+                    if expected_status_outcome:
+                        continue
                 failure_notes.append(f"failure pattern: {pattern.pattern}")
+                break
+            if failure_notes:
                 break
 
     missing = [token for token in step.expected_all if token not in clean]
@@ -380,10 +393,15 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
         hs_enter_expected = (("High-speed mode:", "Status:", "UNSUPPORTED"),)
         hs_enter_fail_tokens: tuple[str, ...] = ()
         hs_enter_fail_patterns: tuple[re.Pattern[str], ...] = ()
+        hs_enter_allowed_statuses: tuple[str, ...] = ()
     else:
-        hs_enter_expected = (("High-speed mode:", "hs enter: OK"),)
+        hs_enter_expected = (
+            ("High-speed mode:", "Support: yes", "hs enter: OK"),
+            ("High-speed mode:", "Support: no", "hs enter: UNSUPPORTED"),
+        )
         hs_enter_fail_tokens = DEFAULT_FAIL_TOKENS
         hs_enter_fail_patterns = DEFAULT_FAIL_PATTERNS
+        hs_enter_allowed_statuses = ("UNSUPPORTED",)
 
     steps = [
         CommandStep("HIL-001", "connectivity", "version",
@@ -419,7 +437,8 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
         CommandStep("HIL-015", "modes", "hs enter",
                     expected_any=hs_enter_expected,
                     fail_tokens=hs_enter_fail_tokens,
-                    fail_patterns=hs_enter_fail_patterns),
+                    fail_patterns=hs_enter_fail_patterns,
+                    allowed_failure_statuses=hs_enter_allowed_statuses),
         CommandStep("HIL-015A", "modes", "hs exit",
                     expected_any=(("High-speed mode:", "Status:", "OK"),
                                   ("High-speed mode:", "hs exit: OK"))),
@@ -457,10 +476,18 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
     if profile == "idf":
         sleep_steps = [
             CommandStep("HIL-017", "modes", "sleep enter",
-                        expected_any=(("Sleep mode:", "sleep enter: OK"),)),
+                        expected_any=(("Sleep mode:", "Support: yes",
+                                       "sleep enter: OK"),
+                                      ("Sleep mode:", "Support: no",
+                                       "sleep enter: UNSUPPORTED")),
+                        allowed_failure_statuses=("UNSUPPORTED",)),
             CommandStep("HIL-017A", "modes", "sleep wake",
-                        expected_any=(("Sleep mode:", "sleep wake: OK",
-                                       "recover after sleep wake: OK"),),
+                        expected_any=(("Sleep mode:", "Support: yes",
+                                       "sleep wake: OK",
+                                       "recover after sleep wake: OK"),
+                                      ("Sleep mode:", "Support: no",
+                                       "sleep wake: UNSUPPORTED")),
+                        allowed_failure_statuses=("UNSUPPORTED",),
                         timeout_s=10),
         ]
     else:
@@ -883,6 +910,7 @@ def write_markdown(
     transcript_path: Path,
     json_path: Path,
     observations: Observations,
+    strict_gate: str,
     strict_reasons: list[str],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -897,7 +925,7 @@ def write_markdown(
         f"- Transcript: `{transcript_path.as_posix()}`",
         f"- JSON: `{json_path.as_posix()}`",
         f"- Functional counts: PASS={counts['PASS']} FAIL={counts['FAIL']} UNKNOWN={counts['UNKNOWN']} NOT RUN=0",
-        f"- Strict gate: `{'PASS' if not strict_reasons else 'FAIL'}`",
+        f"- Strict gate: `{strict_gate}`",
         "",
         "## Functional Results",
         "",
@@ -1103,6 +1131,12 @@ def strict_failure_reasons(
     return reasons
 
 
+def strict_gate_status(strict: bool, strict_reasons: list[str]) -> str:
+    if not strict:
+        return "NOT RUN"
+    return "FAIL" if strict_reasons else "PASS"
+
+
 def parser_self_test() -> int:
     samples = [
         (
@@ -1152,6 +1186,82 @@ def parser_self_test() -> int:
     if incomplete.status != "UNKNOWN":
         ok = False
         print("parser self-test failed for incomplete prompt framing")
+
+    idf_mode_steps = {
+        step.test_id: step for step in make_functional_steps("idf", 1, False)
+    }
+    idf_mode_samples = (
+        ("HIL-015", "High-speed mode:\n  Support: yes\nhs enter: OK (code=0 detail=0)\n> "),
+        ("HIL-015", "High-speed mode:\n  Support: no\nhs enter: UNSUPPORTED (code=17 detail=0)\n> "),
+        ("HIL-017", "Sleep mode:\n  Support: yes\nsleep enter: OK (code=0 detail=0)\n> "),
+        ("HIL-017", "Sleep mode:\n  Support: no\nsleep enter: UNSUPPORTED (code=17 detail=0)\n> "),
+        ("HIL-017A", "Sleep mode:\n  Support: yes\nsleep wake: OK (code=0 detail=0)\nrecover after sleep wake: OK (code=0 detail=0)\n> "),
+        ("HIL-017A", "Sleep mode:\n  Support: no\nsleep wake: UNSUPPORTED (code=17 detail=0)\n> "),
+    )
+    for test_id, output in idf_mode_samples:
+        result = classify(idf_mode_steps[test_id], output, 0.1)
+        if result.status != "PASS":
+            ok = False
+            print(
+                f"parser self-test failed for honest IDF mode outcome "
+                f"{test_id}: got {result.status}"
+            )
+    dishonest_unsupported_samples = (
+        ("HIL-015", "High-speed mode:\n  Support: yes\nhs enter: UNSUPPORTED\n> "),
+        ("HIL-017", "Sleep mode:\n  Support: yes\nsleep enter: UNSUPPORTED\n> "),
+        ("HIL-017A", "Sleep mode:\n  Support: yes\nsleep wake: UNSUPPORTED\n> "),
+    )
+    for test_id, output in dishonest_unsupported_samples:
+        result = classify(idf_mode_steps[test_id], output, 0.1)
+        if result.status != "FAIL":
+            ok = False
+            print(
+                f"parser self-test failed to reject inconsistent IDF mode outcome "
+                f"{test_id}: got {result.status}"
+            )
+    dishonest_success_samples = (
+        ("HIL-015", "High-speed mode:\n  Support: no\nhs enter: OK\n> "),
+        ("HIL-017", "Sleep mode:\n  Support: no\nsleep enter: OK\n> "),
+        (
+            "HIL-017A",
+            "Sleep mode:\n  Support: no\nsleep wake: OK\n"
+            "recover after sleep wake: OK\n> ",
+        ),
+    )
+    for test_id, output in dishonest_success_samples:
+        result = classify(idf_mode_steps[test_id], output, 0.1)
+        if result.status == "PASS":
+            ok = False
+            print(
+                f"parser self-test failed to reject inconsistent IDF mode outcome "
+                f"{test_id}"
+            )
+    unexpected_mode_failure = classify(
+        idf_mode_steps["HIL-015"],
+        "High-speed mode:\n  Support: yes\nhs enter: BUSY\n> ",
+        0.1,
+    )
+    if unexpected_mode_failure.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject unexpected IDF mode failure")
+    mixed_mode_failure = classify(
+        idf_mode_steps["HIL-017A"],
+        "Sleep mode:\n  Support: no\nsleep wake: UNSUPPORTED\n"
+        "recover after sleep wake: BUSY\n> ",
+        0.1,
+    )
+    if mixed_mode_failure.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject failure after an allowed status")
+    duplicate_unsupported_failure = classify(
+        idf_mode_steps["HIL-017A"],
+        "Sleep mode:\n  Support: no\nsleep wake: UNSUPPORTED\n"
+        "recover after sleep wake: UNSUPPORTED\n> ",
+        0.1,
+    )
+    if duplicate_unsupported_failure.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject an extra unsupported operation")
     observations = Observations()
     update_observations(
         observations,
@@ -1247,6 +1357,15 @@ def parser_self_test() -> int:
                for reason in missing_reasons):
         ok = False
         print("parser self-test failed for missing ESP-IDF framework telemetry")
+    if strict_gate_status(False, []) != "NOT RUN":
+        ok = False
+        print("parser self-test failed for disabled strict gate status")
+    if strict_gate_status(True, []) != "PASS":
+        ok = False
+        print("parser self-test failed for passing strict gate status")
+    if strict_gate_status(True, ["forced failure"]) != "FAIL":
+        ok = False
+        print("parser self-test failed for failing strict gate status")
     if ok:
         print("HIL parser self-test PASSED")
         return 0
@@ -1389,13 +1508,14 @@ def main(argv: list[str]) -> int:
 
     counts = count_results(results)
     strict_reasons = strict_failure_reasons(args, counts, soak, observations)
+    strict_gate = strict_gate_status(args.strict, strict_reasons)
     data = {
         "generated": datetime.now().astimezone().isoformat(timespec="seconds"),
         "port": args.port,
         "baud": args.baud,
         "profile": profile,
         "strict": args.strict,
-        "strict_gate": "PASS" if not strict_reasons else "FAIL",
+        "strict_gate": strict_gate,
         "strict_failures": strict_reasons,
         "requirements": {
             "arduino_core_version": args.require_arduino_version,
@@ -1429,12 +1549,13 @@ def main(argv: list[str]) -> int:
         transcript_path,
         json_path,
         observations,
+        strict_gate,
         strict_reasons,
     )
 
     print(f"HIL functional summary: PASS={counts['PASS']} FAIL={counts['FAIL']} UNKNOWN={counts['UNKNOWN']}")
     print(f"HIL soak summary: {soak.status} duration={soak.duration_s:.1f}s pass={soak.pass_count} fail={soak.fail_count} unknown={soak.unknown_count}")
-    print(f"HIL strict gate: {'PASS' if not strict_reasons else 'FAIL'}")
+    print(f"HIL strict gate: {strict_gate}")
     for reason in strict_reasons:
         print(f"  - {reason}")
     print(f"Transcript: {transcript_path}")

@@ -460,7 +460,9 @@ void resetBusPins() {
 }
 
 void printStatus(const char* op, MB85RC::Status st) {
-  printf("%s: %s (code=%u detail=%ld)\n", op, st.ok() ? "OK" : "FAIL",
+  const char* result = st.ok() ? "OK" :
+      (st.code == MB85RC::Err::UNSUPPORTED ? "UNSUPPORTED" : "FAIL");
+  printf("%s: %s (code=%u detail=%ld)\n", op, result,
          static_cast<unsigned>(st.code), static_cast<long>(st.detail));
   if (!st.ok() && st.msg != nullptr) {
     printf("  %s\n", st.msg);
