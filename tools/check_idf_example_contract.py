@@ -122,6 +122,13 @@ def main() -> int:
     for token in REQUIRED_NATIVE_TOKENS:
         if token not in text:
             fail(f"native ESP-IDF token missing: {token}")
+    tx_only = re.search(
+        r"else\s+if\s*\(\s*rxLen\s*==\s*0U\s*\)\s*\{\s*"
+        r"err\s*=\s*i2c_master_transmit\s*\(\s*dev\s*,\s*tx\s*,\s*txLen\s*,",
+        text,
+    )
+    if tx_only is None:
+        fail("native ESP-IDF write-read callback lacks a TX-only transaction path")
     for token in REQUIRED_CONFIRMATION_TOKENS:
         if token not in text:
             fail(f"confirmation/handler token missing: {token}")

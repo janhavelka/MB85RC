@@ -6,7 +6,9 @@
 #include <cstdint>
 
 #define MB85RC_TEST_WIRE_STUB 1
-#define I2C_BUFFER_LENGTH 128U
+#ifndef I2C_BUFFER_LENGTH
+#define I2C_BUFFER_LENGTH 32U
+#endif
 
 static constexpr int OUTPUT_OPEN_DRAIN = 1;
 static constexpr int HIGH = 1;

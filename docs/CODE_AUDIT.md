@@ -15,6 +15,37 @@ tests/tooling/simplicity. Datasheet claims were rechecked against all seven
 local PDFs under `docs/reference-pdfs/`; backend claims were checked against
 the pinned Arduino-ESP32 source and official ESP-IDF 6.x documentation.
 
+### Independent follow-up audit
+
+After the initial corrective commit was synchronized as `48af464`, the original
+audit was read again in full and the implementation was reviewed independently
+against the actual `6ee87a8..48af464` diff and current code. Parallel passes
+again covered requirements and scope, core behavior and edge cases, and
+tests/CI/simplicity. Four classes of follow-up work were confirmed and fixed:
+
+- Cancelling, timing out, or calling `end()` after
+  `resumeVerifiedWrite()`—but before its readback poll—discarded the original
+  failed-write chunk. Abort paths now preserve any recorded nonzero failed
+  chunk, and one regression case exercises all three terminal paths without
+  additional I2C.
+- The ESP-IDF `i2cWriteRead` callback passed transmit-only requests to the
+  transmit-receive API with a zero-length receive. It now uses a normal
+  STOP-terminated transmit. Error and write-commit mapping is centralized in
+  constexpr helpers with semantic compile-time assertions; invalid arguments
+  on non-memory operations retain `NOT_APPLICABLE`.
+- Coverage now distinguishes a real 32-byte Wire buffer from the core's
+  128-byte ceiling, checks both TX and RX limits, covers reserved-ID rejection
+  in all five caller-qualified request APIs, and proves that an unselected AUTO
+  `probe()` accepts a known identity without selecting it.
+- API/report wording was corrected for `pollTransfer()`, Device-ID detail
+  arithmetic, AUTO probe selection, and terminal failed-chunk field semantics.
+  Duplicate catalog assertions were removed.
+
+The follow-up found no reason to expand the deferred diagnostic refactor or to
+adopt the original proposals that could not report backend behavior truthfully.
+After the fixes and a second live-diff review, no confirmed original-scope gap
+remained.
+
 ### Finding dispositions
 
 | Finding | Final disposition |
@@ -23,29 +54,29 @@ the pinned Arduino-ESP32 source and official ESP-IDF 6.x documentation.
 | 1.2 04V/16V bus rate | Confirmed fixed at 400 kHz over the full documented supply range. Added catalog assertions and corrected public wording that had implied a universal maximum. |
 | 1.3 remaining datasheet table | Reverified; no code change required. |
 | 2.1 range arithmetic | Reverified fixed. Capacity is compared in the wider domain before narrowing; no further change was required. |
-| 2.2 Device-ID detail arithmetic | Reverified fixed. The original signed-overflow explanation was too strong because the operands promote unsigned on common 16-bit targets; explicit `uint32_t` construction still prevents truncation of malformed wider values. |
+| 2.2 Device-ID detail arithmetic | Reverified fixed. Explicit `int32_t` construction prevents 16-bit unsigned truncation before the shift; the decoded identity fields are 12-bit values. |
 | 2.3 variant re-identification | Removed the redundant second reset because `_selectVariant()` already owns that transition. Added proof that re-reading the same identity preserves mode/current-address state while a real variant change resets it. |
 | 2.4 wake without a clock hook | Confirmed fixed and added a test proving configured recovery is honored and the driver returns to AWAKE. |
 | 2.5 expired WAKING entry points | Confirmed fixed and added direct `wake()`/`enterSleep()` transition tests. |
 | 2.6 staged mismatch provenance | Confirmed fixed; added assertions for the failed offset and exact failed length in normal verify and reconciliation mismatch paths. |
 | 2.7 smaller core items | Reverified. Added configured-recovery and malformed-asleep preflight coverage. |
-| 2.8 AUTO `probe()` | Fixed. After AUTO selects a variant, `probe()` validates that exact identity without changing health; unidentified AUTO binding remains permissive enough to select a known part. |
-| 2.9 successful transfer offset | Fixed at terminal success: `failedChunkOffset == bytesRequested` and length is zero. Cancel/timeout use definite completed bytes, including the verified-write post-write phase; reconciliation waiting preserves its earlier failed-chunk evidence. This avoids publishing a future-success value while a transfer is active. |
-| 2.10 request-ID collision | Fixed with disjoint namespaces: automatic IDs use `0x80000000..0xFFFFFFFF`; caller-qualified IDs accept `1..0x7FFFFFFF`. Allocation wrap and reserved-band rejection are tested and documented. |
+| 2.8 AUTO `probe()` | Fixed. After AUTO selects a variant, `probe()` validates that exact identity without changing health; unidentified AUTO binding accepts any known family identity without selecting it. |
+| 2.9 successful transfer offset | Fixed at terminal success: `failedChunkOffset == bytesRequested` and length is zero. Cancel/timeout use definite completed bytes, including the verified-write post-write phase; reconciliation waiting and an abort after resume preserve the earlier failed-chunk evidence. This avoids publishing a future-success value while a transfer is active. |
+| 2.10 request-ID collision | Fixed with disjoint namespaces: automatic IDs use `0x80000000..0xFFFFFFFF`; caller-qualified IDs accept `1..0x7FFFFFFF`. Allocation wrap and reserved-band rejection in all five qualified request APIs are tested and documented. |
 | 2.11 health filters | Removed the three redundant wrapper filters. `_updateHealth()` now performs the single authoritative classification and avoids calling the clock hook for excluded semantic errors. |
-| 2.12 public return contracts | Added a class-level bus-method precondition note plus lifecycle/probe details, without incorrectly applying bus requirements to cache-only queries. |
+| 2.12 public return contracts | Added a class-level bus-method precondition note plus lifecycle/probe details, explicitly excepting the active transfer's `pollTransfer()` entry point and avoiding bus requirements on cache-only queries. Transfer failure fields now also describe their success/abort conventions. |
 | 3.1 Wire short-write lock | Fixed completely. The adapter refuses calls while unready, closes every opened short transaction, reports write effect as `INDETERMINATE` when buffered data may have been sent, records completion only when the cleanup transmission succeeds, and unbinds the driver after failed interface reset. A transmit-only `writeRead` now sends STOP directly instead of deferring an operation that a zero-length read could not complete or diagnose. Tests cover failed init, short write, combined-read uncertainty, transmit-only success/NACK, STOP, conservative completion, and all Wire result commit classes. |
 | 3.2 open-drain recovery | Reverified fixed. The configured `TwoWire` instance is now used for both recovery and normal callbacks. |
-| 3.3 real Wire bounds | Fixed. The adapter owns/configures the Wire buffer and publishes matching TX/RX limits, clamped to the core's fixed bounds; the example feeds those limits into `Config`. Oversize and short-read tests were added. |
-| 3.4 NACK taxonomy | Partly valid, but the proposed mapping was not. The pinned Arduino API has no `TwoWire::lastError()`, so combined-read failures cannot truthfully be split into address/data NACK. ESP-IDF 6.0.1+ documents `ESP_ERR_INVALID_RESPONSE`, not legacy `ESP_FAIL`, as NACK and still does not identify which transmitted byte was rejected. Ambiguous outcomes therefore remain `IO_ERROR`; misleading `ESP_FAIL -> BUS_ERROR` was corrected to `IO_ERROR`. No fabricated address-NACK was added. |
+| 3.3 real Wire bounds | Fixed. The adapter owns/configures the Wire buffer and publishes matching TX/RX limits, clamped to the core's fixed bounds; the example feeds those limits into `Config`. Native coverage uses a 32-byte stub and asserts both limits and their oversize rejection rather than accidentally testing only the 128-byte core ceiling. |
+| 3.4 NACK taxonomy | Partly valid, but the proposed mapping was not. The pinned Arduino API has no `TwoWire::lastError()`, so combined-read failures cannot truthfully be split into address/data NACK. ESP-IDF 6.0.1+ documents `ESP_ERR_INVALID_RESPONSE`, not legacy `ESP_FAIL`, as NACK and still does not identify which transmitted byte was rejected. Ambiguous outcomes therefore remain `IO_ERROR`; misleading `ESP_FAIL -> BUS_ERROR` was corrected to `IO_ERROR`. Mapping helpers now have semantic compile-time assertions, and non-memory invalid-argument results retain `NOT_APPLICABLE`. No fabricated address-NACK was added. |
 | 3.5 Arduino HS/Sleep commands | The proposed direct calls were rejected. The adapter deliberately implements Device ID only; invoking a supported-part HS/Sleep core path through an unimplemented raw sequence would degrade health and could mutate state after a partial operation. Explicit CLI `UNSUPPORTED` remains truthful until those physical sequences exist. |
 | 4.1 HIL profile handling | Fixed without suppressing global failures. Expected Arduino `UNSUPPORTED` is allowed only as an exact status for its specific step; crash/error detection remains enabled for mode, invalid-command, and range-validation steps. Parser self-tests cover allowed outcomes and embedded panic rejection. |
-| 4.2 brittle backend checker | Removed the source-format pin. The revised mapping was checked against official backend contracts; the Arduino adapter was compiled on both pinned stacks, while the IDF example is checked structurally here and built by the CI IDF matrix rather than being frozen to one source-code line wrapping. |
+| 4.2 brittle backend checker | Removed the external source-format pin. The revised mapping was checked against official backend contracts and is protected by compile-time semantic assertions. The Arduino adapter is compiled on both pinned stacks; the IDF example has a whitespace-tolerant TX-only contract check and is built by the CI IDF matrix. |
 | 4.3 `runpy` coupling | Replaced with normal imports from `tools/_contract_data.py` and removed the redundant Device-ID token. The proposed shared C++ prose layer was not introduced because it depended on the much larger 5.1 refactor. |
 | 4.4 dead timing-guard paths | Removed. The guard now states its zero-tolerance policy directly. |
 | 4.5 CLI guard redundancy | Removed `require_token()` and made `?` help coverage explicit. |
 | 5.1 duplicate diagnostics | Confirmed as maintainability debt, not a correctness gap suitable for this pass. The proposed variadic print sink does not cover timers, framework hooks, or distinct ownership behavior, and its broad include-path change would weaken the IDF boundary. No large refactor was made under the guise of a simple audit fix. |
-| 5.2 missing tests | Addressed with seven additional registered native cases and expanded assertions/stub behavior. The suite increased from 159 at this branch baseline to 166 tests. |
+| 5.2 missing tests | Addressed with nine additional registered native cases and expanded assertions/stub behavior. The suite increased from 159 at this branch baseline to 168 tests. |
 | 5.3 small example fixes | Reverified fixed. |
 | 5.4 remaining example items | Fixed the unbound/small-capacity suite underflow, strict IDF verbose parsing/use, dead stress flag, custom-Wire reset, non-ESP32 reset guard, and misleading `wireSpecial` wording. Whole-range current-read rejection is intentional (bulk APIs do not cross capacity), byte-array bounds are useful defense in depth, the documented 5 ms target timeout is intentional, and `BuildConfig.h` remains the supported external log-level override. |
 | 6 documentation cleanup | Rechecked. Restored sync/wrapper safety rules that the original cleanup weakened, corrected wrapper failure advice, and documented a durable release location for ignored HIL artifacts. |
@@ -65,12 +96,15 @@ and [ESP-IDF 6.0 peripheral migration notes](https://docs.espressif.com/projects
   contract, including safe failure after `Wire.end()`/reinitialization.
 - The native fake and Wire stub represent the protocol and failure modes needed
   to catch the original bugs rather than merely satisfying happy paths.
+- The native ESP-IDF adapter handles read-only, write-only, and combined
+  callback shapes explicitly, with compile-time checks for conservative error
+  and commit mapping.
 - Tooling shares contract data normally, HIL keeps crash detection active, and
   repository/release instructions preserve sync and evidence expectations.
 
 ### Verification
 
-- `.\scripts\pio.cmd test -e native`: **166/166 passed**.
+- `.\scripts\pio.cmd test -e native`: **168/168 passed**.
 - Arduino reference builds: **ESP32-S3 current passed**, **ESP32-S2 current
   passed**, and **ESP32-S3 legacy 54.03.20 passed**.
 - `check_core_timing_guard.py`, `check_cli_contract.py`,

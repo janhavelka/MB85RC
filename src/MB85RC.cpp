@@ -252,9 +252,8 @@ void MB85RC::tick(uint32_t nowMs) {
 
 void MB85RC::end() {
   if (_transferBusy()) {
-    if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+    if (_transfer.result.failedChunkLength == 0U) {
       _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
-      _transfer.result.failedChunkLength = 0;
     }
     _finishTransfer(TransferState::CANCELLED,
                     Status::Error(Err::CANCELLED,
@@ -1309,9 +1308,8 @@ Status MB85RC::cancelTransfer(uint32_t requestId) {
   if (_transfer.result.requestId != requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
-  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+  if (_transfer.result.failedChunkLength == 0U) {
     _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
-    _transfer.result.failedChunkLength = 0;
   }
   _finishTransfer(TransferState::CANCELLED,
                   Status::Error(Err::CANCELLED, "Transfer cancelled"));
@@ -1325,9 +1323,8 @@ Status MB85RC::timeoutTransfer(uint32_t requestId) {
   if (_transfer.result.requestId != requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
-  if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
+  if (_transfer.result.failedChunkLength == 0U) {
     _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
-    _transfer.result.failedChunkLength = 0;
   }
   _finishTransfer(TransferState::TIMED_OUT,
                   Status::Error(Err::TIMEOUT, "Transfer timed out"));

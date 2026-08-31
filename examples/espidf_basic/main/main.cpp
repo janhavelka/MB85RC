@@ -57,33 +57,54 @@ int timeoutArg(uint32_t timeoutMs) {
   return timeoutMs > static_cast<uint32_t>(INT_MAX) ? INT_MAX : static_cast<int>(timeoutMs);
 }
 
+constexpr MB85RC::TransportCode mapI2cCode(esp_err_t err) {
+  return err == ESP_OK
+             ? MB85RC::TransportCode::OK
+             : (err == ESP_ERR_TIMEOUT ? MB85RC::TransportCode::TIMEOUT
+                                       : MB85RC::TransportCode::IO_ERROR);
+}
+
+constexpr MB85RC::WriteCommit mapI2cFailureCommit(
+    esp_err_t err, MB85RC::WriteCommit failureCommit) {
+  return err == ESP_ERR_INVALID_ARG &&
+                 failureCommit != MB85RC::WriteCommit::NOT_APPLICABLE
+             ? MB85RC::WriteCommit::NOT_COMMITTED
+             : failureCommit;
+}
+
+static_assert(mapI2cCode(ESP_ERR_TIMEOUT) == MB85RC::TransportCode::TIMEOUT,
+              "ESP-IDF timeout mapping changed");
+static_assert(mapI2cCode(ESP_FAIL) == MB85RC::TransportCode::IO_ERROR,
+              "ESP-IDF generic failure mapping changed");
+static_assert(mapI2cCode(ESP_ERR_INVALID_RESPONSE) ==
+                  MB85RC::TransportCode::IO_ERROR,
+              "ESP-IDF NACK mapping changed");
+static_assert(mapI2cCode(ESP_ERR_NOT_FOUND) == MB85RC::TransportCode::IO_ERROR,
+              "ESP-IDF not-found mapping changed");
+static_assert(mapI2cFailureCommit(ESP_FAIL,
+                                 MB85RC::WriteCommit::INDETERMINATE) ==
+                  MB85RC::WriteCommit::INDETERMINATE,
+              "Ambiguous write evidence must be preserved");
+static_assert(mapI2cFailureCommit(ESP_ERR_INVALID_ARG,
+                                 MB85RC::WriteCommit::INDETERMINATE) ==
+                  MB85RC::WriteCommit::NOT_COMMITTED,
+              "Invalid memory-write arguments cannot commit");
+static_assert(mapI2cFailureCommit(ESP_ERR_INVALID_ARG,
+                                 MB85RC::WriteCommit::NOT_APPLICABLE) ==
+                  MB85RC::WriteCommit::NOT_APPLICABLE,
+              "Non-memory transfers have no write-commit result");
+
 MB85RC::TransportResult mapI2c(
     esp_err_t err, size_t txBytes, size_t rxBytes,
     MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_APPLICABLE) {
   if (err == ESP_OK) {
     return MB85RC::TransportResult::Ok(txBytes, rxBytes);
   }
-  if (err == ESP_ERR_TIMEOUT) {
-    return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::TIMEOUT, err, failureCommit);
-  }
-  if (err == ESP_ERR_INVALID_ARG) {
-    return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::IO_ERROR, err,
-        MB85RC::WriteCommit::NOT_COMMITTED);
-  }
-  if (err == ESP_ERR_INVALID_RESPONSE || err == ESP_ERR_NOT_FOUND) {
-    // ESP-IDF does not report which transmitted byte was NACKed. Preserve an
-    // indeterminate memory-write effect instead of inventing address-NACK proof.
-    return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::IO_ERROR, err, failureCommit);
-  }
-  if (err == ESP_FAIL) {
-    return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::IO_ERROR, err, failureCommit);
-  }
+  // ESP-IDF NACK results do not identify the rejected byte. Keep them
+  // conservative and preserve caller-supplied commit evidence unless invalid
+  // arguments prove that a memory write could not start.
   return MB85RC::TransportResult::Error(
-      MB85RC::TransportCode::IO_ERROR, err, failureCommit);
+      mapI2cCode(err), err, mapI2cFailureCommit(err, failureCommit));
 }
 
 const char* sleepStateName(MB85RC::SleepState state) {
@@ -367,6 +388,8 @@ MB85RC::TransportResult i2cWriteRead(uint8_t addr, const uint8_t* tx,
   if (err == ESP_OK) {
     if (txLen == 0U) {
       err = i2c_master_receive(dev, rx, rxLen, timeoutArg(timeoutMs));
+    } else if (rxLen == 0U) {
+      err = i2c_master_transmit(dev, tx, txLen, timeoutArg(timeoutMs));
     } else {
       err = i2c_master_transmit_receive(dev, tx, txLen, rx, rxLen, timeoutArg(timeoutMs));
     }

@@ -178,8 +178,8 @@ struct TransferResult {
   uint32_t address = 0;               ///< Requested starting memory address.
   size_t bytesRequested = 0;          ///< Total requested memory-data length.
   size_t bytesCompleted = 0;          ///< Definite read/match/accepted prefix.
-  size_t failedChunkOffset = 0;       ///< Offset of the first failed chunk.
-  size_t failedChunkLength = 0;       ///< Length of the first failed chunk.
+  size_t failedChunkOffset = 0;       ///< Failure/mismatch offset, or terminal prefix when no chunk failed.
+  size_t failedChunkLength = 0;       ///< Failed/mismatching chunk length, or zero when none failed.
 
   /// Most recent/failed write chunk effect, or VERIFIED after reconciliation.
   WriteCommit writeCommit = WriteCommit::NOT_APPLICABLE;
@@ -205,8 +205,8 @@ struct TransferResult {
 /// timeout policy, retry policy, and recovery policy belong to the injected
 /// transport callbacks or the application bus manager.
 ///
-/// @note Bus-touching methods require a successful binding and no active
-/// cooperative transfer. They report NOT_INITIALIZED or
+/// @note Except for pollTransfer(), bus-touching methods require a successful
+/// binding and no active cooperative transfer. They report NOT_INITIALIZED or
 /// BUSY(TRANSFER_ACTIVE) when those preconditions are not met. Memory and
 /// Device-ID I/O also report BUSY while the tracked Sleep state is ASLEEP,
 /// WAKING, or unknown. Cache-only queries and transfer-result inspection do

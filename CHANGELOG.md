@@ -28,10 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `size_t`, which rejected every access to `MB85RC512T`/`MB85RC1MT` on targets
   with a 16-bit `size_t`.
 - `Status::detail` for Device ID mismatches is now constructed explicitly in
-  `uint32_t`, avoiding truncation of malformed wider identities on 16-bit
-  targets.
+  `int32_t`, preventing 16-bit unsigned truncation before the shift.
 - Staged `VERIFY` and `VERIFIED_WRITE` mismatches now record
   `failedChunkOffset`/`failedChunkLength` instead of leaving them at zero.
+- Cancelling, timing out, or ending a resumed verified-write reconciliation now
+  preserves the original failed-write chunk instead of replacing it with an
+  empty completed-prefix marker.
 - `maxNormalBusHz` for `MB85RC04V` and `MB85RC16V` now reports 400 kHz, the rate
   their datasheets guarantee across the full 3.0 V to 5.5 V supply range; Fast
   Mode Plus is specified only for 4.5 V to 5.5 V on those two parts.
@@ -49,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native ESP-IDF diagnostics no longer classify generic `ESP_FAIL` as an
   arbitration/bus error, and `verbose [0|1]` is now parsed strictly and controls
   diagnostic output.
+- The native ESP-IDF write-read callback now handles transmit-only requests with
+  a STOP-terminated transmit. Its error-code and write-commit mappings are
+  centralized and protected by compile-time assertions.
 - Example CLI `errToStr()` covers `Err::NO_RESULT` and `Err::CANCELLED`.
 
 ### Changed
