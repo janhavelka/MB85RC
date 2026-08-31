@@ -23,7 +23,6 @@
 // ============================================================================
 
 struct StressStats {
-  bool active = false;
   uint32_t startMs = 0;
   uint32_t endMs = 0;
   int target = 0;
@@ -34,6 +33,7 @@ struct StressStats {
 };
 
 MB85RC::MB85RC device;
+transport::WireContext wireContext;
 bool verboseMode = false;
 StressStats stressStats;
 
@@ -894,7 +894,6 @@ void printCurrentAddressReadRange(uint32_t len) {
 }
 
 void resetStressStats(int target) {
-  stressStats.active = true;
   stressStats.startMs = millis();
   stressStats.endMs = 0;
   stressStats.target = target;
@@ -905,7 +904,6 @@ void resetStressStats(int target) {
 }
 
 void finishStressStats() {
-  stressStats.active = false;
   stressStats.endMs = millis();
   const uint32_t durationMs = stressStats.endMs - stressStats.startMs;
   const float successPct =
@@ -1472,23 +1470,43 @@ void runReadWriteSuite() {
 
   Serial.println("=== Read/Write Suite ===");
 
+  if (!device.isInitialized()) {
+    LOGW("Driver is not initialized");
+    return;
+  }
+
+  const uint32_t capacity = device.capacityBytes();
+  const uint32_t requiredBytes = static_cast<uint32_t>(
+      RW_SUITE_LEN + RW_SUITE_FILL_LEN + 8U);
+  if (capacity < requiredBytes) {
+    LOGW("Active capacity is too small for the read/write suite");
+    return;
+  }
+  const bool fixedRegionsFit =
+      rangeFitsActiveCapacity(RW_SUITE_ADDR, RW_SUITE_LEN) &&
+      rangeFitsActiveCapacity(RW_SUITE_FILL_ADDR, RW_SUITE_FILL_LEN);
+  const uint32_t scratchAddr = fixedRegionsFit ? RW_SUITE_ADDR : 0U;
+  const uint32_t fillAddr =
+      fixedRegionsFit ? RW_SUITE_FILL_ADDR
+                      : static_cast<uint32_t>(RW_SUITE_LEN);
+
   uint8_t originalScratch[RW_SUITE_LEN] = {};
   uint8_t originalFill[RW_SUITE_FILL_LEN] = {};
   uint8_t originalTail[8] = {};
   bool haveScratch = false;
   bool haveFill = false;
   bool haveTail = false;
-  const uint32_t tailAddr = device.maxAddress() - (sizeof(originalTail) - 1U);
+  const uint32_t tailAddr = capacity - static_cast<uint32_t>(sizeof(originalTail));
 
   MB85RC::Status st = typed_memory::readBytes(device,
-                                              RW_SUITE_ADDR,
+                                              scratchAddr,
                                               originalScratch,
                                               sizeof(originalScratch));
   haveScratch = st.ok();
   reportStatus("backup scratch region", st);
 
   st = typed_memory::readBytes(device,
-                               RW_SUITE_FILL_ADDR,
+                               fillAddr,
                                originalFill,
                                sizeof(originalFill));
   haveFill = st.ok();
@@ -1503,26 +1521,26 @@ void runReadWriteSuite() {
     scratchPattern[i] = static_cast<uint8_t>(0x21U + static_cast<uint8_t>(i * 13U));
   }
 
-  st = device.write(RW_SUITE_ADDR, scratchPattern, sizeof(scratchPattern));
+  st = device.write(scratchAddr, scratchPattern, sizeof(scratchPattern));
   reportStatus("write scratch pattern", st);
 
   MB85RC::VerifyResult verify;
-  st = device.verify(RW_SUITE_ADDR, scratchPattern, sizeof(scratchPattern), verify);
+  st = device.verify(scratchAddr, scratchPattern, sizeof(scratchPattern), verify);
   reportStatus("verify scratch transaction", st);
   reportCheck("verify scratch contents", st.ok() && verify.match, "");
 
   uint8_t readBack[RW_SUITE_LEN] = {};
-  st = device.read(RW_SUITE_ADDR, readBack, sizeof(readBack));
+  st = device.read(scratchAddr, readBack, sizeof(readBack));
   reportStatus("read scratch pattern", st);
   reportCheck("scratch round-trip bytes match",
               st.ok() && std::memcmp(readBack, scratchPattern, sizeof(readBack)) == 0,
               "");
 
-  st = device.fill(RW_SUITE_FILL_ADDR, 0xA5, RW_SUITE_FILL_LEN);
+  st = device.fill(fillAddr, 0xA5, RW_SUITE_FILL_LEN);
   reportStatus("fill test region", st);
 
   uint8_t fillReadBack[RW_SUITE_FILL_LEN] = {};
-  st = device.read(RW_SUITE_FILL_ADDR, fillReadBack, sizeof(fillReadBack));
+  st = device.read(fillAddr, fillReadBack, sizeof(fillReadBack));
   reportStatus("read fill region", st);
   bool fillOk = true;
   for (size_t i = 0; i < sizeof(fillReadBack); ++i) {
@@ -1546,13 +1564,13 @@ void runReadWriteSuite() {
 
   if (haveScratch) {
     reportStatus("restore scratch region",
-                 restoreVerified(RW_SUITE_ADDR,
+                 restoreVerified(scratchAddr,
                                  originalScratch,
                                  sizeof(originalScratch)));
   }
   if (haveFill) {
     reportStatus("restore fill region",
-                 restoreVerified(RW_SUITE_FILL_ADDR,
+                 restoreVerified(fillAddr,
                                  originalFill,
                                  sizeof(originalFill)));
   }
@@ -2436,9 +2454,10 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd == "iface_reset") {
-    if (!transport::interfaceReset(board::I2C_SDA, board::I2C_SCL,
+    if (!transport::interfaceReset(wireContext, board::I2C_SDA, board::I2C_SCL,
                                    board::I2C_FREQ_HZ, board::I2C_TIMEOUT_MS)) {
       LOGE("Interface reset failed");
+      device.end();
       return;
     }
     LOGI("Interface reset sequence sent (9 SCL pulses + STOP)");
@@ -2560,7 +2579,7 @@ void setup() {
 
   LOGI("=== MB85RC FRAM Bringup Example ===");
 
-  if (!board::initI2c()) {
+  if (!board::initI2c(wireContext, Wire)) {
     LOGE("Failed to initialize I2C");
     return;
   }
@@ -2572,13 +2591,13 @@ void setup() {
   cfg.i2cWrite = transport::wireWrite;
   cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cSpecial = transport::wireSpecial;
-  cfg.i2cUser = &Wire;
+  cfg.i2cUser = &wireContext;
   cfg.i2cAddress = 0x50;
   cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
-  // Total TX includes the active variant's 1-2 memory-address bytes, so the
-  // write-data limit is 125 on one-byte-address parts and 124 on two-byte ones.
-  cfg.maxTxBytes = 126U;
-  cfg.maxRxBytes = 124U;
+  // The adapter owns/configures the Wire buffer and publishes the matching
+  // total transaction limits. The driver subtracts active address overhead.
+  cfg.maxTxBytes = transport::MAX_TX_BYTES;
+  cfg.maxRxBytes = transport::MAX_RX_BYTES;
   cfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
   cfg.nowMs = exampleNowMs;
   cfg.offlineThreshold = 5;

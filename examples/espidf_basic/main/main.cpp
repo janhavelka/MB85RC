@@ -80,7 +80,7 @@ MB85RC::TransportResult mapI2c(
   }
   if (err == ESP_FAIL) {
     return MB85RC::TransportResult::Error(
-        MB85RC::TransportCode::BUS_ERROR, err, failureCommit);
+        MB85RC::TransportCode::IO_ERROR, err, failureCommit);
   }
   return MB85RC::TransportResult::Error(
       MB85RC::TransportCode::IO_ERROR, err, failureCommit);
@@ -943,6 +943,10 @@ void runStress(uint32_t count) {
       break;
     }
     ++ok;
+    if (gVerbose) {
+      printf("stress[%lu] wrote=0x%02X read=0x%02X\n",
+             static_cast<unsigned long>(i), pattern, readBack);
+    }
   }
   printStatus("stress restore", restoreVerified(0U, &original, 1U));
   printf("stress_ok=%lu/%lu\n", static_cast<unsigned long>(ok), static_cast<unsigned long>(count));
@@ -1238,6 +1242,9 @@ void runTypedDemo() {
 
 void handleCommand(char* line) {
   char* full = trim(line);
+  if (gVerbose) {
+    printf("command=%s\n", full);
+  }
   if (strcmp(full, "help") == 0 || strcmp(full, "?") == 0) {
     printHelp();
   } else if (strcmp(full, "version") == 0 || strcmp(full, "ver") == 0) {
@@ -1415,9 +1422,13 @@ void handleCommand(char* line) {
     } else {
       puts("Usage: fill! <addr> <value> <len>");
     }
-  } else if (strcmp(full, "verbose") == 0 || strncmp(full, "verbose ", 8) == 0) {
-    gVerbose = strstr(full, " 0") == nullptr && (strstr(full, " 1") != nullptr || !gVerbose);
+  } else if (strcmp(full, "verbose") == 0) {
     printf("verbose=%d\n", gVerbose ? 1 : 0);
+  } else if (strcmp(full, "verbose 0") == 0 || strcmp(full, "verbose 1") == 0) {
+    gVerbose = full[8] == '1';
+    printf("verbose=%d\n", gVerbose ? 1 : 0);
+  } else if (strncmp(full, "verbose ", 8) == 0) {
+    puts("Usage: verbose [0|1]");
   } else if (strcmp(full, "variants") == 0) {
     printVariants();
   } else if (strcmp(full, "selftest") == 0) {

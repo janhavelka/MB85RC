@@ -82,7 +82,7 @@ struct SettingsSnapshot {
   uint8_t densityCode = 0;        ///< Cached Device ID density field.
   uint32_t capacityBytes = 0;     ///< Active runtime memory capacity in bytes.
   uint32_t maxAddress = 0;        ///< Highest valid runtime memory address.
-  uint32_t maxNormalBusHz = 0;    ///< Datasheet normal-mode I2C limit for active variant.
+  uint32_t maxNormalBusHz = 0;    ///< Normal-mode rate guaranteed over the full documented supply range.
   uint32_t maxHighSpeedBusHz = 0; ///< Datasheet HS-mode I2C limit, or 0 when unsupported.
   bool highSpeedModeSupported = false; ///< True when active variant documents HS mode.
   bool highSpeedModeEnabled = false; ///< True when memory transfers use HS-prefixed callbacks.
@@ -158,12 +158,20 @@ enum class TransferState : uint8_t {
   TIMED_OUT                    ///< The owner declared the request deadline expired.
 };
 
+/// Automatically generated request IDs reserve the upper half of uint32_t.
+/// Caller-qualified request overloads accept IDs from 1 through 0x7FFFFFFF.
+static constexpr uint32_t AUTOMATIC_REQUEST_ID_FIRST = 0x80000000UL;
+
 /// @brief Snapshot/result retaining no caller-owned transfer-buffer pointers.
 ///
 /// Terminal results remain retained until takeTransferResult() consumes them
 /// exactly once. A new request is rejected while a terminal result is pending.
+/// On success, failedChunkOffset equals bytesRequested and failedChunkLength is
+/// zero. Cancellation and owner timeout use the completed-prefix offset with a
+/// zero length when no transport chunk failed first; reconciliation waiting
+/// preserves the original failed-write chunk evidence.
 struct TransferResult {
-  uint32_t requestId = 0;             ///< Caller-supplied nonzero correlation ID.
+  uint32_t requestId = 0;             ///< Caller-supplied or automatically generated nonzero correlation ID.
   TransferKind kind = TransferKind::NONE; ///< Requested cooperative operation.
   TransferState state = TransferState::IDLE; ///< Current or terminal lifecycle state.
   Status status = Status::Ok();       ///< Current or terminal operation status.
@@ -196,6 +204,13 @@ struct TransferResult {
 /// The core driver does not own the I2C bus: bus initialization, locking,
 /// timeout policy, retry policy, and recovery policy belong to the injected
 /// transport callbacks or the application bus manager.
+///
+/// @note Bus-touching methods require a successful binding and no active
+/// cooperative transfer. They report NOT_INITIALIZED or
+/// BUSY(TRANSFER_ACTIVE) when those preconditions are not met. Memory and
+/// Device-ID I/O also report BUSY while the tracked Sleep state is ASLEEP,
+/// WAKING, or unknown. Cache-only queries and transfer-result inspection do
+/// not have these bus-access preconditions.
 class MB85RC {
 public:
   MB85RC() = default;
@@ -214,7 +229,8 @@ public:
   /// and owner-directed transactions. AUTO remains bound but cannot perform
   /// memory access until readDeviceId() selects a supported variant.
   /// @param config Configuration including terminal transport callbacks.
-  /// @return Status::Ok() when the passive binding is valid.
+  /// @return Status::Ok() when the passive binding is valid; BUSY when a
+  /// transfer is active or a terminal transfer result has not been consumed.
   Status bind(const Config& config);
 
   /// Compatibility lifecycle: bind, then perform one explicit presence/identity
@@ -222,7 +238,8 @@ public:
   /// binding is retained so the external owner may try again later.
   /// Does not configure or take ownership of the caller-managed I2C bus.
   /// @param config Configuration including transport callbacks
-  /// @return Status::Ok() when binding and the compatibility check succeed.
+  /// @return Status::Ok() when binding and the compatibility check succeeds;
+  /// BUSY when a transfer is active or a terminal result remains unconsumed.
   Status begin(const Config& config);
   
   /// Process bounded maintenance work (call regularly from loop).
@@ -248,8 +265,10 @@ public:
   // =========================================================================
   
   /// Check if device is present on the bus (no health tracking).
-  /// Requires a successful bind()/begin() because the active variant and configured
-  /// transport are used. This is a diagnostic check only; it does not
+  /// Requires a successful bind()/begin() because the active variant and
+  /// configured transport are used. Once AUTO has selected a runtime variant,
+  /// this validates that exact identity rather than accepting another known
+  /// family part. This is a diagnostic check only; it does not
   /// initialize, reset, recover, or take ownership of the physical I2C bus.
   /// Diagnostic probes do not establish a safe current-address-read starting
   /// point; explicit no-Device-ID probes conservatively clear cached
@@ -311,8 +330,9 @@ public:
   /// @return Highest valid byte address for the active runtime variant.
   uint32_t maxAddress() const;
 
-  /// Get active variant's normal-mode I2C maximum bus rate.
-  /// @return Datasheet normal-mode bus rate in hertz, or 0 before variant selection.
+  /// Get the normal-mode I2C rate guaranteed over the active variant's full
+  /// documented supply range.
+  /// @return Full-supply normal-mode bus rate in hertz, or 0 before selection.
   uint32_t maxNormalBusHz() const;
 
   /// Get active variant's High-speed-mode I2C maximum bus rate.
@@ -686,6 +706,8 @@ public:
   /// The request performs validation only and emits no I2C traffic. Call
   /// pollTransfer() to execute bounded random-read chunks. Each chunk carries
   /// its own memory address and counts as one instruction.
+  /// This overload generates an ID in the reserved range beginning at
+  /// AUTOMATIC_REQUEST_ID_FIRST.
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Output buffer that must remain valid until the request reaches
   /// a terminal state; the completed prefix may change after each poll.
@@ -694,7 +716,7 @@ public:
   /// Sleep state blocks memory I2C.
   Status requestRead(uint32_t address, uint8_t* data, size_t length);
   /// Request-qualified overload for external-owner correlation.
-  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
   /// @param address Starting memory address within active capacity.
   /// @param data Output buffer with the lifetime documented above.
   /// @param length Number of bytes to read.
@@ -706,6 +728,7 @@ public:
   /// The request performs validation only and emits no I2C traffic. Call
   /// pollTransfer() to execute bounded sequential-write chunks. Successful
   /// chunks are not rolled back if a later chunk fails.
+  /// This overload generates an ID in the reserved upper-half range.
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Source buffer that must remain valid and unmodified until the
   /// request reaches a terminal state.
@@ -714,7 +737,7 @@ public:
   /// Sleep state blocks memory I2C.
   Status requestWrite(uint32_t address, const uint8_t* data, size_t length);
   /// Request-qualified overload for external-owner correlation.
-  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
   /// @param address Starting memory address within active capacity.
   /// @param data Input buffer with the lifetime documented above.
   /// @param length Number of bytes to write.
@@ -728,6 +751,7 @@ public:
   /// pollTransfer() to execute bounded addressed write chunks using a fixed
   /// local fill buffer. Successful chunks are not rolled back if a later chunk
   /// fails.
+  /// This overload generates an ID in the reserved upper-half range.
   /// @param address Starting memory address within the active variant capacity.
   /// @param value Fill byte.
   /// @param length Number of bytes to fill.
@@ -735,7 +759,7 @@ public:
   /// Sleep state blocks memory I2C.
   Status requestFill(uint32_t address, uint8_t value, size_t length);
   /// Request-qualified overload for external-owner correlation.
-  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
   /// @param address Starting memory address within active capacity.
   /// @param value Fill byte.
   /// @param length Number of bytes to fill.
@@ -747,6 +771,7 @@ public:
   /// Each poll instruction reads one addressed chunk and compares it before the
   /// next chunk is attempted. A mismatch terminates the transfer with
   /// Err::VERIFY_MISMATCH and detail set to the first mismatching offset.
+  /// This overload generates an ID in the reserved upper-half range.
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Expected bytes that must remain valid and unmodified until the
   /// request reaches a terminal state.
@@ -755,7 +780,7 @@ public:
   /// Sleep state blocks memory I2C.
   Status requestVerify(uint32_t address, const uint8_t* data, size_t length);
   /// Request-qualified overload for external-owner correlation.
-  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
   /// @param address Starting memory address within active capacity.
   /// @param data Expected bytes with the lifetime documented above.
   /// @param length Number of bytes to verify.
@@ -771,7 +796,7 @@ public:
   /// performs zero callbacks until resumeVerifiedWrite() authorizes readback.
   /// `data` must remain valid and unmodified until the request reaches a
   /// terminal state, including throughout reconciliation waiting.
-  /// @param requestId Caller-supplied nonzero correlation ID.
+  /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
   /// @param address Starting memory address within active capacity.
   /// @param data Input/expected bytes retained through terminal state.
   /// @param length Length that must fit one write and one read transaction.
@@ -975,7 +1000,7 @@ private:
   /// Execute one staged transfer instruction.
   Status _pollTransferInstruction();
 
-  /// Allocate a nonzero compatibility request ID not colliding with retained state.
+  /// Allocate an automatic request ID from the reserved upper-half range.
   uint32_t _allocateRequestId();
   
   // =========================================================================
@@ -1013,7 +1038,7 @@ private:
   bool _currentAddressKnown = false;
   uint32_t _currentAddress = 0;
   TransferJob _transfer;
-  uint32_t _nextRequestId = 1;
+  uint32_t _nextRequestId = AUTOMATIC_REQUEST_ID_FIRST;
 };
 
 }  // namespace MB85RC

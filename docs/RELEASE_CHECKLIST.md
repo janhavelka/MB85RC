@@ -34,6 +34,9 @@ Use this checklist before tagging and publishing a release.
     `--soak-max-consecutive-failures`
 
   Run `python tools/hil_runner.py --help` for the complete flag list.
+- Attach the generated `.pio/hil` transcript, JSON, and Markdown result to the
+  release draft or retain them in a durable release CI artifact. Do not include
+  these fixture-specific logs in the published library package.
 - Run package validation:
   `.\scripts\pio.cmd pkg pack --output MB85RC.tar.gz`, then
   `python tools/check_package_contents.py MB85RC.tar.gz`. Remove the generated

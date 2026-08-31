@@ -83,16 +83,21 @@ their application-owned bus, locking, timeout, and recovery policy.
 #include "common/I2cTransport.h"
 
 MB85RC::MB85RC device;
+transport::WireContext wireContext;
 
 void setup() {
   Serial.begin(115200);
-  transport::initWire(8, 9, 400000, 50);
+  if (!transport::initWire(wireContext, Wire, 8, 9, 400000, 50)) {
+    return;
+  }
 
   MB85RC::Config cfg;
   cfg.i2cWrite = transport::wireWrite;
   cfg.i2cWriteRead = transport::wireWriteRead;
   cfg.i2cSpecial = transport::wireSpecial;
-  cfg.i2cUser = &Wire;
+  cfg.i2cUser = &wireContext;
+  cfg.maxTxBytes = transport::MAX_TX_BYTES;
+  cfg.maxRxBytes = transport::MAX_RX_BYTES;
   cfg.i2cAddress = 0x50;
   cfg.expectedVariant = MB85RC::DeviceVariant::MB85RC256V;
 
@@ -223,12 +228,13 @@ most `ceil(N/W)`; a fill uses at most `ceil(N/min(W, 64))`. A verified write
 must fit one write and one read transaction and takes at most two callbacks,
 normally in separate polls when `B = 1`.
 
-The external owner supplies a nonzero request ID and owns the absolute
-deadline. On expiry it calls `timeoutTransfer(requestId)`; cancellation uses
-`cancelTransfer(requestId)`. Both terminalize between callbacks and issue no
-I2C. A synchronous callback already in flight cannot be interrupted by the
-core, so its own `T` bound remains mandatory. Accepted prefixes are never
-rolled back.
+The external owner supplies a request ID in `1..0x7FFFFFFF` and owns the
+absolute deadline. Unqualified compatibility requests use the reserved upper
+half of the ID space. On expiry the owner calls `timeoutTransfer(requestId)`;
+cancellation uses `cancelTransfer(requestId)`. Both terminalize between
+callbacks and issue no I2C. A synchronous callback already in flight cannot be
+interrupted by the core, so its own `T` bound remains mandatory. Accepted
+prefixes are never rolled back.
 
 An indeterminate verified-write failure enters
 `WAITING_FOR_RECONCILIATION`. Polling then performs zero callbacks until the
@@ -421,10 +427,9 @@ completed run. A failed restore is reported explicitly; the commands never
 claim that temporary writes are atomic or safe against power loss.
 
 The bundled board configuration uses a 5 ms controller/callback timeout and
-declares 126 TX bytes plus 124 RX bytes. On two-byte-address variants this
-exercises 124-byte read/write data chunks, matching a conservative external
-I2C-owner integration envelope while keeping timeout ownership in the example
-transport.
+configures the pinned ESP32 Wire buffer for 128-byte TX/RX transactions. On
+two-byte-address variants this permits 126-byte write-data and 128-byte read
+chunks while keeping timeout ownership in the example transport.
 
 - `examples/espidf_basic/`
   - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.

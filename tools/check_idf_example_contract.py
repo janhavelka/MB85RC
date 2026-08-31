@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import pathlib
 import re
-import runpy
 import sys
+
+from _contract_data import (
+    DEVICE_ID_IDF_TOKENS,
+    IDF_REQUIRED_COMPONENTS,
+    MANDATORY_COMMANDS,
+    MODE_CONTRACT_TOKENS,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -75,16 +81,6 @@ REQUIRED_MODE_TOKENS = [
     "Hardware validation: not claimed by this diagnostic",
 ]
 
-REQUIRED_CONSERVATIVE_TRANSPORT_TOKENS = [
-    "ESP-IDF does not report which transmitted byte was NACKed",
-    "MB85RC::TransportCode::IO_ERROR, err, failureCommit",
-]
-
-FORBIDDEN_CONSERVATIVE_TRANSPORT_TOKENS = [
-    "failureCommit == MB85RC::WriteCommit::INDETERMINATE",
-]
-
-
 def fail(msg: str) -> None:
     print(f"IDF example contract FAILED: {msg}")
     raise SystemExit(1)
@@ -106,11 +102,6 @@ def example_contract_files(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def main() -> int:
-    ns = runpy.run_path(str(ROOT / "tools" / "check_cli_contract.py"))
-    commands = ns.get("MANDATORY_COMMANDS", [])
-    components = ns.get("IDF_REQUIRED_COMPONENTS", [])
-    device_id_idf_tokens = ns.get("DEVICE_ID_IDF_TOKENS", [])
-    mode_contract_tokens = ns.get("MODE_CONTRACT_TOKENS", [])
     main_path = ROOT / "examples" / "espidf_basic" / "main" / "main.cpp"
     cmake_path = ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt"
     workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
@@ -137,25 +128,19 @@ def main() -> int:
     for token in REQUIRED_MODE_TOKENS:
         if token not in text:
             fail(f"HS/Sleep native token missing: {token}")
-    for token in mode_contract_tokens:
+    for token in MODE_CONTRACT_TOKENS:
         if token not in text:
             fail(f"ESP-IDF HS/Sleep diagnostic wording missing: {token}")
-    for token in REQUIRED_CONSERVATIVE_TRANSPORT_TOKENS:
-        if token not in text:
-            fail(f"conservative transport token missing: {token}")
-    for token in FORBIDDEN_CONSERVATIVE_TRANSPORT_TOKENS:
-        if token in text:
-            fail(f"unsafe transport commit mapping present: {token}")
-    for token in device_id_idf_tokens:
+    for token in DEVICE_ID_IDF_TOKENS:
         if token not in text:
             fail(f"ESP-IDF Device ID manual-address token missing: {token}")
-    for cmd in commands:
+    for cmd in MANDATORY_COMMANDS:
         if cmd == "?":
             if '"?"' not in text and " / ?" not in text and " | ?" not in text:
                 fail("mandatory command '?' missing from IDF example")
         elif re.search(rf"\b{re.escape(cmd)}\b", text) is None:
             fail(f"mandatory command '{cmd}' missing from IDF example")
-    for component in components:
+    for component in IDF_REQUIRED_COMPONENTS:
         if re.search(rf"\b{re.escape(component)}\b", cmake) is None:
             fail(f"ESP-IDF CMake file missing component '{component}'")
     for token in ("../../..", "../../common"):

@@ -253,7 +253,7 @@ void MB85RC::tick(uint32_t nowMs) {
 void MB85RC::end() {
   if (_transferBusy()) {
     if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
-      _transfer.result.failedChunkOffset = _transfer.offset;
+      _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
       _transfer.result.failedChunkLength = 0;
     }
     _finishTransfer(TransferState::CANCELLED,
@@ -519,15 +519,15 @@ Status MB85RC::probe() {
   if (!st.ok()) {
     return st;
   }
-  if (_config.expectedVariant == DeviceVariant::AUTO) {
-    if (id.manufacturerId != cmd::MANUFACTURER_ID ||
-        cmd::findVariantByProductId(id.productId) == nullptr) {
-      return Status::Error(Err::DEVICE_ID_MISMATCH,
-                           "Unknown Device ID", deviceIdDetail(id));
-    }
-    return Status::Ok();
+  if (_variant != nullptr) {
+    return _validateActiveDeviceId(id);
   }
-  return _validateActiveDeviceId(id);
+  if (id.manufacturerId != cmd::MANUFACTURER_ID ||
+      cmd::findVariantByProductId(id.productId) == nullptr) {
+    return Status::Error(Err::DEVICE_ID_MISMATCH,
+                         "Unknown Device ID", deviceIdDetail(id));
+  }
+  return Status::Ok();
 }
 
 Status MB85RC::recover() {
@@ -830,7 +830,6 @@ Status MB85RC::readDeviceId(DeviceId& id) {
     return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
   }
 
-  const cmd::VariantInfo* previousVariant = _variant;
   Status st = _readDeviceIdTracked(id);
   if (!st.ok()) {
     return st;
@@ -864,11 +863,6 @@ Status MB85RC::readDeviceId(DeviceId& id) {
       _currentAddress = 0;
       return Status::Error(Err::INVALID_CONFIG,
                            "Sleep recovery time below datasheet tREC");
-    }
-    if (_variant != previousVariant) {
-      _highSpeedModeEnabled = false;
-      _currentAddressKnown = false;
-      _currentAddress = 0;
     }
   } else {
     st = _validateActiveDeviceId(id);
@@ -1167,47 +1161,66 @@ Status MB85RC::fillVerify(uint32_t address, uint8_t value, size_t len,
 // ===========================================================================
 
 Status MB85RC::requestRead(uint32_t address, uint8_t* data, size_t length) {
-  return requestRead(_allocateRequestId(), address, data, length);
+  return _requestTransfer(_allocateRequestId(), TransferKind::READ, address,
+                          data, nullptr, 0, length);
 }
 
 Status MB85RC::requestRead(uint32_t requestId, uint32_t address,
                            uint8_t* data, size_t length) {
+  if (requestId >= AUTOMATIC_REQUEST_ID_FIRST) {
+    return Status::Error(Err::INVALID_PARAM, "Caller request ID uses reserved range");
+  }
   return _requestTransfer(requestId, TransferKind::READ, address,
                           data, nullptr, 0, length);
 }
 
 Status MB85RC::requestWrite(uint32_t address, const uint8_t* data, size_t length) {
-  return requestWrite(_allocateRequestId(), address, data, length);
+  return _requestTransfer(_allocateRequestId(), TransferKind::WRITE, address,
+                          nullptr, data, 0, length);
 }
 
 Status MB85RC::requestWrite(uint32_t requestId, uint32_t address,
                             const uint8_t* data, size_t length) {
+  if (requestId >= AUTOMATIC_REQUEST_ID_FIRST) {
+    return Status::Error(Err::INVALID_PARAM, "Caller request ID uses reserved range");
+  }
   return _requestTransfer(requestId, TransferKind::WRITE, address,
                           nullptr, data, 0, length);
 }
 
 Status MB85RC::requestFill(uint32_t address, uint8_t value, size_t length) {
-  return requestFill(_allocateRequestId(), address, value, length);
+  return _requestTransfer(_allocateRequestId(), TransferKind::FILL, address,
+                          nullptr, nullptr, value, length);
 }
 
 Status MB85RC::requestFill(uint32_t requestId, uint32_t address,
                            uint8_t value, size_t length) {
+  if (requestId >= AUTOMATIC_REQUEST_ID_FIRST) {
+    return Status::Error(Err::INVALID_PARAM, "Caller request ID uses reserved range");
+  }
   return _requestTransfer(requestId, TransferKind::FILL, address,
                           nullptr, nullptr, value, length);
 }
 
 Status MB85RC::requestVerify(uint32_t address, const uint8_t* data, size_t length) {
-  return requestVerify(_allocateRequestId(), address, data, length);
+  return _requestTransfer(_allocateRequestId(), TransferKind::VERIFY, address,
+                          nullptr, data, 0, length);
 }
 
 Status MB85RC::requestVerify(uint32_t requestId, uint32_t address,
                              const uint8_t* data, size_t length) {
+  if (requestId >= AUTOMATIC_REQUEST_ID_FIRST) {
+    return Status::Error(Err::INVALID_PARAM, "Caller request ID uses reserved range");
+  }
   return _requestTransfer(requestId, TransferKind::VERIFY, address,
                           nullptr, data, 0, length);
 }
 
 Status MB85RC::requestVerifiedWrite(uint32_t requestId, uint32_t address,
                                     const uint8_t* data, size_t length) {
+  if (requestId >= AUTOMATIC_REQUEST_ID_FIRST) {
+    return Status::Error(Err::INVALID_PARAM, "Caller request ID uses reserved range");
+  }
   return _requestTransfer(requestId, TransferKind::VERIFIED_WRITE, address,
                           nullptr, data, 0, length);
 }
@@ -1297,7 +1310,7 @@ Status MB85RC::cancelTransfer(uint32_t requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
   if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
-    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
     _transfer.result.failedChunkLength = 0;
   }
   _finishTransfer(TransferState::CANCELLED,
@@ -1313,7 +1326,7 @@ Status MB85RC::timeoutTransfer(uint32_t requestId) {
     return busyStatus(BusyDetail::REQUEST_ID_MISMATCH, "Request ID mismatch");
   }
   if (_transfer.result.state != TransferState::WAITING_FOR_RECONCILIATION) {
-    _transfer.result.failedChunkOffset = _transfer.offset;
+    _transfer.result.failedChunkOffset = _transfer.result.bytesCompleted;
     _transfer.result.failedChunkLength = 0;
   }
   _finishTransfer(TransferState::TIMED_OUT,
@@ -1410,9 +1423,6 @@ Status MB85RC::_i2cWriteReadTrackedAddr(uint8_t addr, const uint8_t* txBuf, size
   }
 
   Status st = _i2cWriteReadRaw(addr, txBuf, txLen, rxBuf, rxLen);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   return _updateHealth(st);
 }
 
@@ -1429,9 +1439,6 @@ Status MB85RC::_i2cWriteTrackedAddr(uint8_t addr, const uint8_t* buf, size_t len
   }
 
   Status st = _i2cWriteRaw(addr, buf, len, memoryAddressBytes, writeCommit);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM) {
-    return st;
-  }
   return _updateHealth(st);
 }
 
@@ -1439,10 +1446,6 @@ Status MB85RC::_i2cSpecialTracked(I2cSpecialOp op,
                                   const I2cSpecialTransfer& transfer,
                                   WriteCommit* writeCommit) {
   Status st = _i2cSpecialRaw(op, transfer, writeCommit);
-  if (st.code == Err::INVALID_CONFIG || st.code == Err::INVALID_PARAM ||
-      st.code == Err::UNSUPPORTED) {
-    return st;
-  }
   return _updateHealth(st);
 }
 
@@ -1531,6 +1534,10 @@ Status MB85RC::_ensureNoTransferActive() const {
 void MB85RC::_finishTransfer(TransferState state, const Status& status) {
   _transfer.result.state = state;
   _transfer.result.status = status;
+  if (state == TransferState::SUCCEEDED) {
+    _transfer.result.failedChunkOffset = _transfer.result.bytesRequested;
+    _transfer.result.failedChunkLength = 0U;
+  }
   _transfer.resultPending = true;
   _transfer.data = nullptr;
   _transfer.constData = nullptr;
@@ -1798,17 +1805,10 @@ Status MB85RC::_pollTransferInstruction() {
 }
 
 uint32_t MB85RC::_allocateRequestId() {
-  uint32_t id = _nextRequestId++;
-  if (id == 0U) {
-    id = _nextRequestId++;
-  }
-  if ((_transferBusy() || _transfer.resultPending) &&
-      id == _transfer.result.requestId) {
-    id = _nextRequestId++;
-    if (id == 0U) {
-      id = _nextRequestId++;
-    }
-  }
+  const uint32_t id = _nextRequestId;
+  _nextRequestId = (id == std::numeric_limits<uint32_t>::max())
+                       ? AUTOMATIC_REQUEST_ID_FIRST
+                       : (id + 1U);
   return id;
 }
 
@@ -2131,9 +2131,11 @@ Status MB85RC::_updateHealth(const Status& st) {
     return st;
   }
 
-  const uint32_t now = _nowMs();
-  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
+  if (!st.ok() && !shouldTrackHealthFailure(st.code)) {
+    return st;
+  }
 
+  const uint32_t now = _nowMs();
   if (st.ok()) {
     _lastOkMs = now;
     _totalSuccess++;
@@ -2142,10 +2144,7 @@ Status MB85RC::_updateHealth(const Status& st) {
     return st;
   }
 
-  if (!shouldTrackHealthFailure(st.code)) {
-    return st;
-  }
-
+  const uint8_t maxU8 = std::numeric_limits<uint8_t>::max();
   _lastError = st;
   _lastErrorMs = now;
   _totalFailures++;

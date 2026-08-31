@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `_fitsRange()` no longer narrows the remaining-capacity computation to
   `size_t`, which rejected every access to `MB85RC512T`/`MB85RC1MT` on targets
   with a 16-bit `size_t`.
-- `Status::detail` for Device ID mismatches no longer overflows a 16-bit `int`
-  during integer promotion.
+- `Status::detail` for Device ID mismatches is now constructed explicitly in
+  `uint32_t`, avoiding truncation of malformed wider identities on 16-bit
+  targets.
 - Staged `VERIFY` and `VERIFIED_WRITE` mismatches now record
   `failedChunkOffset`/`failedChunkLength` instead of leaving them at zero.
 - `maxNormalBusHz` for `MB85RC04V` and `MB85RC16V` now reports 400 kHz, the rate
@@ -37,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example Wire transport: the short-write paths released the Wire HAL lock they
   had taken, and bus recovery now drives SDA/SCL open-drain instead of
   push-pull against a slave that may be holding SDA low.
+- Example Wire transport now owns and reports its configured buffer limit,
+  rejects callbacks after failed reinitialization, uses the configured
+  `TwoWire` instance for recovery, and reports short buffered writes without
+  falsely claiming that nothing could have reached the bus.
+- `probe()` now validates the exact runtime variant selected by AUTO instead of
+  accepting a different known family identity.
+- Successful staged results now use `bytesRequested` as the no-failure offset,
+  matching the detailed synchronous result convention.
+- Native ESP-IDF diagnostics no longer classify generic `ESP_FAIL` as an
+  arbitration/bus error, and `verbose [0|1]` is now parsed strictly and controls
+  diagnostic output.
 - Example CLI `errToStr()` covers `Err::NO_RESULT` and `Err::CANCELLED`.
 
 ### Changed
@@ -49,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection; fixed variants continue to use `_validateActiveDeviceId()`.
 - Added compile-time assertions tying the chunk limits to the core staging
   buffer sizes.
+- Caller-qualified cooperative requests reserve IDs `1..0x7FFFFFFF`; automatic
+  compatibility requests use `0x80000000..0xFFFFFFFF`, preventing the two
+  ownership domains from aliasing.
+- Contract guards share their data through normal imports, retain HIL crash
+  detection for expected `UNSUPPORTED` steps, and directly enforce the core's
+  zero-framework/timing-call policy.
 
 ### Removed
 

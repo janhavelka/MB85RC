@@ -4,7 +4,6 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
-from typing import Dict
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCAN_DIRS = ("src", "include")
@@ -49,9 +48,6 @@ BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 
-ALLOWED_CALL_COUNTS: Dict[str, Dict[str, int]] = {}
-
-
 def strip_comments(text: str) -> str:
     text = BLOCK_COMMENT_RE.sub("", text)
     return LINE_COMMENT_RE.sub("", text)
@@ -74,9 +70,9 @@ def collect_sources() -> list[pathlib.Path]:
 
 
 def main() -> int:
-    observed_calls: Dict[str, Dict[str, int]] = {}
-    observed_includes: Dict[str, list[str]] = {}
-    observed_tokens: Dict[str, Dict[str, int]] = {}
+    observed_calls: dict[str, dict[str, int]] = {}
+    observed_includes: dict[str, list[str]] = {}
+    observed_tokens: dict[str, dict[str, int]] = {}
 
     for path in collect_sources():
         rel = path.relative_to(ROOT).as_posix()
@@ -84,7 +80,7 @@ def main() -> int:
         commentless = strip_comments(raw)
         code = strip_non_code(raw)
 
-        call_counts: Dict[str, int] = {}
+        call_counts: dict[str, int] = {}
         for call_name, pattern in FORBIDDEN_CALLS.items():
             count = len(pattern.findall(code))
             if count > 0:
@@ -99,7 +95,7 @@ def main() -> int:
         if includes:
             observed_includes[rel] = includes
 
-        token_counts: Dict[str, int] = {}
+        token_counts: dict[str, int] = {}
         for token_name, pattern in FORBIDDEN_FRAMEWORK_TOKENS.items():
             count = len(pattern.findall(code))
             if count > 0:
@@ -110,28 +106,7 @@ def main() -> int:
     errors: list[str] = []
 
     for rel, counts in observed_calls.items():
-        if rel not in ALLOWED_CALL_COUNTS:
-            errors.append(f"forbidden timing calls in unexpected file: {rel} -> {counts}")
-            continue
-        expected = ALLOWED_CALL_COUNTS[rel]
-        for call_name, count in counts.items():
-            exp = expected.get(call_name, 0)
-            if count != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={count}, expected={exp}"
-                )
-
-    for rel, expected in ALLOWED_CALL_COUNTS.items():
-        observed = observed_calls.get(rel, {})
-        for call_name, exp in expected.items():
-            obs = observed.get(call_name, 0)
-            if obs != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={obs}, expected={exp}"
-                )
-        unexpected_calls = set(observed.keys()) - set(expected.keys())
-        if unexpected_calls:
-            errors.append(f"unexpected timing call types in {rel}: {sorted(unexpected_calls)}")
+        errors.append(f"forbidden timing calls in core/public file: {rel} -> {counts}")
 
     for rel, includes in observed_includes.items():
         errors.append(f"forbidden framework include in core/public file: {rel} -> {includes}")

@@ -102,6 +102,7 @@ class CommandStep:
     fail_tokens: tuple[str, ...] = DEFAULT_FAIL_TOKENS
     fail_patterns: tuple[re.Pattern[str], ...] = DEFAULT_FAIL_PATTERNS
     allowed_failure_statuses: tuple[str, ...] = ()
+    exclusive_pairs: tuple[tuple[str, str], ...] = ()
     timeout_s: float | None = None
     notes: str = ""
 
@@ -208,10 +209,17 @@ def classify(
 ) -> StepResult:
     clean = normalize_output(output)
     failure_notes: list[str] = []
-    for token in step.fail_tokens:
-        if token and token in clean:
-            failure_notes.append(f"failure token: {token}")
+    for first, second in step.exclusive_pairs:
+        if first in clean and second in clean:
+            failure_notes.append(
+                f"mutually exclusive outcomes present: {first} / {second}"
+            )
             break
+    if not failure_notes:
+        for token in step.fail_tokens:
+            if token and token in clean:
+                failure_notes.append(f"failure token: {token}")
+                break
     if not failure_notes:
         for pattern in step.fail_patterns:
             for match in pattern.finditer(clean):
@@ -390,10 +398,11 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
         return profile_command(profile, command)
 
     if profile == "arduino":
-        hs_enter_expected = (("High-speed mode:", "Status:", "UNSUPPORTED"),)
-        hs_enter_fail_tokens: tuple[str, ...] = ()
-        hs_enter_fail_patterns: tuple[re.Pattern[str], ...] = ()
-        hs_enter_allowed_statuses: tuple[str, ...] = ()
+        hs_enter_expected = (("High-speed mode:", "Status: UNSUPPORTED"),)
+        hs_enter_fail_tokens = DEFAULT_FAIL_TOKENS
+        hs_enter_fail_patterns = DEFAULT_FAIL_PATTERNS
+        hs_enter_allowed_statuses = ("UNSUPPORTED",)
+        hs_enter_exclusive = (("Status: OK", "Status: UNSUPPORTED"),)
     else:
         hs_enter_expected = (
             ("High-speed mode:", "Support: yes", "hs enter: OK"),
@@ -402,6 +411,10 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
         hs_enter_fail_tokens = DEFAULT_FAIL_TOKENS
         hs_enter_fail_patterns = DEFAULT_FAIL_PATTERNS
         hs_enter_allowed_statuses = ("UNSUPPORTED",)
+        hs_enter_exclusive = (
+            ("Support: yes", "Support: no"),
+            ("hs enter: OK", "hs enter: UNSUPPORTED"),
+        )
 
     steps = [
         CommandStep("HIL-001", "connectivity", "version",
@@ -438,7 +451,8 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
                     expected_any=hs_enter_expected,
                     fail_tokens=hs_enter_fail_tokens,
                     fail_patterns=hs_enter_fail_patterns,
-                    allowed_failure_statuses=hs_enter_allowed_statuses),
+                    allowed_failure_statuses=hs_enter_allowed_statuses,
+                    exclusive_pairs=hs_enter_exclusive),
         CommandStep("HIL-015A", "modes", "hs exit",
                     expected_any=(("High-speed mode:", "Status:", "OK"),
                                   ("High-speed mode:", "hs exit: OK"))),
@@ -449,11 +463,9 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
         CommandStep("HIL-018", "recovery", "recover",
                     expected_any=(("Status:", "OK"), ("recover: OK",))),
         CommandStep("HIL-019", "validation", "definitely_not_a_command",
-                    expected_any=(("Unknown command",), ("Unknown command. Try 'help'.",)),
-                    fail_tokens=(), fail_patterns=()),
+                    expected_any=(("Unknown command",), ("Unknown command. Try 'help'.",))),
         CommandStep("HIL-020", "validation", "read 0xFFFFFFFF 1",
-                    expected_any=(("Range",), ("Address out of range",), ("outside active capacity",), ("Usage:",)),
-                    fail_tokens=(), fail_patterns=()),
+                    expected_any=(("Range",), ("Address out of range",), ("outside active capacity",), ("Usage:",))),
         CommandStep("HIL-021", "diagnostics", pc("selftest"),
                     expected_any=(("Selftest result:",), ("selftest_pattern=PASS",)),
                     timeout_s=20),
@@ -480,7 +492,10 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
                                        "sleep enter: OK"),
                                       ("Sleep mode:", "Support: no",
                                        "sleep enter: UNSUPPORTED")),
-                        allowed_failure_statuses=("UNSUPPORTED",)),
+                        allowed_failure_statuses=("UNSUPPORTED",),
+                        exclusive_pairs=(("Support: yes", "Support: no"),
+                                         ("sleep enter: OK",
+                                          "sleep enter: UNSUPPORTED"))),
             CommandStep("HIL-017A", "modes", "sleep wake",
                         expected_any=(("Sleep mode:", "Support: yes",
                                        "sleep wake: OK",
@@ -488,16 +503,23 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
                                       ("Sleep mode:", "Support: no",
                                        "sleep wake: UNSUPPORTED")),
                         allowed_failure_statuses=("UNSUPPORTED",),
+                        exclusive_pairs=(("Support: yes", "Support: no"),
+                                         ("sleep wake: OK",
+                                          "sleep wake: UNSUPPORTED"),
+                                         ("sleep wake: UNSUPPORTED",
+                                          "recover after sleep wake:")),
                         timeout_s=10),
         ]
     else:
         sleep_steps = [
             CommandStep("HIL-017", "modes", "sleep enter",
                         expected_any=(("Sleep mode:", "Status: UNSUPPORTED"),),
-                        fail_tokens=(), fail_patterns=()),
+                        allowed_failure_statuses=("UNSUPPORTED",),
+                        exclusive_pairs=(("Status: OK", "Status: UNSUPPORTED"),)),
             CommandStep("HIL-017A", "modes", "sleep wake",
                         expected_any=(("Sleep mode:", "Status: UNSUPPORTED"),),
-                        fail_tokens=(), fail_patterns=()),
+                        allowed_failure_statuses=("UNSUPPORTED",),
+                        exclusive_pairs=(("Status: OK", "Status: UNSUPPORTED"),)),
         ]
     sleep_index = next(i for i, step in enumerate(steps) if step.test_id == "HIL-018")
     steps[sleep_index:sleep_index] = sleep_steps
@@ -1187,6 +1209,46 @@ def parser_self_test() -> int:
         ok = False
         print("parser self-test failed for incomplete prompt framing")
 
+    arduino_steps = {
+        step.test_id: step for step in make_functional_steps("arduino", 1, False)
+    }
+    for test_id, output in (
+        ("HIL-015", "High-speed mode:\n  Status: UNSUPPORTED\n> "),
+        ("HIL-017", "Sleep mode:\n  Status: UNSUPPORTED\n> "),
+        ("HIL-017A", "Sleep mode:\n  Status: UNSUPPORTED\n> "),
+    ):
+        result = classify(arduino_steps[test_id], output, 0.1)
+        if result.status != "PASS":
+            ok = False
+            print(
+                f"parser self-test failed for honest Arduino mode outcome "
+                f"{test_id}: got {result.status}"
+            )
+    mode_panic = classify(
+        arduino_steps["HIL-015"],
+        "High-speed mode:\n  Status: UNSUPPORTED\nGuru Meditation Error\n> ",
+        0.1,
+    )
+    if mode_panic.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject a panic with allowed mode status")
+    contradictory_arduino = classify(
+        arduino_steps["HIL-017"],
+        "Sleep mode:\n  Status: OK\n  Status: UNSUPPORTED\n> ",
+        0.1,
+    )
+    if contradictory_arduino.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject contradictory Arduino mode output")
+    panic_result = classify(
+        arduino_steps["HIL-019"],
+        "Unknown command. Try 'help'.\nGuru Meditation Error\n> ",
+        0.1,
+    )
+    if panic_result.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject a panic during validation")
+
     idf_mode_steps = {
         step.test_id: step for step in make_functional_steps("idf", 1, False)
     }
@@ -1244,6 +1306,24 @@ def parser_self_test() -> int:
     if unexpected_mode_failure.status != "FAIL":
         ok = False
         print("parser self-test failed to reject unexpected IDF mode failure")
+    contradictory_idf_mode = classify(
+        idf_mode_steps["HIL-015"],
+        "High-speed mode:\n  Support: yes\n  Support: no\n"
+        "hs enter: OK\nhs enter: UNSUPPORTED\n> ",
+        0.1,
+    )
+    if contradictory_idf_mode.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject contradictory IDF mode output")
+    unsupported_with_recovery = classify(
+        idf_mode_steps["HIL-017A"],
+        "Sleep mode:\n  Support: no\nsleep wake: UNSUPPORTED\n"
+        "recover after sleep wake: OK\n> ",
+        0.1,
+    )
+    if unsupported_with_recovery.status != "FAIL":
+        ok = False
+        print("parser self-test failed to reject recovery after unsupported wake")
     mixed_mode_failure = classify(
         idf_mode_steps["HIL-017A"],
         "Sleep mode:\n  Support: no\nsleep wake: UNSUPPORTED\n"
@@ -1271,8 +1351,8 @@ def parser_self_test() -> int:
         "  Consecutive failures: 0\n"
         "  Total failures: 0\n"
         "  I2C timeout: 5 ms\n"
-        "  Transport capacity: TX=126 RX=124 bytes\n"
-        "  One-transaction data: write=124 read=124 bytes\n"
+        "  Transport capacity: TX=128 RX=128 bytes\n"
+        "  One-transaction data: write=126 read=128 bytes\n"
         "  Arduino-ESP32: 3.3.11\n"
         "  ESP-IDF: v5.5.5\n"
         "heap: free=240000 min_free=230000 largest=120000\n> ",
@@ -1291,9 +1371,9 @@ def parser_self_test() -> int:
     if observations.heap_baseline_free != 240000 or observations.heap_min_free_observed != 230000:
         ok = False
         print("parser self-test failed for observations: heap not parsed")
-    if (observations.i2c_timeout_ms != 5 or observations.max_tx_bytes != 126 or
-            observations.max_rx_bytes != 124 or observations.max_write_data_bytes != 124 or
-            observations.max_read_data_bytes != 124):
+    if (observations.i2c_timeout_ms != 5 or observations.max_tx_bytes != 128 or
+            observations.max_rx_bytes != 128 or observations.max_write_data_bytes != 126 or
+            observations.max_read_data_bytes != 128):
         ok = False
         print("parser self-test failed for observations: transport envelope not parsed")
     update_observations(

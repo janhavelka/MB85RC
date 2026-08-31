@@ -166,6 +166,36 @@ uint32_t decodeMemoryAddress(const FakeBus* bus, uint8_t addr, const uint8_t* da
   }
 }
 
+uint32_t decodeCurrentReadAddress(const FakeBus* bus, uint8_t addr) {
+  if (bus->addressModel == cmd::AddressModel::TWO_BYTE_ADDRESS_PINS) {
+    return bus->currentAddr;
+  }
+
+  // These parts retain the last accessed lower address bits internally, take
+  // the upper bit(s) from this read's slave byte, and then return n+1.
+  const uint32_t lastLow =
+      (bus->currentAddr == 0U ? bus->memoryBytes : bus->currentAddr) - 1U;
+  uint32_t lastAddress = lastLow;
+  switch (bus->addressModel) {
+    case cmd::AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
+      lastAddress = (static_cast<uint32_t>(addr & 0x01U) << 8) |
+                    (lastLow & 0xFFU);
+      break;
+    case cmd::AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
+      lastAddress = (static_cast<uint32_t>(addr & 0x07U) << 8) |
+                    (lastLow & 0xFFU);
+      break;
+    case cmd::AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
+      lastAddress = (static_cast<uint32_t>(addr & 0x01U) << 16) |
+                    (lastLow & 0xFFFFU);
+      break;
+    case cmd::AddressModel::TWO_BYTE_ADDRESS_PINS:
+    default:
+      break;
+  }
+  return (lastAddress + 1U) % bus->memoryBytes;
+}
+
 void recordMemoryAddress(FakeBus* bus, uint8_t addr, const uint8_t* data, size_t addrLen) {
   bus->lastI2cAddress = addr;
   bus->lastAddressLen = addrLen;
@@ -304,11 +334,13 @@ TransportResult fakeWriteRead(uint8_t addr, const uint8_t* txData, size_t txLen,
     bus->lastAddressLen = 0;
     bus->lastAddrHigh = 0;
     bus->lastAddrLow = 0;
-    bus->lastMemoryAddress = bus->currentAddr;
+    uint32_t readAddress = decodeCurrentReadAddress(bus, addr);
+    bus->lastMemoryAddress = readAddress;
     for (size_t i = 0; i < rxLen; ++i) {
-      rxData[i] = bus->mem[bus->currentAddr % bus->memoryBytes];
-      bus->currentAddr = (bus->currentAddr + 1) % bus->memoryBytes;
+      rxData[i] = bus->mem[readAddress];
+      readAddress = (readAddress + 1U) % bus->memoryBytes;
     }
+    bus->currentAddr = readAddress;
     bus->currentAddrValid = true;
     if (bus->customReadResultOnCall == bus->readCalls) {
       return bus->customReadResult;
@@ -1155,6 +1187,13 @@ void test_auto_reidentification_resets_variant_dependent_state() {
   TEST_ASSERT_TRUE(settings.highSpeedModeEnabled);
   TEST_ASSERT_TRUE(settings.currentAddressKnown);
 
+  // Re-reading the same identity must not discard variant-owned state.
+  DeviceId sameId;
+  TEST_ASSERT_TRUE(dev.readDeviceId(sameId).ok());
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.highSpeedModeEnabled);
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
   const cmd::VariantInfo* info = variantInfoByExpected(DeviceVariant::MB85RC256V);
   TEST_ASSERT_NOT_NULL(info);
   bus.productId = info->productId;
@@ -1449,6 +1488,26 @@ void test_probe_validates_active_64ta_variant_without_health_update() {
   TEST_ASSERT_EQUAL_UINT32(beforeFailures, dev.totalFailures());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
                           static_cast<uint8_t>(dev.state()));
+}
+
+void test_probe_validates_auto_selected_variant_without_health_update() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  TEST_ASSERT_EQUAL_STRING("MB85RC64TA", dev.variantName());
+  const uint32_t beforeSuccess = dev.totalSuccess();
+  const uint32_t beforeFailures = dev.totalFailures();
+
+  TEST_ASSERT_TRUE(dev.probe().ok());
+  bus.productId = cmd::PRODUCT_ID_MB85RC256V;
+  Status st = dev.probe();
+  TEST_ASSERT_TRUE(st.is(Err::DEVICE_ID_MISMATCH));
+  TEST_ASSERT_EQUAL_STRING("MB85RC64TA", dev.variantName());
+  TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC64TA, dev.capacityBytes());
+  TEST_ASSERT_EQUAL_UINT32(beforeSuccess, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(beforeFailures, dev.totalFailures());
 }
 
 void test_diag_methods_reject_not_initialized() {
@@ -1853,6 +1912,12 @@ void test_transfer_verify_respects_budget_and_reports_mismatch() {
     TEST_ASSERT_FALSE(dev.isTransferBusy());
     TEST_ASSERT_EQUAL_UINT32(readsBefore + 2U, bus.readCalls);
     TEST_ASSERT_TRUE(dev.getTransferStatus().is(Err::VERIFY_MISMATCH));
+    TransferResult result;
+    TEST_ASSERT_TRUE(dev.getTransferProgress(result).ok());
+    TEST_ASSERT_EQUAL_UINT32(130U,
+                             static_cast<uint32_t>(result.failedChunkOffset));
+    TEST_ASSERT_EQUAL_UINT32(cmd::MAX_READ_CHUNK - 2U,
+                             static_cast<uint32_t>(result.failedChunkLength));
     TEST_ASSERT_EQUAL_UINT32(0U, dev.totalFailures());
   }
 }
@@ -1932,7 +1997,10 @@ void test_transfer_request_rejects_asleep_and_waking_without_bus() {
 
   uint8_t data[4] = {};
   const uint32_t trafficAsleep = busTraffic(bus);
-  Status st = dev.requestWrite(0x0000, data, sizeof(data));
+  Status st = dev.requestWrite(0x0000, nullptr, sizeof(data));
+  TEST_ASSERT_TRUE(st.is(Err::INVALID_PARAM));
+  TEST_ASSERT_EQUAL_UINT32(trafficAsleep, busTraffic(bus));
+  st = dev.requestWrite(0x0000, data, sizeof(data));
   assertBusyDetail(st, BusyDetail::ASLEEP);
   TEST_ASSERT_FALSE(dev.isTransferBusy());
   TEST_ASSERT_EQUAL_UINT32(trafficAsleep, busTraffic(bus));
@@ -3106,6 +3174,11 @@ void test_variant_catalog_identifies_known_device_ids() {
   TEST_ASSERT_FALSE(rc04->uses256vAccessFormat);
   TEST_ASSERT_FALSE(rc04->supportsHighSpeedMode);
   TEST_ASSERT_FALSE(rc04->supportsSleepMode);
+  TEST_ASSERT_EQUAL_UINT32(cmd::FAST_MODE_BUS_HZ, rc04->maxNormalBusHz);
+
+  const cmd::VariantInfo* rc16 = variantInfoByExpected(DeviceVariant::MB85RC16V);
+  TEST_ASSERT_NOT_NULL(rc16);
+  TEST_ASSERT_EQUAL_UINT32(cmd::FAST_MODE_BUS_HZ, rc16->maxNormalBusHz);
 
   const cmd::VariantInfo* rc1mt = cmd::findVariantByProductId(cmd::PRODUCT_ID_MB85RC1MT);
   TEST_ASSERT_NOT_NULL(rc1mt);
@@ -3461,6 +3534,50 @@ void test_1mt_current_address_uses_previous_bank_at_64k_boundary() {
   TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
   TEST_ASSERT_TRUE(snap.currentAddressKnown);
   TEST_ASSERT_EQUAL_HEX32(0x10001, snap.currentAddress);
+}
+
+void test_04v_current_address_uses_previous_bank_and_wraps_at_end() {
+  FakeBus bus;
+  bus.mem[0x0100U] = 0xA4U;
+  bus.mem[0x0000U] = 0xB4U;
+  bus.mem[0x0200U] = 0xEEU;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, DeviceVariant::MB85RC04V)).ok());
+
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0x00FFU, value).ok());
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA4U, value);
+  TEST_ASSERT_EQUAL_HEX8(0x50U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x0100U, bus.lastMemoryAddress);
+
+  TEST_ASSERT_TRUE(dev.readByte(0x01FFU, value).ok());
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xB4U, value);
+  TEST_ASSERT_EQUAL_HEX8(0x51U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x0000U, bus.lastMemoryAddress);
+}
+
+void test_16v_current_address_uses_previous_bank_and_wraps_at_end() {
+  FakeBus bus;
+  bus.mem[0x0100U] = 0xA6U;
+  bus.mem[0x0000U] = 0xB6U;
+  bus.mem[0x0200U] = 0xEEU;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, DeviceVariant::MB85RC16V)).ok());
+
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0x00FFU, value).ok());
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA6U, value);
+  TEST_ASSERT_EQUAL_HEX8(0x50U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x0100U, bus.lastMemoryAddress);
+
+  TEST_ASSERT_TRUE(dev.readByte(0x07FFU, value).ok());
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xB6U, value);
+  TEST_ASSERT_EQUAL_HEX8(0x57U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x0000U, bus.lastMemoryAddress);
 }
 
 void test_no_device_id_variant_probe_recover_and_id_access() {
@@ -3853,6 +3970,44 @@ void test_wake_is_noop_when_awake_even_without_special_callback() {
                           static_cast<uint8_t>(dev.sleepState()));
 }
 
+void test_wake_without_time_hook_returns_awake_and_uses_configured_recovery() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.nowMs = nullptr;
+  cfg.timeUser = nullptr;
+  cfg.sleepRecoveryUs = 800U;
+  TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  TEST_ASSERT_EQUAL_UINT16(800U, bus.lastRecoveryUs);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0U, value).ok());
+}
+
+void test_sleep_entry_points_advance_expired_waking_state() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  const uint32_t wakeCalls = bus.wakeCalls;
+  bus.nowMs += cmd::SLEEP_RECOVERY_MS;
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  TEST_ASSERT_EQUAL_UINT32(wakeCalls, bus.wakeCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  bus.nowMs += cmd::SLEEP_RECOVERY_MS;
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::ASLEEP),
+                          static_cast<uint8_t>(dev.sleepState()));
+}
+
 void test_sleep_enter_wake_gates_memory_access_and_invalidates_current_address() {
   FakeBus bus;
   MB85RC::MB85RC dev;
@@ -4070,42 +4225,78 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 void test_example_transport_maps_wire_errors() {
   Wire._clearEndTransmissionResult();
   Wire._clearWriteReturnOverride();
+  Wire._clearRequestReturnOverride();
+  transport::WireContext context;
 
   Wire._setBeginResult(false);
-  TEST_ASSERT_FALSE(transport::initWire(8, 9, 400000, 77));
+  TEST_ASSERT_FALSE(transport::initWire(context, Wire, 8, 9, 400000, 77));
+  TEST_ASSERT_FALSE(context.ready);
+  const uint8_t byte = 0x55;
+  TransportResult st = transport::wireWrite(0x50, &byte, 1, 123, &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_FALSE(Wire._isTransactionOpen());
+
   Wire._setBeginResult(true);
-  TEST_ASSERT_TRUE(transport::initWire(8, 9, 400000, 77));
+  TEST_ASSERT_TRUE(transport::initWire(context, Wire, 8, 9, 400000, 77));
   TEST_ASSERT_EQUAL_UINT32(77u, Wire.getTimeOut());
 
-  const uint8_t byte = 0x55;
-
   Wire._setEndTransmissionResult(2);
-  TransportResult st = transport::wireWrite(0x50, &byte, 1, 123, &Wire);
+  st = transport::wireWrite(0x50, &byte, 1, 123, &context);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_ADDRESS),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                          static_cast<uint8_t>(st.writeCommit));
 
   Wire._setEndTransmissionResult(3);
-  st = transport::wireWrite(0x50, &byte, 1, 999, &Wire);
+  st = transport::wireWrite(0x50, &byte, 1, 999, &context);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_DATA),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(st.writeCommit));
 
   Wire._setEndTransmissionResult(5);
-  st = transport::wireWrite(0x50, &byte, 1, 10, &Wire);
+  st = transport::wireWrite(0x50, &byte, 1, 10, &context);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::TIMEOUT),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(st.writeCommit));
 
   Wire._setEndTransmissionResult(4);
-  st = transport::wireWrite(0x50, &byte, 1, 10, &Wire);
+  st = transport::wireWrite(0x50, &byte, 1, 10, &context);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::BUS_ERROR),
                           static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(st.writeCommit));
 
   Wire._setWriteReturnOverride(0U);
-  st = transport::wireWrite(0x50, &byte, 1, 10, &Wire);
+  st = transport::wireWrite(0x50, &byte, 1, 10, &context);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
                           static_cast<uint8_t>(st.writeCommit));
   TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+  TEST_ASSERT_FALSE(Wire._isTransactionOpen());
+  TEST_ASSERT_TRUE(Wire._lastEndTransmissionSentStop());
+
+  const uint8_t partial[3] = {1U, 2U, 3U};
+  Wire._setWriteReturnOverride(2U);
+  Wire._setEndTransmissionResult(2U);
+  st = transport::wireWrite(0x50, partial, sizeof(partial), 10, &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                          static_cast<uint8_t>(st.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+  Wire._clearEndTransmissionResult();
+  st = transport::wireWrite(0x50, partial, sizeof(partial), 10, &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(st.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(st.completedTxBytes));
+
+  uint8_t oversized[transport::MAX_TX_BYTES + 1U] = {};
+  Wire._clearWriteReturnOverride();
+  st = transport::wireWrite(0x50, oversized, sizeof(oversized), 10, &context);
+  TEST_ASSERT_TRUE(st.code == TransportCode::IO_ERROR);
+  TEST_ASSERT_FALSE(Wire._isTransactionOpen());
 
   Wire._clearEndTransmissionResult();
   Wire._clearWriteReturnOverride();
@@ -4113,17 +4304,121 @@ void test_example_transport_maps_wire_errors() {
 
 void test_example_transport_supports_read_only_transactions() {
   Wire._clearEndTransmissionResult();
+  Wire._clearRequestReturnOverride();
+  transport::WireContext context;
+  TEST_ASSERT_TRUE(transport::initWire(context, Wire, 8, 9, 400000, 50));
 
   const uint8_t rxSeed[2] = {0xDE, 0xAD};
   Wire._setRxBuffer(rxSeed, 2);
 
   uint8_t rx[2] = {};
-  TransportResult st = transport::wireWriteRead(0x50, nullptr, 0, rx, 2, 50, &Wire);
+  TransportResult st =
+      transport::wireWriteRead(0x50, nullptr, 0, rx, 2, 50, &context);
   TEST_ASSERT_TRUE(st.ok());
   TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
   TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(st.completedRxBytes));
   TEST_ASSERT_EQUAL_HEX8(0xDE, rx[0]);
   TEST_ASSERT_EQUAL_HEX8(0xAD, rx[1]);
+
+  Wire._setRequestReturnOverride(1U);
+  st = transport::wireWriteRead(0x50, nullptr, 0, rx, 2, 50, &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(st.completedRxBytes));
+  Wire._clearRequestReturnOverride();
+
+  const uint8_t tx[2] = {0x10U, 0x20U};
+  Wire._setWriteReturnOverride(1U);
+  Wire._setEndTransmissionResult(2U);
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), rx, sizeof(rx), 50,
+                                &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+  TEST_ASSERT_FALSE(Wire._isTransactionOpen());
+  Wire._clearEndTransmissionResult();
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), rx, sizeof(rx), 50,
+                                &context);
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(st.completedTxBytes));
+  Wire._clearWriteReturnOverride();
+
+  Wire._setRxBuffer(rxSeed, sizeof(rxSeed));
+  Wire._setEndTransmissionResult(2U);
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), rx, sizeof(rx), 50,
+                                &context);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_FALSE(Wire._lastEndTransmissionSentStop());
+  Wire._setRequestReturnOverride(1U);
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), rx, sizeof(rx), 50,
+                                &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(st.completedRxBytes));
+  Wire._clearRequestReturnOverride();
+  Wire._clearEndTransmissionResult();
+
+  Wire._setEndTransmissionResult(2U);
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), nullptr, 0U, 50,
+                                &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_ADDRESS),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_TRUE(Wire._lastEndTransmissionSentStop());
+  TEST_ASSERT_FALSE(Wire._isTransactionOpen());
+  Wire._clearEndTransmissionResult();
+  st = transport::wireWriteRead(0x50, tx, sizeof(tx), nullptr, 0U, 50,
+                                &context);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_UINT32(sizeof(tx),
+                           static_cast<uint32_t>(st.completedTxBytes));
+  TEST_ASSERT_TRUE(Wire._lastEndTransmissionSentStop());
+
+  TwoWire alternateWire;
+  transport::WireContext alternateContext;
+  Wire._addr = 0x6AU;
+  TEST_ASSERT_TRUE(
+      transport::initWire(alternateContext, alternateWire, 8, 9, 400000, 50));
+  st = transport::wireWrite(0x51U, tx, sizeof(tx), 50, &alternateContext);
+  TEST_ASSERT_TRUE(st.ok());
+  TEST_ASSERT_EQUAL_HEX8(0x51U, alternateWire._addr);
+  TEST_ASSERT_EQUAL_HEX8(0x6AU, Wire._addr);
+}
+
+void test_example_wire_special_encodes_reserved_device_id_transaction() {
+  transport::WireContext context;
+  TEST_ASSERT_TRUE(transport::initWire(context, Wire, 8, 9, 400000, 50));
+  Wire._clearEndTransmissionResult();
+  Wire._clearWriteReturnOverride();
+  Wire._clearRequestReturnOverride();
+  const uint8_t seed[cmd::DEVICE_ID_LEN] = {0x00U, 0xA5U, 0x10U};
+  Wire._setRxBuffer(seed, sizeof(seed));
+  uint8_t tx = static_cast<uint8_t>(cmd::DEFAULT_ADDRESS << 1);
+  uint8_t rx[cmd::DEVICE_ID_LEN] = {};
+  I2cSpecialTransfer transfer;
+  transfer.i2cAddress = cmd::DEFAULT_ADDRESS;
+  transfer.txData = &tx;
+  transfer.txLen = 1U;
+  transfer.rxData = rx;
+  transfer.rxLen = sizeof(rx);
+
+  TransportResult result = transport::wireSpecial(
+      I2cSpecialOp::READ_DEVICE_ID, transfer, 50U, &context);
+  TEST_ASSERT_TRUE(result.ok());
+  TEST_ASSERT_EQUAL_HEX8(0x7CU, Wire._addr);
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(Wire._txLen));
+  TEST_ASSERT_EQUAL_HEX8(tx, Wire._txBuf[0]);
+  TEST_ASSERT_EQUAL_UINT32(1U, static_cast<uint32_t>(result.completedTxBytes));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(rx), static_cast<uint32_t>(result.completedRxBytes));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(seed, rx, sizeof(rx));
+  TEST_ASSERT_FALSE(Wire._lastEndTransmissionSentStop());
+
+  const uint8_t previousAddress = Wire._addr;
+  result = transport::wireSpecial(I2cSpecialOp::ENTER_SLEEP, transfer, 50U,
+                                  &context);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(result.code));
+  TEST_ASSERT_EQUAL_HEX8(previousAddress, Wire._addr);
 }
 
 // ===========================================================================
@@ -4711,16 +5006,43 @@ void test_request_identity_provenance_and_stale_result_prevention() {
                           static_cast<uint8_t>(result.state));
   TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(result.bytesRequested));
   TEST_ASSERT_EQUAL_UINT32(2U, static_cast<uint32_t>(result.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(2U,
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U,
+                           static_cast<uint32_t>(result.failedChunkLength));
   TEST_ASSERT_TRUE(dev.getTransferProgress(result).is(Err::NO_RESULT));
 
   const uint8_t writeData = 0xCCU;
-  TEST_ASSERT_TRUE(dev.requestWrite(0x87654321U, 0x0456U, &writeData, 1U).ok());
+  TEST_ASSERT_TRUE(dev.requestWrite(0x87654321U, 0x0456U, &writeData, 1U)
+                       .is(Err::INVALID_PARAM));
+  TEST_ASSERT_TRUE(dev.requestWrite(0x07654321U, 0x0456U, &writeData, 1U).ok());
   TEST_ASSERT_TRUE(dev.pollTransfer(2U, 1U).ok());
   TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
-  TEST_ASSERT_EQUAL_UINT32(0x87654321U, result.requestId);
+  TEST_ASSERT_EQUAL_UINT32(0x07654321U, result.requestId);
   TEST_ASSERT_EQUAL_HEX32(0x0456U, result.address);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferKind::WRITE),
                           static_cast<uint8_t>(result.kind));
+}
+
+void test_automatic_request_ids_stay_in_reserved_range_across_wrap() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+  uint8_t data = 0U;
+  TransferResult result;
+  dev._nextRequestId = std::numeric_limits<uint32_t>::max();
+
+  TEST_ASSERT_TRUE(dev.requestRead(0U, &data, 1U).ok());
+  TEST_ASSERT_TRUE(dev.getTransferProgress(result).ok());
+  TEST_ASSERT_EQUAL_UINT32(std::numeric_limits<uint32_t>::max(), result.requestId);
+  TEST_ASSERT_TRUE(dev.cancelTransfer(result.requestId).ok());
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+
+  TEST_ASSERT_TRUE(dev.requestRead(0U, &data, 1U).ok());
+  TEST_ASSERT_TRUE(dev.getTransferProgress(result).ok());
+  TEST_ASSERT_EQUAL_UINT32(AUTOMATIC_REQUEST_ID_FIRST, result.requestId);
+  TEST_ASSERT_TRUE(dev.cancelTransfer(result.requestId).ok());
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
 }
 
 void test_verified_write_success_uses_different_polls_and_one_callback_budget() {
@@ -4817,6 +5139,10 @@ void test_verified_write_cancel_and_timeout_after_write_preserve_phase_evidence(
                           static_cast<uint8_t>(result.writeCommit));
   TEST_ASSERT_EQUAL_UINT32(sizeof(data),
                            static_cast<uint32_t>(result.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U,
+                           static_cast<uint32_t>(result.failedChunkLength));
 
   TEST_ASSERT_TRUE(dev.requestVerifiedWrite(8102U, 0x520U, data,
                                             sizeof(data)).ok());
@@ -4836,6 +5162,30 @@ void test_verified_write_cancel_and_timeout_after_write_preserve_phase_evidence(
                           static_cast<uint8_t>(result.writeCommit));
   TEST_ASSERT_EQUAL_UINT32(sizeof(data),
                            static_cast<uint32_t>(result.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U,
+                           static_cast<uint32_t>(result.failedChunkLength));
+
+  TEST_ASSERT_TRUE(dev.requestVerifiedWrite(8103U, 0x530U, data,
+                                            sizeof(data)).ok());
+  TEST_ASSERT_TRUE(dev.pollTransfer(3U, 1U).inProgress());
+  TEST_ASSERT_EQUAL_UINT32(3U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.readCalls);
+  const uint32_t trafficBeforeEnd = busTraffic(bus);
+  dev.end();
+  TEST_ASSERT_EQUAL_UINT32(trafficBeforeEnd, busTraffic(bus));
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferState::CANCELLED),
+                          static_cast<uint8_t>(result.state));
+  TEST_ASSERT_TRUE(result.writeStatus.ok());
+  TEST_ASSERT_TRUE(result.verifyStatus.inProgress());
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.bytesCompleted));
+  TEST_ASSERT_EQUAL_UINT32(sizeof(data),
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(0U,
+                           static_cast<uint32_t>(result.failedChunkLength));
 }
 
 void test_ambiguous_write_waits_zero_io_then_resumes_verify_only_no_replay() {
@@ -4889,6 +5239,7 @@ void test_ambiguous_write_mismatch_and_verify_failure_remain_truthful() {
   MB85RC::MB85RC dev;
   TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
   const uint8_t data[3] = {1U, 2U, 3U};
+  bus.mem[0x700U] = data[0];
   bus.customWriteResultOnCall = 1U;
   bus.customWriteResult =
       TransportResult::Error(TransportCode::TIMEOUT, -710,
@@ -4903,6 +5254,10 @@ void test_ambiguous_write_mismatch_and_verify_failure_remain_truthful() {
   TEST_ASSERT_FALSE(result.match);
   TEST_ASSERT_TRUE(result.writeStatus.is(Err::I2C_TIMEOUT));
   TEST_ASSERT_TRUE(result.verifyStatus.is(Err::VERIFY_MISMATCH));
+  TEST_ASSERT_EQUAL_UINT32(1U,
+                           static_cast<uint32_t>(result.failedChunkOffset));
+  TEST_ASSERT_EQUAL_UINT32(2U,
+                           static_cast<uint32_t>(result.failedChunkLength));
   TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
   TEST_ASSERT_EQUAL_UINT32(1U, bus.readCalls);
 
@@ -5327,6 +5682,7 @@ int main() {
   RUN_TEST(test_probe_failure_does_not_update_health);
   RUN_TEST(test_probe_id_mismatch_does_not_update_health);
   RUN_TEST(test_probe_validates_active_64ta_variant_without_health_update);
+  RUN_TEST(test_probe_validates_auto_selected_variant_without_health_update);
   RUN_TEST(test_diag_methods_reject_not_initialized);
 
   // Recover
@@ -5396,6 +5752,8 @@ int main() {
   RUN_TEST(test_64ta_current_address_respects_active_capacity);
   RUN_TEST(test_1mt_current_address_uses_dynamic_i2c_address_and_32bit_range);
   RUN_TEST(test_1mt_current_address_uses_previous_bank_at_64k_boundary);
+  RUN_TEST(test_04v_current_address_uses_previous_bank_and_wraps_at_end);
+  RUN_TEST(test_16v_current_address_uses_previous_bank_and_wraps_at_end);
   RUN_TEST(test_no_device_id_variant_probe_recover_and_id_access);
   RUN_TEST(test_verify_reports_match_and_first_mismatch);
   RUN_TEST(test_write_ack_ok_under_wp_high_but_verify_reports_mismatch);
@@ -5422,6 +5780,8 @@ int main() {
   RUN_TEST(test_sleep_rejects_unsupported_variants_without_bus_traffic);
   RUN_TEST(test_sleep_requires_special_callback_for_supported_variant);
   RUN_TEST(test_wake_is_noop_when_awake_even_without_special_callback);
+  RUN_TEST(test_wake_without_time_hook_returns_awake_and_uses_configured_recovery);
+  RUN_TEST(test_sleep_entry_points_advance_expired_waking_state);
   RUN_TEST(test_sleep_enter_wake_gates_memory_access_and_invalidates_current_address);
   RUN_TEST(test_sleep_entry_failure_updates_health_once_and_invalidates_current_address);
 
@@ -5437,6 +5797,7 @@ int main() {
   // Transport adapter
   RUN_TEST(test_example_transport_maps_wire_errors);
   RUN_TEST(test_example_transport_supports_read_only_transactions);
+  RUN_TEST(test_example_wire_special_encodes_reserved_device_id_transaction);
 
   // Memory size
   RUN_TEST(test_memory_size);
@@ -5459,6 +5820,7 @@ int main() {
   RUN_TEST(test_staged_read_fill_verify_failures_preserve_terminal_provenance);
   RUN_TEST(test_cancel_and_timeout_are_distinct_exactly_once_terminal_results);
   RUN_TEST(test_request_identity_provenance_and_stale_result_prevention);
+  RUN_TEST(test_automatic_request_ids_stay_in_reserved_range_across_wrap);
   RUN_TEST(test_verified_write_success_uses_different_polls_and_one_callback_budget);
   RUN_TEST(test_verified_write_cancel_and_timeout_after_write_preserve_phase_evidence);
   RUN_TEST(test_ambiguous_write_waits_zero_io_then_resumes_verify_only_no_replay);
