@@ -22,8 +22,11 @@ inline bool interfaceReset(int sda, int scl, uint32_t freq, uint16_t timeoutMs) 
   Wire.end();
 #if defined(ARDUINO_ARCH_ESP32)
   // 9 SCL pulses + STOP is the standard bus recovery / interface-reset sequence.
-  pinMode(scl, OUTPUT);
-  pinMode(sda, INPUT_PULLUP);
+  // Open drain only: a stuck slave may be holding SDA low, and a push-pull
+  // HIGH would short both output stages together.
+  pinMode(scl, OUTPUT_OPEN_DRAIN);
+  pinMode(sda, OUTPUT_OPEN_DRAIN);
+  digitalWrite(sda, HIGH);
   for (int i = 0; i < 9; i++) {
     digitalWrite(scl, LOW);
     delayMicroseconds(5);
@@ -31,14 +34,13 @@ inline bool interfaceReset(int sda, int scl, uint32_t freq, uint16_t timeoutMs) 
     delayMicroseconds(5);
   }
 
-  pinMode(sda, OUTPUT);
+  // STOP: SDA rises while SCL is high.
   digitalWrite(sda, LOW);
   delayMicroseconds(5);
   digitalWrite(scl, HIGH);
   delayMicroseconds(5);
   digitalWrite(sda, HIGH);
   delayMicroseconds(5);
-  pinMode(sda, INPUT_PULLUP);
   const bool sdaReleased = digitalRead(sda) != LOW;
 #else
   (void)sda;
@@ -124,6 +126,9 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
   size_t written = wire->write(data, len);
   if (written != len) {
     // Bytes copied into Wire's software buffer have not reached the I2C bus.
+    // Close the transaction anyway: beginTransmission() holds the Wire HAL
+    // lock until a STOP-issuing endTransmission() or requestFrom() runs.
+    (void)wire->endTransmission(true);
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
         MB85RC::WriteCommit::NOT_COMMITTED, 0U, 0U);
@@ -172,7 +177,9 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     wire->beginTransmission(addr);
     size_t written = wire->write(tx, txLen);
     if (written != txLen) {
-      // No endTransmission() means no physical TX phase has started.
+      // No physical TX phase has started, but beginTransmission() holds the
+      // Wire HAL lock until a STOP-issuing call releases it.
+      (void)wire->endTransmission(true);
       return MB85RC::TransportResult::Error(
           MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
           MB85RC::WriteCommit::NOT_APPLICABLE, 0U, 0U);

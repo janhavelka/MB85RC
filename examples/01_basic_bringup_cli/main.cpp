@@ -97,6 +97,8 @@ const char* errToStr(MB85RC::Err err) {
     case Err::I2C_BUS:              return "I2C_BUS";
     case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
     case Err::UNSUPPORTED:          return "UNSUPPORTED";
+    case Err::NO_RESULT:            return "NO_RESULT";
+    case Err::CANCELLED:            return "CANCELLED";
     default:                        return "UNKNOWN";
   }
 }
@@ -2573,7 +2575,8 @@ void setup() {
   cfg.i2cUser = &Wire;
   cfg.i2cAddress = 0x50;
   cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
-  // Total TX includes the two address bytes, so both data limits are 124.
+  // Total TX includes the active variant's 1-2 memory-address bytes, so the
+  // write-data limit is 125 on one-byte-address parts and 124 on two-byte ones.
   cfg.maxTxBytes = 126U;
   cfg.maxRxBytes = 124U;
   cfg.expectedVariant = MB85RC::DeviceVariant::AUTO;

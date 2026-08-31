@@ -4,11 +4,6 @@ Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using 
 
 Library version: `4.1.0`
 
-Latest published tag: `v4.1.0`
-
-Release `v4.1.0` uses pioarduino `55.03.311`. The previous `54.03.20` stack
-remains available as a named build-only compatibility environment.
-
 ## Features
 
 - Injected, terminal I2C transport with no `Wire` dependency in library code
@@ -29,12 +24,11 @@ framework-neutral, uses injected I2C callbacks, rejects invalid ranges before
 bus traffic, tracks health, and documents FRAM-specific write semantics. Native
 unit tests and CI builds cover the supported runtime variants and examples.
 
-Hardware validation remains board- and variant-dependent. Recorded runs and
-their limitations live in the [HIL evidence ledger](docs/reports/HIL_SUMMARY.md);
-the [release checklist](docs/RELEASE_CHECKLIST.md) is the canonical outstanding
-qualification matrix. Do not treat CI, native tests, fake-bus WP simulation, or
-evidence from one fixture as proof for a different FRAM variant, board, address
-strap, pull-up network, WP wiring, power profile, or shared-bus topology.
+Hardware validation remains board- and variant-dependent. The
+[release checklist](docs/RELEASE_CHECKLIST.md) is the canonical qualification
+matrix. Do not treat CI, native tests, fake-bus WP simulation, or evidence from
+one fixture as proof for a different FRAM variant, board, address strap,
+pull-up network, WP wiring, power profile, or shared-bus topology.
 
 ## Installation
 
@@ -75,8 +69,6 @@ idf.py -C examples/espidf_basic set-target esp32s2 build
 
 The native boundary, command/confirmation policy, transport mapping, and runtime
 version telemetry are maintained in the [ESP-IDF port notes](docs/IDF_PORT.md).
-Revision-specific hardware evidence is recorded in the
-[HIL summary](docs/reports/HIL_SUMMARY.md).
 
 ## Quick Start
 
@@ -355,46 +347,17 @@ power loss, bus errors, `probe()`, or `recover()`. `readCurrentAddress()` is bes
 reserved for diagnostics or carefully controlled transaction sequences after a
 known successful addressed read/write by the same instance.
 
-### Diagnostics
-
-- `Status probe()` - diagnostic presence check after binding using the active variant; it does not initialize, reset, or recover the physical bus
-- `Status recover()` - compatibility presence/identity check that updates diagnostics; it does not recover the bus or control future admission
-- `Status readDeviceId(DeviceId& out)` - read manufacturer, product, and density fields where supported
-- `Status readDeviceIdRaw(DeviceIdRaw& out)` - read the raw 3-byte Device ID payload where supported; this public API is health-tracked like `readDeviceId()`
-- `static DeviceId decodeDeviceId(const DeviceIdRaw& raw)` - bus-silent pure decode, including the exact matched variant when known
-- `Status getSettings(SettingsSnapshot& out)` - snapshot active config/runtime/health state without I2C
-- `SettingsSnapshot getSettings() const` - value-returning snapshot helper for diagnostics
-
 ### State And Health
 
-- `DriverState state() const`
-- `DriverState driverState() const`
-- `bool isInitialized() const`
-- `bool isOnline() const`
-- `const Config& getConfig() const`
-- `uint32_t capacityBytes() const`
-- `uint32_t maxAddress() const`
-- `uint32_t lastOkMs() const`
-- `uint32_t lastErrorMs() const`
-- `Status lastError() const`
-- `uint8_t consecutiveFailures() const`
-- `uint32_t totalFailures() const`
-- `uint32_t totalSuccess() const`
-
-`isOnline()` is a compatibility name for “passively bound”; it remains true in
+`isOnline()` is a compatibility name for "passively bound"; it stays true in
 diagnostic `DEGRADED` and `OFFLINE` states. Use `state()` for health display,
-not for transport admission policy.
+never for transport admission policy: `OFFLINE` never suppresses an
+owner-requested transaction or claims bus-recovery authority.
 
-`SettingsSnapshot` is a cache-only view. It includes bound/state/online status,
-I2C timeout/capacities, health counters and library-owned last-error text,
-active variant and
-Device ID fields, Sleep mode state, and conservative current-address tracking.
-Calling either `getSettings()` overload must not probe the device or change
-health counters. Lifetime `totalSuccess()` and `totalFailures()` counters are
-`uint32_t` values and wrap naturally at `UINT32_MAX`; the
-`consecutiveFailures()` streak is `uint8_t` and saturates. `OFFLINE` is an
-optional diagnostic classification only; it never suppresses an owner-requested
-transaction or claims bus-recovery authority.
+`getSettings()` returns a cache-only `SettingsSnapshot` and never touches the
+bus or health counters. Lifetime `totalSuccess()`/`totalFailures()` are
+`uint32_t` and wrap at `UINT32_MAX`; the `consecutiveFailures()` streak is
+`uint8_t` and saturates.
 
 ## Supported Runtime Variants
 
@@ -417,21 +380,6 @@ The maintained [device reference](docs/DEVICE_REFERENCE.md) is the canonical
 source for address encoding, product IDs, electrical limits, bus modes,
 endurance, and retention notes. Use the exact BOM datasheet for final design
 decisions.
-
-## Hardware Validation
-
-The latest completed run is the 24-hour MB85RC256V strict soak ending
-2026-08-01: 34/34 functional checks and 221,222 soak checks passed, with no
-failures, unknowns, target resets, serial reconnects, or framing recoveries. The
-driver finished `READY` after 3,837,088 successful operations and zero failures;
-the final heap drop was 160 bytes.
-
-That firmware identified itself as `d31d2b4-dirty`, so the result is strong
-fixture regression and endurance evidence, not immutable clean-release
-qualification. WP-high behavior, unplug/NACK recovery, controlled power loss,
-native ESP-IDF hardware execution, and full variant/strap coverage remain open.
-See the [HIL evidence ledger](docs/reports/HIL_SUMMARY.md) for exact provenance
-and the [release checklist](docs/RELEASE_CHECKLIST.md) for the remaining matrix.
 
 ## Production Storage Pattern
 
@@ -558,8 +506,8 @@ doxygen Doxyfile
 
 `hil_runner.py` requires an explicit `--port` for both plan-only and real runs;
 `--dry-run` never opens hardware. The canonical full build, package, and real
-strict-HIL commands—including framework, transport-envelope, heap, and soak
-gates—are in the [release checklist](docs/RELEASE_CHECKLIST.md).
+strict-HIL commands, including framework, transport-envelope, heap, and soak
+gates are in the [release checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Documentation
 
@@ -567,7 +515,6 @@ gates—are in the [release checklist](docs/RELEASE_CHECKLIST.md).
 - `docs/DEVICE_REFERENCE.md` - maintained MB85RC-family behavior reference
 - `docs/IDF_PORT.md` - ESP-IDF portability and native example notes
 - `docs/RELEASE_CHECKLIST.md` - release verification checklist
-- `docs/reports/HIL_SUMMARY.md` - revision-specific hardware evidence ledger
 - `docs/reference-pdfs/` - retained vendor datasheets and fact sheet
 - `CONTRIBUTING.md` - contribution workflow and required validation
 - `SECURITY.md` - supported-version and vulnerability-reporting policy

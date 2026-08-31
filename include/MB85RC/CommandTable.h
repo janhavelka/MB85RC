@@ -60,6 +60,22 @@ static constexpr uint16_t PRODUCT_ID = PRODUCT_ID_MB85RC256V;
 /// Density code (upper nibble of Product ID)
 static constexpr uint8_t DENSITY_CODE = 0x05;
 
+/// Documented internal-regulator recovery time after Sleep wake.
+static constexpr uint16_t SLEEP_RECOVERY_US = 400U;
+
+/// Maximum documented High-speed-mode bus rate for capable local variants.
+static constexpr uint32_t HIGH_SPEED_BUS_HZ = 3400000UL;
+
+/// Fast Mode Plus bus rate, documented by every supported local variant.
+static constexpr uint32_t NORMAL_BUS_HZ = 1000000UL;
+
+/// Fast Mode bus rate.
+///
+/// `MB85RC04V` and `MB85RC16V` specify Fast Mode Plus only for VDD 4.5 V to
+/// 5.5 V, so this is the rate their datasheets guarantee across the whole
+/// documented 3.0 V to 5.5 V supply range.
+static constexpr uint32_t FAST_MODE_BUS_HZ = 400000UL;
+
 /// @brief FRAM memory-address encoding used by a device variant.
 enum class AddressModel : uint8_t {
   TWO_BYTE_ADDRESS_PINS,              ///< Two address bytes; A2:A0 select the device.
@@ -85,7 +101,7 @@ struct VariantInfo {
   bool supportedByDriver;        ///< True when runtime memory operations are implemented/tested.
   bool supportsHighSpeedMode;    ///< True when the variant documents I2C High-speed mode.
   bool supportsSleepMode;        ///< True when the variant documents Sleep mode.
-  uint32_t maxNormalBusHz;       ///< Maximum normal-mode I2C bus rate from local datasheets.
+  uint32_t maxNormalBusHz;       ///< Normal-mode I2C bus rate guaranteed over the variant's full supply range.
   uint32_t maxHighSpeedBusHz;    ///< Maximum HS-mode bus rate, or 0 when unsupported.
   uint16_t sleepRecoveryUs;      ///< Sleep wake recovery time tREC, or 0 when unsupported.
 };
@@ -99,22 +115,22 @@ struct VariantInfo {
 static constexpr VariantInfo KNOWN_VARIANTS[] = {
   {DeviceVariant::MB85RC04V, "MB85RC04V", 512UL, PRODUCT_ID_MB85RC04V, 0x00, true,
    AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS, false, true,
-   false, false, 1000000UL, 0UL, 0U},
+   false, false, FAST_MODE_BUS_HZ, 0UL, 0U},
   {DeviceVariant::MB85RC16V, "MB85RC16V", 2048UL, 0x000, 0x00, false,
    AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS, false, true,
-   false, false, 1000000UL, 0UL, 0U},
+   false, false, FAST_MODE_BUS_HZ, 0UL, 0U},
   {DeviceVariant::MB85RC64TA, "MB85RC64TA", 8192UL, PRODUCT_ID_MB85RC64TA, 0x03, true,
    AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
-   true, true, 1000000UL, 3400000UL, 400U},
+   true, true, NORMAL_BUS_HZ, HIGH_SPEED_BUS_HZ, SLEEP_RECOVERY_US},
   {DeviceVariant::MB85RC256V, "MB85RC256V", 32768UL, PRODUCT_ID, DENSITY_CODE, true,
    AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
-   false, false, 1000000UL, 0UL, 0U},
+   false, false, NORMAL_BUS_HZ, 0UL, 0U},
   {DeviceVariant::MB85RC512T, "MB85RC512T", 65536UL, PRODUCT_ID_MB85RC512T, 0x06, true,
    AddressModel::TWO_BYTE_ADDRESS_PINS, true, true,
-   true, true, 1000000UL, 3400000UL, 400U},
+   true, true, NORMAL_BUS_HZ, HIGH_SPEED_BUS_HZ, SLEEP_RECOVERY_US},
   {DeviceVariant::MB85RC1MT, "MB85RC1MT", 131072UL, PRODUCT_ID_MB85RC1MT, 0x07, true,
    AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS, false, true,
-   true, true, 1000000UL, 3400000UL, 400U},
+   true, true, NORMAL_BUS_HZ, HIGH_SPEED_BUS_HZ, SLEEP_RECOVERY_US},
 };
 
 /// @brief Number of entries in KNOWN_VARIANTS.
@@ -175,20 +191,11 @@ static constexpr uint8_t HIGH_SPEED_MASTER_CODE_MAX = 0x0F;
 /// Default raw 8-bit High-speed master code used by Config.
 static constexpr uint8_t HIGH_SPEED_MASTER_CODE_DEFAULT = 0x08;
 
-/// Maximum documented High-speed-mode bus rate for capable local variants.
-static constexpr uint32_t HIGH_SPEED_BUS_HZ = 3400000UL;
-
-/// Maximum documented normal-mode bus rate for supported local variants.
-static constexpr uint32_t NORMAL_BUS_HZ = 1000000UL;
-
 /// Reserved 8-bit Device ID/Sleep command byte used for Sleep entry phase 1.
 static constexpr uint8_t SLEEP_RESERVED_ADDR_W = 0xF8;
 
 /// Reserved 8-bit Sleep command byte used after the repeated START.
 static constexpr uint8_t SLEEP_ENTRY_COMMAND = 0x86;
-
-/// Documented internal-regulator recovery time after Sleep wake.
-static constexpr uint16_t SLEEP_RECOVERY_US = 400U;
 
 /// Conservative millisecond gate for the driver state machine.
 static constexpr uint32_t SLEEP_RECOVERY_MS = 1UL;

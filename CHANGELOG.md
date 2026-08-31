@@ -7,7 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Fixed
+
+- Current-address reads on `MB85RC04V`, `MB85RC16V`, and `MB85RC1MT` encoded the
+  slave byte from the next address instead of the last accessed one. Those parts
+  compose the current address from the upper bits in the slave byte plus the low
+  bits held in the device buffer, so every crossing of a 256-byte (04V/16V) or
+  64 KiB (1MT) boundary returned a byte from the wrong bank with `Status::Ok()`.
+- `wake()` could strand the driver in `SleepState::WAKING` permanently when
+  `Config::nowMs` was not supplied. Without a time source the core cannot
+  measure tREC, so it now reports `AWAKE` immediately and the caller owns the
+  recovery wait; the behaviour with a time hook is unchanged.
+- `wake()` and `enterSleep()` now advance an expired `WAKING` state before
+  judging it, so an idempotent `wake()` retry after tREC no longer returns
+  `Err::BUSY`.
+- AUTO re-identification to a different variant now clears High-speed
+  enablement and the cached current-address pointer. Previously a part without
+  High-speed support could keep receiving High-speed-prefixed transactions.
+- `_fitsRange()` no longer narrows the remaining-capacity computation to
+  `size_t`, which rejected every access to `MB85RC512T`/`MB85RC1MT` on targets
+  with a 16-bit `size_t`.
+- `Status::detail` for Device ID mismatches no longer overflows a 16-bit `int`
+  during integer promotion.
+- Staged `VERIFY` and `VERIFIED_WRITE` mismatches now record
+  `failedChunkOffset`/`failedChunkLength` instead of leaving them at zero.
+- `maxNormalBusHz` for `MB85RC04V` and `MB85RC16V` now reports 400 kHz, the rate
+  their datasheets guarantee across the full 3.0 V to 5.5 V supply range; Fast
+  Mode Plus is specified only for 4.5 V to 5.5 V on those two parts.
+- Example Wire transport: the short-write paths released the Wire HAL lock they
+  had taken, and bus recovery now drives SDA/SCL open-drain instead of
+  push-pull against a slave that may be holding SDA low.
+- Example CLI `errToStr()` covers `Err::NO_RESULT` and `Err::CANCELLED`.
+
+### Changed
+
+- `_specialTransfer()` uses the active variant's tREC, matching
+  `sleepRecoveryUs()`.
+- Staged transfer requests validate their parameters before the Sleep gate, so a
+  malformed request reports `INVALID_PARAM` rather than `BUSY`.
+- Removed the unreachable expected-variant branch from internal variant
+  selection; fixed variants continue to use `_validateActiveDeviceId()`.
+- Added compile-time assertions tying the chunk limits to the core staging
+  buffer sizes.
+
+### Removed
+
+- `docs/reports/HIL_SUMMARY.md` and the `docs/reports/` directory. The ledger
+  recorded fixture-specific, revision-specific hardware runs and was packaged
+  for every library consumer; git history retains it. `tools/hil_runner.py` now
+  writes its artifacts to `.pio/hil/`.
+- README hardware-validation snapshot and the hand-maintained API method
+  inventories, both of which duplicated or contradicted generated
+  documentation.
 
 ## [4.1.0] - 2026-08-05
 

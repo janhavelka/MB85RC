@@ -1296,7 +1296,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def default_artifact_paths(port: str) -> tuple[Path, Path, Path]:
     date = datetime.now().strftime("%Y%m%d")
     safe_port = port.replace(":", "").replace("\\", "").replace("/", "")
-    root = ROOT / "docs" / "reports"
+    root = ROOT / ".pio" / "hil"
     stem = f"hil-runner-{safe_port}-{date}"
     return (
         root / f"{stem}-transcript.txt",

@@ -49,7 +49,8 @@ bool isSupportedRuntimeVariant(const cmd::VariantInfo& variant) {
 }
 
 int32_t deviceIdDetail(const DeviceId& id) {
-  return (id.manufacturerId << 12) | id.productId;
+  return (static_cast<int32_t>(id.manufacturerId) << 12) |
+         static_cast<int32_t>(id.productId);
 }
 
 bool isValidHighSpeedMasterCode(uint8_t value) {
@@ -410,6 +411,7 @@ Status MB85RC::enterSleep() {
   if (!supportsSleepMode()) {
     return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
   }
+  _advanceWakeState(_nowMs());
   if (_config.i2cSpecial == nullptr) {
     return Status::Error(Err::INVALID_CONFIG, "Special I2C callback not set");
   }
@@ -451,6 +453,7 @@ Status MB85RC::wake() {
   if (!supportsSleepMode()) {
     return Status::Error(Err::UNSUPPORTED, "Active variant does not support Sleep mode");
   }
+  _advanceWakeState(_nowMs());
   if (_sleepState == SleepState::AWAKE) {
     return Status::Ok();
   }
@@ -470,11 +473,20 @@ Status MB85RC::wake() {
     return st;
   }
 
-  _sleepState = SleepState::WAKING;
+  if (_config.nowMs == nullptr) {
+    // Without a time source the core can neither measure tREC nor ever leave
+    // WAKING, which would block all further I2C. Report AWAKE and leave the
+    // documented recovery wait to the caller.
+    _sleepState = SleepState::AWAKE;
+    _sleepWakeReadyMs = 0;
+    return Status::Ok();
+  }
+
   uint32_t recoveryMs = (static_cast<uint32_t>(sleepRecoveryUs()) + 999UL) / 1000UL;
   if (recoveryMs < cmd::SLEEP_RECOVERY_MS) {
     recoveryMs = cmd::SLEEP_RECOVERY_MS;
   }
+  _sleepState = SleepState::WAKING;
   _sleepWakeReadyMs = _nowMs() + recoveryMs;
   return Status::Ok();
 }
@@ -814,7 +826,7 @@ Status MB85RC::readDeviceId(DeviceId& id) {
   }
 
   if (_config.expectedVariant == DeviceVariant::AUTO) {
-    st = _selectVariant(DeviceVariant::AUTO, id);
+    st = _selectVariant(id);
     if (!st.ok()) {
       _variant = nullptr;
       _deviceId = DeviceId{};
@@ -891,8 +903,15 @@ Status MB85RC::readCurrentAddress(uint8_t* buf, size_t len) {
   }
 
   for (size_t offset = 0; offset < len; ++offset) {
+    // Variants that carry upper memory-address bits in the slave byte
+    // (MB85RC04V A8, MB85RC16V A10:A8, MB85RC1MT A16) compose the current
+    // address from those bits plus the low bits held in the device's own
+    // buffer, and then read the following byte. The slave byte must therefore
+    // encode the last accessed byte, not the byte about to be read.
+    const uint32_t lastAccessed =
+        (_currentAddress == 0U) ? maxAddress() : (_currentAddress - 1U);
     EncodedMemoryAddress enc;
-    Status st = _encodeMemoryAddress(_currentAddress, enc);
+    Status st = _encodeMemoryAddress(lastAccessed, enc);
     if (!st.ok()) {
       return st;
     }
@@ -946,7 +965,7 @@ Status MB85RC::verifyOnce(uint32_t address, const uint8_t* expected, size_t len,
                          "Verify range exceeds active capacity", detailFromU32(address));
   }
 
-  uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
+  uint8_t readBuf[cmd::MAX_READ_CHUNK];
   Status st = _readMemory(address, readBuf, len);
   if (!st.ok()) {
     return st;
@@ -1504,10 +1523,6 @@ Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
     return busyStatus(BusyDetail::RESULT_PENDING,
                       "Terminal transfer result not consumed");
   }
-  Status ready = _ensureAwakeForI2c();
-  if (!ready.ok()) {
-    return ready;
-  }
   if (requestId == 0U) {
     return Status::Error(Err::INVALID_PARAM, "Request ID must be nonzero");
   }
@@ -1529,6 +1544,10 @@ Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                          "Transfer range exceeds active capacity",
                          static_cast<int32_t>(address));
+  }
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    return ready;
   }
 
   _transfer = TransferJob{};
@@ -1647,7 +1666,7 @@ Status MB85RC::_pollTransferInstruction() {
         chunk = maxReadDataBytes();
       }
       {
-        uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
+        uint8_t readBuf[cmd::MAX_READ_CHUNK];
         Status st = _readMemory(chunkAddress, readBuf, chunk);
         if (!st.ok()) {
           _transfer.result.verifyStatus = st;
@@ -1662,6 +1681,8 @@ Status MB85RC::_pollTransferInstruction() {
             _transfer.offset = mismatch;
             _transfer.result.bytesCompleted = mismatch;
             _transfer.result.mismatchOffset = mismatch;
+            _transfer.result.failedChunkOffset = mismatch;
+            _transfer.result.failedChunkLength = chunk - i;
             _transfer.result.expected = _transfer.constData[mismatch];
             _transfer.result.actual = readBuf[i];
             _transfer.result.match = false;
@@ -1709,7 +1730,7 @@ Status MB85RC::_pollTransferInstruction() {
         return st;
       }
       {
-        uint8_t readBuf[MAX_TRANSPORT_RX_BYTES];
+        uint8_t readBuf[cmd::MAX_READ_CHUNK];
         Status st = _readMemory(_transfer.result.address, readBuf,
                                 _transfer.result.bytesRequested);
         _transfer.result.verifyStatus = st;
@@ -1724,6 +1745,8 @@ Status MB85RC::_pollTransferInstruction() {
             _transfer.offset = i;
             _transfer.result.bytesCompleted = i;
             _transfer.result.mismatchOffset = i;
+            _transfer.result.failedChunkOffset = i;
+            _transfer.result.failedChunkLength = _transfer.result.bytesRequested - i;
             _transfer.result.expected = _transfer.constData[i];
             _transfer.result.actual = readBuf[i];
             _transfer.result.match = false;
@@ -1900,8 +1923,10 @@ bool MB85RC::_fitsRange(uint32_t address, size_t len) const {
   if (len == 0U || !_isValidAddress(address)) {
     return false;
   }
-  const uint32_t capacity = capacityBytes();
-  const size_t remaining = static_cast<size_t>(capacity - address);
+  // Compare without casting: the usual arithmetic conversions widen whichever
+  // side is narrower. Narrowing the remaining count to size_t instead would
+  // truncate a 64 KiB+ capacity to zero wherever size_t is 16-bit.
+  const uint32_t remaining = capacityBytes() - address;
   return len <= remaining;
 }
 
@@ -1961,38 +1986,31 @@ Status MB85RC::_encodeMemoryAddress(uint32_t address, EncodedMemoryAddress& out)
   return Status::Ok();
 }
 
-Status MB85RC::_selectVariant(DeviceVariant expected, const DeviceId& id) {
+Status MB85RC::_selectVariant(const DeviceId& id) {
   if (id.manufacturerId != cmd::MANUFACTURER_ID) {
     return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID manufacturer mismatch",
                          deviceIdDetail(id));
   }
 
-  const cmd::VariantInfo* selected = nullptr;
-  if (expected == DeviceVariant::AUTO) {
-    selected = cmd::findVariantByProductId(id.productId);
-    if (selected == nullptr) {
-      return Status::Error(Err::DEVICE_ID_MISMATCH, "Unknown Device ID product",
-                           deviceIdDetail(id));
-    }
-  } else {
-    selected = variantForExpected(expected);
-    if (selected == nullptr) {
-      return Status::Error(Err::INVALID_CONFIG, "Unsupported expected variant");
-    }
-    if (!selected->hasDeviceId) {
-      return Status::Error(Err::INVALID_CONFIG, "Expected variant has no Device ID");
-    }
-    if (id.productId != selected->productId) {
-      return Status::Error(Err::DEVICE_ID_MISMATCH, "Device ID product mismatch",
-                           deviceIdDetail(id));
-    }
+  const cmd::VariantInfo* selected = cmd::findVariantByProductId(id.productId);
+  if (selected == nullptr) {
+    return Status::Error(Err::DEVICE_ID_MISMATCH, "Unknown Device ID product",
+                         deviceIdDetail(id));
   }
-
   if (!isSupportedRuntimeVariant(*selected)) {
     return Status::Error(Err::DEVICE_ID_MISMATCH, "Unsupported Device ID product",
                          deviceIdDetail(id));
   }
 
+  if (_variant != selected) {
+    // High-speed enablement and the cached device address pointer belong to the
+    // previous variant's capabilities and address space. Neither survives
+    // re-identification. Sleep state needs no reset: reaching this point
+    // required a Device ID read, which is only admitted while AWAKE.
+    _highSpeedModeEnabled = false;
+    _currentAddressKnown = false;
+    _currentAddress = 0;
+  }
   _variant = selected;
   _deviceId = id;
   return Status::Ok();
@@ -2059,8 +2077,9 @@ I2cSpecialTransfer MB85RC::_specialTransfer(uint8_t i2cAddress,
   transfer.txLen = txLen;
   transfer.rxData = rxData;
   transfer.rxLen = rxLen;
-  transfer.recoveryUs = (_config.sleepRecoveryUs != 0U) ? _config.sleepRecoveryUs
-                                                        : cmd::SLEEP_RECOVERY_US;
+  const uint16_t activeRecoveryUs = sleepRecoveryUs();
+  transfer.recoveryUs =
+      (activeRecoveryUs != 0U) ? activeRecoveryUs : cmd::SLEEP_RECOVERY_US;
   return transfer;
 }
 

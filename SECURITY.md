@@ -2,14 +2,13 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| Current 4.x release | :white_check_mark: |
-| Previous 3.x release | :white_check_mark: |
-| 2.x and older | :x: |
+| Version | Supported |
+| ------- | --------- |
+| Latest 4.x release | Yes |
+| Older releases | No |
 
-The current 4.x release and previous 3.x release are supported reporting
-targets. Security fixes for older release lines are best effort only.
+Only the latest released version is a supported reporting target. There is no
+maintenance branch for older release lines.
 
 ## Reporting a Vulnerability
 
@@ -23,7 +22,7 @@ If you discover a security vulnerability within this library, please follow resp
    - Potential impact
    - Any suggested fixes (optional)
 
-We will acknowledge receipt within 48 hours and aim to provide a fix or mitigation within 14 days for critical issues.
+Reports are acknowledged and addressed on a best-effort basis by the maintainer.
 
 ## Scope
 

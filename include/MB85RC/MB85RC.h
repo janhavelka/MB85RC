@@ -286,7 +286,7 @@ public:
   /// @return true while bound, including DEGRADED/OFFLINE diagnostic states.
   bool isOnline() const { return _initialized; }
 
-  /// Get a copy of the active configuration.
+  /// Get the active configuration.
   /// @return Reference to the cached configuration supplied to bind()/begin().
   const Config& getConfig() const { return _config; }
 
@@ -372,10 +372,13 @@ public:
 
   /// Send the wake stimulus for a sleeping device.
   ///
-  /// On success the driver enters WAKING and records a conservative millisecond
-  /// deadline derived from the datasheet tREC. The application must allow at
-  /// least sleepRecoveryUs() before access; call tick() after that interval to
-  /// transition back to AWAKE. No delay is inserted by the core.
+  /// With a `Config::nowMs` hook the driver enters WAKING and records a
+  /// conservative millisecond deadline derived from the datasheet tREC; call
+  /// tick() after that interval to transition back to AWAKE. Without a time
+  /// hook the driver cannot measure tREC, so it reports AWAKE immediately and
+  /// enforcing the recovery interval is entirely the caller's responsibility.
+  /// The application must always allow at least sleepRecoveryUs() before
+  /// access. No delay is inserted by the core.
   /// @return Status::Ok() when the wake stimulus is accepted.
   Status wake();
 
@@ -927,8 +930,8 @@ private:
   /// Encode a runtime memory address for the active variant.
   Status _encodeMemoryAddress(uint32_t address, EncodedMemoryAddress& out) const;
 
-  /// Select and validate the active runtime variant from Device ID.
-  Status _selectVariant(DeviceVariant expected, const DeviceId& id);
+  /// Select and validate the active runtime variant from a Device ID readback.
+  Status _selectVariant(const DeviceId& id);
 
   /// Validate a Device ID against the active runtime variant.
   Status _validateActiveDeviceId(const DeviceId& id) const;

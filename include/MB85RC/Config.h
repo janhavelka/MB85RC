@@ -207,6 +207,16 @@ static constexpr size_t MAX_TRANSPORT_TX_BYTES = 128U;
 /// Fixed core RX buffer capacity; larger transport capabilities are accepted.
 static constexpr size_t MAX_TRANSPORT_RX_BYTES = 128U;
 
+// The core stages one memory-address prefix plus one data chunk in a single
+// fixed TX buffer, and one read chunk in a fixed RX buffer. Keep the chunk
+// limits and the buffer sizes from drifting apart.
+static_assert(cmd::MAX_WRITE_DATA_BYTES + cmd::ADDRESS_BYTES <= MAX_TRANSPORT_TX_BYTES,
+              "A write chunk plus its address prefix must fit the core TX buffer");
+static_assert(cmd::MAX_READ_CHUNK <= MAX_TRANSPORT_RX_BYTES,
+              "A read chunk must fit the core RX buffer");
+static_assert(cmd::MAX_FILL_CHUNK <= cmd::MAX_WRITE_DATA_BYTES,
+              "A fill chunk must fit the write-chunk limit");
+
 /// @brief Configuration for MB85RC driver.
 ///
 /// `i2cUser`, `timeUser`, and the state they reference must remain valid until

@@ -21,13 +21,19 @@ Use this checklist before tagging and publishing a release.
   `python tools/check_core_timing_guard.py`,
   `python tools/check_cli_contract.py`, and
   `python tools/check_idf_example_contract.py`.
-- Preview the reference MB85RC256V fixture plan without opening hardware:
-  `python tools/hil_runner.py --dry-run --port COM4 --profile arduino --include-stress --sample-count 500 --soak-duration-s 28800`.
-- Run the actual strict reference-fixture HIL (this command deliberately omits
-  `--dry-run`):
-  `python tools/hil_runner.py --port COM4 --baud 115200 --timeout-s 5 --profile arduino --include-stress --sample-count 500 --strict --require-arduino-version 3.3.11 --require-idf-version v5.5.5 --require-variant MB85RC256V --require-product-id 0x510 --require-capacity 32768 --require-timeout-ms 5 --require-max-write-data 124 --require-max-read-data 124 --heap-max-drop-bytes 1024 --heap-min-free-bytes 8192 --soak-duration-s 28800 --soak-pacing-s 0.1 --soak-max-consecutive-failures 3`.
-  Adapt the port, identity, capacity, and documented heap thresholds for another
-  fixture; never relax a gate silently.
+- Preview the fixture plan without opening hardware:
+  `python tools/hil_runner.py --dry-run --port <PORT> --profile arduino --include-stress`.
+- Run the strict HIL against the fixture (omit `--dry-run`). Set every gate from
+  the fixture's own BOM and never relax one silently:
+  - identity: `--require-variant`, `--require-product-id`, `--require-capacity`
+  - framework: `--require-arduino-version`, `--require-idf-version`
+  - transport envelope: `--require-timeout-ms`, `--require-max-write-data`,
+    `--require-max-read-data`
+  - heap: `--heap-max-drop-bytes`, `--heap-min-free-bytes`
+  - soak: `--strict`, `--soak-duration-s`, `--soak-pacing-s`,
+    `--soak-max-consecutive-failures`
+
+  Run `python tools/hil_runner.py --help` for the complete flag list.
 - Run package validation:
   `.\scripts\pio.cmd pkg pack --output MB85RC.tar.gz`, then
   `python tools/check_package_contents.py MB85RC.tar.gz`. Remove the generated
@@ -54,10 +60,10 @@ Use this checklist before tagging and publishing a release.
 
 ## Hardware Qualification
 
-Keep each item pending until board logs and evidence are recorded in the
-[HIL evidence ledger](reports/HIL_SUMMARY.md). A pass applies only to the tested
-revision, BOM, wiring, voltage, bus settings, framework, and firmware identity;
-do not project one fixture's result onto another configuration.
+Keep each item pending until the board log, wiring, command output, commit, and
+result are captured for the release under test. A pass applies only to the
+tested revision, BOM, wiring, voltage, bus settings, framework, and firmware
+identity; do not project one fixture's result onto another configuration.
 
 Production HIL must use strict mode, required variant/product/capacity gates,
 zero FAIL, zero UNKNOWN, final `READY` health, zero total driver failures, zero

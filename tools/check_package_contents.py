@@ -33,7 +33,6 @@ REQUIRED_FILES = {
     "docs/DEVICE_REFERENCE.md",
     "docs/IDF_PORT.md",
     "docs/RELEASE_CHECKLIST.md",
-    "docs/reports/HIL_SUMMARY.md",
 }
 
 FORBIDDEN_PREFIXES = (

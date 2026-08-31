@@ -1,15 +1,14 @@
 # MB85RC Device Reference
 
-This file is the maintained device-behavior reference for the supported
-MB85RC-family driver surface. It summarizes the vendor PDFs kept in
-`docs/reference-pdfs/` and replaces the older extracted Markdown dumps.
+Maintained device-behavior reference for the supported MB85RC-family driver
+surface, summarizing the vendor PDFs kept in `docs/reference-pdfs/`.
 
 ## Variant Matrix
 
 | Variant | Capacity | Last address | Address model | Device ID | Bus speed | Supply | Notes |
 | --- | ---: | ---: | --- | --- | --- | --- | --- |
-| MB85RC04V | 512 B | `0x01FF` | One address byte; A8 is encoded in the I2C address word with A2:A1 as device-select bits. | Manufacturer `0x00A`, Product `0x010` | 1 MHz | 3.0 V to 5.5 V | No local High-speed or Sleep command support. |
-| MB85RC16V | 2 KiB | `0x07FF` | One address byte; A10:A8 are encoded in the I2C address word. | None in local datasheet | 1 MHz | 3.0 V to 5.5 V | Must be selected explicitly; `AUTO` cannot discover it. |
+| MB85RC04V | 512 B | `0x01FF` | One address byte; A8 is encoded in the I2C address word with A2:A1 as device-select bits. | Manufacturer `0x00A`, Product `0x010` | 400 kHz; 1 MHz only at VDD 4.5-5.5 V | 3.0 V to 5.5 V | Two device pins (A2, A1); each part occupies two consecutive 7-bit addresses. No High-speed or Sleep support. |
+| MB85RC16V | 2 KiB | `0x07FF` | One address byte; A10:A8 are encoded in the I2C address word. | None in local datasheet | 400 kHz; 1 MHz only at VDD 4.5-5.5 V | 3.0 V to 5.5 V | No device pins: one part occupies all of `0x50`-`0x57`, so only one can share a bus. Must be selected explicitly; `AUTO` cannot discover it. |
 | MB85RC64TA | 8 KiB | `0x1FFF` | Two address bytes; A2:A1:A0 select the device. | Manufacturer `0x00A`, Product `0x358` | 1 MHz normal, 3.4 MHz HS | 1.8 V to 3.6 V | High-speed and Sleep documented. |
 | MB85RC256V | 32 KiB | `0x7FFF` | Two address bytes; A2:A1:A0 select the device. High address MSB must be 0. | Manufacturer `0x00A`, Product `0x510` | 1 MHz | 2.7 V to 5.5 V | Original target part. |
 | MB85RC512T | 64 KiB | `0xFFFF` | Two address bytes; A2:A1:A0 select the device. | Manufacturer `0x00A`, Product `0x658` | 1 MHz normal, 3.4 MHz HS | 1.7 V to 3.6 V | High-speed and Sleep documented. |
@@ -44,21 +43,31 @@ voltage, temperature, and package decisions.
   internally pulled down.
 - Address pins must be strapped to `VDD` or `VSS`; documented open pins read as
   low through internal pull-downs.
-- Address-pin availability changes by variant: `MB85RC04V` and `MB85RC1MT`
-  support up to four devices on one bus, while `MB85RC64TA`, `MB85RC256V`, and
-  `MB85RC512T` support up to eight. `MB85RC16V` uses address bits in the device
-  address rather than external device-select pins.
+- Device-select pin counts differ: `MB85RC64TA`, `MB85RC256V`, and `MB85RC512T`
+  have three (A2:A0); `MB85RC04V` and `MB85RC1MT` have two (A2, A1) because the
+  lowest slave-address bit carries memory address A8 or A16; `MB85RC16V` has
+  none, because its lowest three slave-address bits carry memory address
+  A10:A8.
+- Devices per bus: `MB85RC64TA`, `MB85RC256V`, and `MB85RC512T` allow eight;
+  `MB85RC04V` and `MB85RC1MT` allow four, each consuming two consecutive 7-bit
+  addresses; `MB85RC16V` allows exactly one, because a single part answers to
+  all eight addresses `0x50`-`0x57`.
 - Driver configuration uses the board strap base address, not a memory-bank
   encoded transaction address. `MB85RC64TA`, `MB85RC256V`, and `MB85RC512T`
   accept `0x50`-`0x57`; `MB85RC04V` and `MB85RC1MT` accept only even bases
-  `0x50`, `0x52`, `0x54`, and `0x56`; `MB85RC16V` accepts only `0x50` in this
-  repository's local datasheet model.
+  `0x50`, `0x52`, `0x54`, and `0x56`; `MB85RC16V` accepts only `0x50`.
 - Do not change address pins or `WP` during an I2C transaction.
 
 ## Electrical And AC Timing
 
-The bus-speed values in the variant matrix are maximum device capabilities, not
-a complete board timing proof. Production boards must also satisfy the exact
+The bus-speed values in the variant matrix are the rates guaranteed across each
+variant's full documented supply range, not a complete board timing proof.
+`MB85RC04V` and `MB85RC16V` specify Fast Mode Plus (1 MHz) only for VDD 4.5 V to
+5.5 V; below 4.5 V their guaranteed ceiling is Fast Mode (400 kHz). The other
+four variants specify 1 MHz over their whole supply range. `variantInfo()` and
+`maxNormalBusHz()` therefore report 400 kHz for `MB85RC04V` and `MB85RC16V`;
+raise the controller clock only after confirming the board's supply voltage
+against the BOM datasheet. Production boards must also satisfy the exact
 BOM datasheet's AC/DC timing tables: pull-up sizing, bus capacitance, rise and
 fall times, setup/hold times, valid voltage range, temperature range, input
 thresholds, and High-speed-mode footnotes at the selected `VDD`. The core
@@ -84,9 +93,21 @@ should validate the board power profile and use verify/journaling for critical
 records.
 
 Sequential read/write transactions auto-increment the internal address and the
-physical device can roll over at the end of its array. The public driver API
+physical device rolls over to address 0 at the end of its array, including
+across the address bits carried in the slave byte. A burst crossing a 256-byte
+boundary therefore needs no new slave address. The public driver API
 intentionally rejects cross-capacity ranges unless an explicit wrap API is
 added and tested.
+
+For variants that carry memory address bits in the slave byte (`MB85RC04V` A8,
+`MB85RC16V` A10:A8, `MB85RC1MT` A16), two datasheet rules constrain the driver:
+
+- Random read must send the same upper address bits in both the write-phase and
+  the read-phase device address words.
+- Current-address read composes its target as `n + 1`, where `n` combines the
+  upper address bits taken from the *slave byte of that transaction* with the
+  low address bits held in the device's internal buffer. The upper bits must
+  therefore describe the last accessed byte, not the byte about to be read.
 
 Current-address reads are conservative: the internal pointer is undefined after
 power-on and can be disturbed by failed or diagnostic transactions. Use explicit

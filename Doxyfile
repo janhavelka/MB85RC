@@ -25,15 +25,14 @@ HIDE_FRIEND_COMPOUNDS  = NO
 
 SHOW_INCLUDE_FILES     = YES
 INLINE_INFO            = YES
-SOURCE_BROWSER         = YES
-REFERENCED_BY_RELATION = YES
-REFERENCES_RELATION    = YES
+SOURCE_BROWSER         = NO
+REFERENCED_BY_RELATION = NO
+REFERENCES_RELATION    = NO
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md include docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md docs/reports/HIL_SUMMARY.md
-FILE_PATTERNS          = *.h *.cpp *.md
+INPUT                  = README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md include docs/DEVICE_REFERENCE.md docs/IDF_PORT.md docs/RELEASE_CHECKLIST.md
+FILE_PATTERNS          = *.h *.md
 RECURSIVE              = YES
-EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/* */docs/reference-pdfs/*
 USE_MDFILE_AS_MAINPAGE = README.md
 FULL_PATH_NAMES        = NO
 SORT_MEMBER_DOCS       = YES

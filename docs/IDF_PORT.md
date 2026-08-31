@@ -101,7 +101,3 @@ For a production adapter:
 When `Config::nowMs` is null, core health timestamps remain `0`. The IDF
 example supplies `nowMs` from `esp_timer_get_time() / 1000`, intentionally
 matching the driver's `uint32_t` millisecond contract.
-
-No native ESP-IDF hardware run is currently recorded in the
-[HIL evidence ledger](reports/HIL_SUMMARY.md). Keep that qualification pending
-until the target board, wiring, command log, commit, and result are captured.
