@@ -696,6 +696,11 @@ WriteResult MB85RC::writeDetailed(uint32_t address, const uint8_t* buf, size_t l
                                   detailFromU32(address));
     return result;
   }
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    result.status = ready;
+    return result;
+  }
 
   // Break large writes into chunks to stay within I2C buffer limits
   size_t offset = 0;
@@ -760,6 +765,11 @@ WriteResult MB85RC::fillDetailed(uint32_t address, uint8_t value, size_t len) {
                                   detailFromU32(address));
     return result;
   }
+  Status ready = _ensureAwakeForI2c();
+  if (!ready.ok()) {
+    result.status = ready;
+    return result;
+  }
 
   uint8_t chunk[cmd::MAX_FILL_CHUNK];
   std::memset(chunk, value, sizeof(chunk));
@@ -820,6 +830,7 @@ Status MB85RC::readDeviceId(DeviceId& id) {
     return Status::Error(Err::INVALID_PARAM, "Active variant has no Device ID");
   }
 
+  const cmd::VariantInfo* previousVariant = _variant;
   Status st = _readDeviceIdTracked(id);
   if (!st.ok()) {
     return st;
@@ -830,20 +841,34 @@ Status MB85RC::readDeviceId(DeviceId& id) {
     if (!st.ok()) {
       _variant = nullptr;
       _deviceId = DeviceId{};
+      _highSpeedModeEnabled = false;
+      _currentAddressKnown = false;
+      _currentAddress = 0;
       return st;
     }
     st = validateBaseAddressForVariant(_config.i2cAddress, *_variant);
     if (!st.ok()) {
       _variant = nullptr;
       _deviceId = DeviceId{};
+      _highSpeedModeEnabled = false;
+      _currentAddressKnown = false;
+      _currentAddress = 0;
       return st;
     }
     if (_config.sleepRecoveryUs != 0U && _variant->supportsSleepMode &&
         _config.sleepRecoveryUs < _variant->sleepRecoveryUs) {
       _variant = nullptr;
       _deviceId = DeviceId{};
+      _highSpeedModeEnabled = false;
+      _currentAddressKnown = false;
+      _currentAddress = 0;
       return Status::Error(Err::INVALID_CONFIG,
                            "Sleep recovery time below datasheet tREC");
+    }
+    if (_variant != previousVariant) {
+      _highSpeedModeEnabled = false;
+      _currentAddressKnown = false;
+      _currentAddress = 0;
     }
   } else {
     st = _validateActiveDeviceId(id);
@@ -1442,11 +1467,13 @@ Status MB85RC::_mapTransportResult(const TransportResult& result,
       *writeCommit = WriteCommit::ACCEPTED;
     } else if (knownFailureCode &&
                result.writeCommit == WriteCommit::NOT_COMMITTED &&
-               result.completedTxBytes <= memoryAddressBytes) {
+               result.completedTxBytes <= memoryAddressBytes &&
+               result.completedRxBytes == expectedRx) {
       *writeCommit = WriteCommit::NOT_COMMITTED;
     } else if (postAcceptanceFailure &&
                result.writeCommit == WriteCommit::ACCEPTED &&
-               result.completedTxBytes == expectedTx) {
+               result.completedTxBytes == expectedTx &&
+               result.completedRxBytes == expectedRx) {
       *writeCommit = WriteCommit::ACCEPTED;
     } else {
       *writeCommit = WriteCommit::INDETERMINATE;
@@ -1543,7 +1570,7 @@ Status MB85RC::_requestTransfer(uint32_t requestId, TransferKind kind,
   if (!_fitsRange(address, length)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE,
                          "Transfer range exceeds active capacity",
-                         static_cast<int32_t>(address));
+                         detailFromU32(address));
   }
   Status ready = _ensureAwakeForI2c();
   if (!ready.ok()) {
@@ -1944,7 +1971,7 @@ Status MB85RC::_encodeMemoryAddress(uint32_t address, EncodedMemoryAddress& out)
   }
   if (!_isValidAddress(address)) {
     return Status::Error(Err::ADDRESS_OUT_OF_RANGE, "Address exceeds active capacity",
-                         static_cast<int32_t>(address));
+                         detailFromU32(address));
   }
 
   out = EncodedMemoryAddress{};

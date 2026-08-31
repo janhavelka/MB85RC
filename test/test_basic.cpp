@@ -1141,6 +1141,57 @@ void test_begin_auto_rejects_unknown_device_id_product() {
   TEST_ASSERT_FALSE(snap.variantKnown);
 }
 
+void test_auto_reidentification_resets_variant_dependent_state() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  TEST_ASSERT_TRUE(dev.setHighSpeedMode(true).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0010U, 0x5AU).ok());
+
+  SettingsSnapshot settings;
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_TRUE(settings.highSpeedModeEnabled);
+  TEST_ASSERT_TRUE(settings.currentAddressKnown);
+
+  const cmd::VariantInfo* info = variantInfoByExpected(DeviceVariant::MB85RC256V);
+  TEST_ASSERT_NOT_NULL(info);
+  bus.productId = info->productId;
+  bus.memoryBytes = info->memoryBytes;
+  bus.addressModel = info->addressModel;
+
+  DeviceId id;
+  TEST_ASSERT_TRUE(dev.readDeviceId(id).ok());
+  TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DeviceVariant::MB85RC256V),
+                          static_cast<uint8_t>(settings.activeVariant));
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+
+  const uint32_t normalWritesBefore = bus.writeCalls;
+  const uint32_t hsWritesBefore = bus.hsWriteCalls;
+  TEST_ASSERT_TRUE(dev.writeByte(0x0020U, 0xA5U).ok());
+  TEST_ASSERT_EQUAL_UINT32(normalWritesBefore + 1U, bus.writeCalls);
+  TEST_ASSERT_EQUAL_UINT32(hsWritesBefore, bus.hsWriteCalls);
+
+  info = variantInfoByExpected(DeviceVariant::MB85RC64TA);
+  TEST_ASSERT_NOT_NULL(info);
+  bus.productId = info->productId;
+  bus.memoryBytes = info->memoryBytes;
+  bus.addressModel = info->addressModel;
+  TEST_ASSERT_TRUE(dev.readDeviceId(id).ok());
+  TEST_ASSERT_TRUE(dev.setHighSpeedMode(true).ok());
+  TEST_ASSERT_TRUE(dev.writeByte(0x0030U, 0xC3U).ok());
+
+  bus.productId = 0x123U;
+  TEST_ASSERT_TRUE(dev.readDeviceId(id).is(Err::DEVICE_ID_MISMATCH));
+  TEST_ASSERT_TRUE(dev.getSettings(settings).ok());
+  TEST_ASSERT_FALSE(settings.variantKnown);
+  TEST_ASSERT_FALSE(settings.highSpeedModeEnabled);
+  TEST_ASSERT_FALSE(settings.currentAddressKnown);
+}
+
 void test_begin_preserves_disabled_offline_threshold_in_settings() {
   FakeBus bus;
   Config cfg = makeConfig(bus);
@@ -1822,6 +1873,9 @@ void test_transfer_preflight_busy_cancel_and_exact_end_boundary() {
   TEST_ASSERT_TRUE(st.is(Err::INVALID_PARAM));
   st = dev.requestRead(cmd::MAX_MEM_ADDRESS_MB85RC256V, &byte, 2);
   TEST_ASSERT_TRUE(st.is(Err::ADDRESS_OUT_OF_RANGE));
+  st = dev.requestRead(UINT32_MAX, &byte, 1);
+  TEST_ASSERT_TRUE(st.is(Err::ADDRESS_OUT_OF_RANGE));
+  TEST_ASSERT_EQUAL_INT32(std::numeric_limits<int32_t>::max(), st.detail);
   TEST_ASSERT_FALSE(dev.isTransferBusy());
   TEST_ASSERT_EQUAL_UINT32(writesBefore, bus.writeCalls);
   TEST_ASSERT_EQUAL_UINT32(readsBefore, bus.readCalls);
@@ -2128,6 +2182,53 @@ void test_detailed_write_fill_preflight_rejects_without_bus_or_health() {
   TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
                           static_cast<uint8_t>(dev.state()));
+}
+
+void test_detailed_write_fill_sleep_preflight_is_bus_silent() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.bind(make64TaConfig(bus)).ok());
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+
+  const uint8_t value = 0xA5U;
+  uint32_t trafficBefore = busTraffic(bus);
+  uint32_t successesBefore = dev.totalSuccess();
+  uint32_t failuresBefore = dev.totalFailures();
+
+  WriteResult result = dev.writeDetailed(0x0010U, &value, 1U);
+  assertWriteResultPreflightFailure(result, Err::BUSY, 0x0010U, 1U);
+  assertBusyDetail(result.status, BusyDetail::ASLEEP);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_APPLICABLE),
+                          static_cast<uint8_t>(result.writeCommit));
+
+  result = dev.fillDetailed(0x0020U, value, 2U);
+  assertWriteResultPreflightFailure(result, Err::BUSY, 0x0020U, 2U);
+  assertBusyDetail(result.status, BusyDetail::ASLEEP);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_APPLICABLE),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  TEST_ASSERT_EQUAL_UINT32(successesBefore, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
+
+  TEST_ASSERT_TRUE(dev.wake().ok());
+  trafficBefore = busTraffic(bus);
+  successesBefore = dev.totalSuccess();
+  failuresBefore = dev.totalFailures();
+
+  result = dev.writeDetailed(0x0030U, &value, 1U);
+  assertWriteResultPreflightFailure(result, Err::BUSY, 0x0030U, 1U);
+  assertBusyDetail(result.status, BusyDetail::WAKING);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_APPLICABLE),
+                          static_cast<uint8_t>(result.writeCommit));
+
+  result = dev.fillDetailed(0x0040U, value, 2U);
+  assertWriteResultPreflightFailure(result, Err::BUSY, 0x0040U, 2U);
+  assertBusyDetail(result.status, BusyDetail::WAKING);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_APPLICABLE),
+                          static_cast<uint8_t>(result.writeCommit));
+  TEST_ASSERT_EQUAL_UINT32(trafficBefore, busTraffic(bus));
+  TEST_ASSERT_EQUAL_UINT32(successesBefore, dev.totalSuccess());
+  TEST_ASSERT_EQUAL_UINT32(failuresBefore, dev.totalFailures());
 }
 
 void test_write_protect_ack_does_not_prove_persistence() {
@@ -3263,7 +3364,9 @@ void test_read_current_address_range_reads_multiple_bytes_and_advances() {
   TEST_ASSERT_EQUAL_HEX8(0xAB, first);
 
   uint8_t current[3] = {};
+  const uint32_t readsBefore = bus.readCalls;
   TEST_ASSERT_TRUE(dev.readCurrentAddress(current, sizeof(current)).ok());
+  TEST_ASSERT_EQUAL_UINT32(readsBefore + sizeof(current), bus.readCalls);
   TEST_ASSERT_EQUAL_HEX8(0xCD, current[0]);
   TEST_ASSERT_EQUAL_HEX8(0xEF, current[1]);
   TEST_ASSERT_EQUAL_HEX8(0x42, current[2]);
@@ -3336,6 +3439,28 @@ void test_1mt_current_address_uses_dynamic_i2c_address_and_32bit_range() {
   TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
   TEST_ASSERT_TRUE(snap.currentAddressKnown);
   TEST_ASSERT_EQUAL_HEX32(0x00000, snap.currentAddress);
+}
+
+void test_1mt_current_address_uses_previous_bank_at_64k_boundary() {
+  FakeBus bus;
+  bus.mem[0x0FFFF] = 0xA1;
+  bus.mem[0x10000] = 0xA2;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, DeviceVariant::MB85RC1MT)).ok());
+
+  uint8_t value = 0;
+  TEST_ASSERT_TRUE(dev.readByte(0x0FFFF, value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA1, value);
+  TEST_ASSERT_EQUAL_HEX8(0x50, bus.lastI2cAddress);
+
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA2, value);
+  TEST_ASSERT_EQUAL_HEX8(0x50, bus.lastI2cAddress);
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX32(0x10001, snap.currentAddress);
 }
 
 void test_no_device_id_variant_probe_recover_and_id_access() {
@@ -5019,6 +5144,25 @@ void test_failed_write_commit_claims_are_normalized_conservatively() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
                           static_cast<uint8_t>(commit));
   TEST_ASSERT_EQUAL_UINT32(10U, bus.writeCalls);
+
+  bus.customWriteResultOnCall = 11U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -750,
+                             WriteCommit::ACCEPTED, 4U, 1U);
+  TEST_ASSERT_TRUE(dev.writeOnce(0x7B0U, data, sizeof(data), &commit)
+                       .is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(commit));
+
+  bus.customWriteResultOnCall = 12U;
+  bus.customWriteResult =
+      TransportResult::Error(TransportCode::TIMEOUT, -751,
+                             WriteCommit::NOT_COMMITTED, 2U, 1U);
+  TEST_ASSERT_TRUE(dev.writeOnce(0x7C0U, data, sizeof(data), &commit)
+                       .is(Err::I2C_TIMEOUT));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
+                          static_cast<uint8_t>(commit));
+  TEST_ASSERT_EQUAL_UINT32(12U, bus.writeCalls);
 }
 
 void test_verified_write_rejects_unbound_with_zero_callbacks() {
@@ -5169,6 +5313,7 @@ int main() {
   RUN_TEST(test_begin_auto_selects_supported_runtime_variant);
   RUN_TEST(test_begin_auto_cannot_select_no_device_id_variant);
   RUN_TEST(test_begin_auto_rejects_unknown_device_id_product);
+  RUN_TEST(test_auto_reidentification_resets_variant_dependent_state);
   RUN_TEST(test_begin_preserves_disabled_offline_threshold_in_settings);
   RUN_TEST(test_begin_detects_device_not_found);
   RUN_TEST(test_begin_detects_device_id_mismatch);
@@ -5211,6 +5356,7 @@ int main() {
   RUN_TEST(test_write_detailed_reports_failed_chunk_and_accepted_prefix);
   RUN_TEST(test_fill_detailed_reports_failed_chunk_and_accepted_prefix);
   RUN_TEST(test_detailed_write_fill_preflight_rejects_without_bus_or_health);
+  RUN_TEST(test_detailed_write_fill_sleep_preflight_is_bus_silent);
   RUN_TEST(test_failed_multichunk_write_invalidates_current_address_tracking);
   RUN_TEST(test_failed_multichunk_fill_invalidates_current_address_tracking);
   RUN_TEST(test_write_rejects_invalid_address);
@@ -5249,6 +5395,7 @@ int main() {
   RUN_TEST(test_read_current_address_range_reads_multiple_bytes_and_advances);
   RUN_TEST(test_64ta_current_address_respects_active_capacity);
   RUN_TEST(test_1mt_current_address_uses_dynamic_i2c_address_and_32bit_range);
+  RUN_TEST(test_1mt_current_address_uses_previous_bank_at_64k_boundary);
   RUN_TEST(test_no_device_id_variant_probe_recover_and_id_access);
   RUN_TEST(test_verify_reports_match_and_first_mismatch);
   RUN_TEST(test_write_ack_ok_under_wp_high_but_verify_reports_mismatch);
