@@ -9,6 +9,7 @@
 #define private public
 #include "MB85RC/MB85RC.h"
 #undef private
+#include "common/IdfI2cTransport.h"
 #include "common/I2cTransport.h"
 #include "common/TypedMemory.h"
 
@@ -459,11 +460,13 @@ TransportResult fakeSpecial(I2cSpecialOp op, const I2cSpecialTransfer& transfer,
         bus->lastAddressLen = 0;
         bus->lastAddrHigh = 0;
         bus->lastAddrLow = 0;
-        bus->lastMemoryAddress = bus->currentAddr;
+        uint32_t readAddress = decodeCurrentReadAddress(bus, transfer.i2cAddress);
+        bus->lastMemoryAddress = readAddress;
         for (size_t i = 0; i < transfer.rxLen; ++i) {
-          transfer.rxData[i] = bus->mem[bus->currentAddr % bus->memoryBytes];
-          bus->currentAddr = (bus->currentAddr + 1) % bus->memoryBytes;
+          transfer.rxData[i] = bus->mem[readAddress];
+          readAddress = (readAddress + 1U) % bus->memoryBytes;
         }
+        bus->currentAddr = readAddress;
         bus->currentAddrValid = true;
         return TransportResult::Ok(transfer.txLen, transfer.rxLen);
       }
@@ -3552,6 +3555,43 @@ void test_1mt_current_address_uses_previous_bank_at_64k_boundary() {
   TEST_ASSERT_EQUAL_HEX32(0x10001, snap.currentAddress);
 }
 
+void test_1mt_high_speed_current_address_uses_previous_bank_at_64k_boundary() {
+  FakeBus bus;
+  bus.mem[0x00000U] = 0xEEU;  // Wrong A16 in the slave byte would wrap here.
+  bus.mem[0x0FFFFU] = 0xA1U;
+  bus.mem[0x10000U] = 0xA2U;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_TRUE(dev.begin(makeVariantConfig(bus, DeviceVariant::MB85RC1MT)).ok());
+  TEST_ASSERT_TRUE(dev.enterHighSpeedMode().ok());
+  TEST_ASSERT_TRUE(dev.highSpeedModeEnabled());
+  const uint32_t normalReadsBefore = bus.readCalls;
+  const uint32_t specialCallsBefore = bus.specialCalls;
+
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0x0FFFFU, value).ok());
+  TEST_ASSERT_EQUAL_HEX8(0xA1U, value);
+  TEST_ASSERT_EQUAL_HEX8(0x50U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x0FFFFU, bus.lastMemoryAddress);
+  TEST_ASSERT_EQUAL_UINT32(2U, bus.lastTxLen);
+
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).ok());
+  TEST_ASSERT_EQUAL_HEX8(bus.mem[0x10000U], value);
+  TEST_ASSERT_EQUAL_HEX8(0x50U, bus.lastI2cAddress);
+  TEST_ASSERT_EQUAL_HEX32(0x10000U, bus.lastMemoryAddress);
+  TEST_ASSERT_EQUAL_UINT32(0U, bus.lastTxLen);
+  TEST_ASSERT_EQUAL_UINT32(1U, bus.lastRxLen);
+  TEST_ASSERT_EQUAL_UINT32(normalReadsBefore, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(specialCallsBefore + 2U, bus.specialCalls);
+  TEST_ASSERT_EQUAL_UINT32(2U, bus.hsWriteReadCalls);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(I2cSpecialOp::HIGH_SPEED_WRITE_READ),
+                          static_cast<uint8_t>(bus.lastSpecialOp));
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_TRUE(snap.currentAddressKnown);
+  TEST_ASSERT_EQUAL_HEX32(0x10001U, snap.currentAddress);
+}
+
 void test_04v_current_address_uses_previous_bank_and_wraps_at_end() {
   FakeBus bus;
   bus.mem[0x0100U] = 0xA4U;
@@ -4237,6 +4277,123 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 // ===========================================================================
 // Transport adapter tests
 // ===========================================================================
+
+void test_idf_transport_maps_error_codes_and_memory_write_commit() {
+  // esp_err_t values from ESP-IDF esp_err.h. The example binds this same
+  // mapper to the SDK constants; no SDK or compatibility facade is needed here.
+  constexpr idf_transport::ResultMapper mapper{0, 0x107, 0x102};
+  struct Case {
+    const char* name;
+    int32_t error;
+    TransportCode code;
+    WriteCommit submittedWriteCommit;
+    bool nackLike;
+  };
+  const Case cases[] = {
+      {"ESP_OK", 0, TransportCode::OK, WriteCommit::NOT_APPLICABLE, false},
+      {"ESP_FAIL", -1, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, true},
+      {"ESP_ERR_NO_MEM", 0x101, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
+      {"ESP_ERR_INVALID_ARG", 0x102, TransportCode::IO_ERROR, WriteCommit::NOT_COMMITTED, false},
+      {"ESP_ERR_INVALID_STATE", 0x103, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
+      {"ESP_ERR_INVALID_SIZE", 0x104, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
+      {"ESP_ERR_NOT_FOUND", 0x105, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, true},
+      {"ESP_ERR_NOT_SUPPORTED", 0x106, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
+      {"ESP_ERR_TIMEOUT", 0x107, TransportCode::TIMEOUT, WriteCommit::INDETERMINATE, false},
+      {"ESP_ERR_INVALID_RESPONSE", 0x108, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, true},
+      {"unknown error", 0x7FFF, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
+  };
+
+  for (const Case& entry : cases) {
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(entry.code),
+        static_cast<uint8_t>(mapper.mapI2cCode(entry.error)), entry.name);
+    for (bool memoryWrite : {false, true}) {
+      const WriteCommit evidence = memoryWrite ? WriteCommit::INDETERMINATE
+                                              : WriteCommit::NOT_APPLICABLE;
+      const WriteCommit expected = memoryWrite ? entry.submittedWriteCommit
+                                              : WriteCommit::NOT_APPLICABLE;
+      const TransportResult result = mapper.mapI2c(entry.error, 3U, 2U, evidence);
+      TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(entry.code),
+          static_cast<uint8_t>(result.code), entry.name);
+      TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(expected),
+          static_cast<uint8_t>(result.writeCommit), entry.name);
+      TEST_ASSERT_EQUAL_INT32_MESSAGE(entry.error, result.detail, entry.name);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(entry.error == 0 ? 3U : 0U,
+          result.completedTxBytes, entry.name);
+      TEST_ASSERT_EQUAL_UINT32_MESSAGE(entry.error == 0 ? 2U : 0U,
+          result.completedRxBytes, entry.name);
+      if (entry.error != 0) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(expected),
+            static_cast<uint8_t>(mapper.mapI2cFailureCommit(entry.error, evidence)),
+            entry.name);
+      }
+      if (memoryWrite && entry.nackLike) {
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+            static_cast<uint8_t>(result.writeCommit), entry.name);
+      }
+    }
+  }
+
+  // Failure to add a device happens before any memory transaction is submitted.
+  for (int32_t error : {0x101, 0x102, 0x103}) {
+    const TransportResult result =
+        mapper.mapI2c(error, 3U, 0U, WriteCommit::NOT_COMMITTED);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+                            static_cast<uint8_t>(result.writeCommit));
+  }
+}
+
+void test_idf_transport_dispatches_read_write_and_combined_transactions() {
+  uint8_t tx[2] = {0x12U, 0x34U};
+  uint8_t rx[3] = {};
+  int device = 0;
+  struct Call {
+    char kind;
+    int* dev;
+    const uint8_t* tx;
+    size_t txLen;
+    uint8_t* rx;
+    size_t rxLen;
+    int timeoutMs;
+  };
+  const Call cases[] = {
+      {'R', &device, nullptr, 0U, rx, sizeof(rx), 17},
+      {'W', &device, tx, sizeof(tx), nullptr, 0U, 29},
+      {'C', &device, tx, sizeof(tx), rx, sizeof(rx), 41},
+  };
+  for (const Call& expected : cases) {
+    Call actual{};
+    uint32_t calls = 0U;
+    auto transmit = [&](int* dev, const uint8_t* data, size_t len, int timeoutMs) {
+      ++calls;
+      actual = {'W', dev, data, len, nullptr, 0U, timeoutMs};
+      return -1;
+    };
+    auto receive = [&](int* dev, uint8_t* data, size_t len, int timeoutMs) {
+      ++calls;
+      actual = {'R', dev, nullptr, 0U, data, len, timeoutMs};
+      return 0x107;
+    };
+    auto combined = [&](int* dev, const uint8_t* txData, size_t txLen,
+                        uint8_t* rxData, size_t rxLen, int timeoutMs) {
+      ++calls;
+      actual = {'C', dev, txData, txLen, rxData, rxLen, timeoutMs};
+      return 0x108;
+    };
+    const int32_t result = idf_transport::writeRead(
+        expected.dev, expected.tx, expected.txLen, expected.rx, expected.rxLen,
+        expected.timeoutMs, transmit, receive, combined);
+    TEST_ASSERT_EQUAL_UINT32(1U, calls);
+    TEST_ASSERT_EQUAL_CHAR(expected.kind, actual.kind);
+    TEST_ASSERT_EQUAL_PTR(expected.dev, actual.dev);
+    TEST_ASSERT_EQUAL_PTR(expected.tx, actual.tx);
+    TEST_ASSERT_EQUAL_UINT32(expected.txLen, actual.txLen);
+    TEST_ASSERT_EQUAL_PTR(expected.rx, actual.rx);
+    TEST_ASSERT_EQUAL_UINT32(expected.rxLen, actual.rxLen);
+    TEST_ASSERT_EQUAL_INT(expected.timeoutMs, actual.timeoutMs);
+    TEST_ASSERT_EQUAL_INT32(expected.kind == 'W' ? -1 :
+                           (expected.kind == 'R' ? 0x107 : 0x108), result);
+  }
+}
 
 void test_example_transport_maps_wire_errors() {
   Wire._clearEndTransmissionResult();
@@ -5845,6 +6002,7 @@ int main() {
   RUN_TEST(test_64ta_current_address_respects_active_capacity);
   RUN_TEST(test_1mt_current_address_uses_dynamic_i2c_address_and_32bit_range);
   RUN_TEST(test_1mt_current_address_uses_previous_bank_at_64k_boundary);
+  RUN_TEST(test_1mt_high_speed_current_address_uses_previous_bank_at_64k_boundary);
   RUN_TEST(test_04v_current_address_uses_previous_bank_and_wraps_at_end);
   RUN_TEST(test_16v_current_address_uses_previous_bank_and_wraps_at_end);
   RUN_TEST(test_no_device_id_variant_probe_recover_and_id_access);
@@ -5888,6 +6046,8 @@ int main() {
   RUN_TEST(test_semantic_identity_mismatch_does_not_wrap_failure_counter);
 
   // Transport adapter
+  RUN_TEST(test_idf_transport_maps_error_codes_and_memory_write_commit);
+  RUN_TEST(test_idf_transport_dispatches_read_write_and_combined_transactions);
   RUN_TEST(test_example_transport_maps_wire_errors);
   RUN_TEST(test_example_transport_supports_read_only_transactions);
   RUN_TEST(test_example_wire_special_encodes_reserved_device_id_transaction);

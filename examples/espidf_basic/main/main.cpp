@@ -24,6 +24,7 @@
 #include <freertos/task.h>
 
 #include "MB85RC/MB85RC.h"
+#include "../../common/IdfI2cTransport.h"
 
 namespace {
 
@@ -57,54 +58,35 @@ int timeoutArg(uint32_t timeoutMs) {
   return timeoutMs > static_cast<uint32_t>(INT_MAX) ? INT_MAX : static_cast<int>(timeoutMs);
 }
 
-constexpr MB85RC::TransportCode mapI2cCode(esp_err_t err) {
-  return err == ESP_OK
-             ? MB85RC::TransportCode::OK
-             : (err == ESP_ERR_TIMEOUT ? MB85RC::TransportCode::TIMEOUT
-                                       : MB85RC::TransportCode::IO_ERROR);
-}
+constexpr idf_transport::ResultMapper I2C_RESULT_MAPPER{
+    ESP_OK, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_ARG};
 
-constexpr MB85RC::WriteCommit mapI2cFailureCommit(
-    esp_err_t err, MB85RC::WriteCommit failureCommit) {
-  return err == ESP_ERR_INVALID_ARG &&
-                 failureCommit != MB85RC::WriteCommit::NOT_APPLICABLE
-             ? MB85RC::WriteCommit::NOT_COMMITTED
-             : failureCommit;
-}
-
-static_assert(mapI2cCode(ESP_ERR_TIMEOUT) == MB85RC::TransportCode::TIMEOUT,
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_TIMEOUT) == MB85RC::TransportCode::TIMEOUT,
               "ESP-IDF timeout mapping changed");
-static_assert(mapI2cCode(ESP_FAIL) == MB85RC::TransportCode::IO_ERROR,
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_FAIL) == MB85RC::TransportCode::IO_ERROR,
               "ESP-IDF generic failure mapping changed");
-static_assert(mapI2cCode(ESP_ERR_INVALID_RESPONSE) ==
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_INVALID_RESPONSE) ==
                   MB85RC::TransportCode::IO_ERROR,
               "ESP-IDF NACK mapping changed");
-static_assert(mapI2cCode(ESP_ERR_NOT_FOUND) == MB85RC::TransportCode::IO_ERROR,
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_NOT_FOUND) == MB85RC::TransportCode::IO_ERROR,
               "ESP-IDF not-found mapping changed");
-static_assert(mapI2cFailureCommit(ESP_FAIL,
-                                 MB85RC::WriteCommit::INDETERMINATE) ==
+static_assert(I2C_RESULT_MAPPER.mapI2cFailureCommit(
+                  ESP_FAIL, MB85RC::WriteCommit::INDETERMINATE) ==
                   MB85RC::WriteCommit::INDETERMINATE,
               "Ambiguous write evidence must be preserved");
-static_assert(mapI2cFailureCommit(ESP_ERR_INVALID_ARG,
-                                 MB85RC::WriteCommit::INDETERMINATE) ==
+static_assert(I2C_RESULT_MAPPER.mapI2cFailureCommit(
+                  ESP_ERR_INVALID_ARG, MB85RC::WriteCommit::INDETERMINATE) ==
                   MB85RC::WriteCommit::NOT_COMMITTED,
               "Invalid memory-write arguments cannot commit");
-static_assert(mapI2cFailureCommit(ESP_ERR_INVALID_ARG,
-                                 MB85RC::WriteCommit::NOT_APPLICABLE) ==
+static_assert(I2C_RESULT_MAPPER.mapI2cFailureCommit(
+                  ESP_ERR_INVALID_ARG, MB85RC::WriteCommit::NOT_APPLICABLE) ==
                   MB85RC::WriteCommit::NOT_APPLICABLE,
               "Non-memory transfers have no write-commit result");
 
 MB85RC::TransportResult mapI2c(
     esp_err_t err, size_t txBytes, size_t rxBytes,
     MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_APPLICABLE) {
-  if (err == ESP_OK) {
-    return MB85RC::TransportResult::Ok(txBytes, rxBytes);
-  }
-  // ESP-IDF NACK results do not identify the rejected byte. Keep them
-  // conservative and preserve caller-supplied commit evidence unless invalid
-  // arguments prove that a memory write could not start.
-  return MB85RC::TransportResult::Error(
-      mapI2cCode(err), err, mapI2cFailureCommit(err, failureCommit));
+  return I2C_RESULT_MAPPER.mapI2c(err, txBytes, rxBytes, failureCommit);
 }
 
 const char* sleepStateName(MB85RC::SleepState state) {
@@ -386,13 +368,9 @@ MB85RC::TransportResult i2cWriteRead(uint8_t addr, const uint8_t* tx,
   i2c_master_dev_handle_t dev = nullptr;
   esp_err_t err = addDevice(*bus, addr, &dev);
   if (err == ESP_OK) {
-    if (txLen == 0U) {
-      err = i2c_master_receive(dev, rx, rxLen, timeoutArg(timeoutMs));
-    } else if (rxLen == 0U) {
-      err = i2c_master_transmit(dev, tx, txLen, timeoutArg(timeoutMs));
-    } else {
-      err = i2c_master_transmit_receive(dev, tx, txLen, rx, rxLen, timeoutArg(timeoutMs));
-    }
+    err = idf_transport::writeRead(
+        dev, tx, txLen, rx, rxLen, timeoutArg(timeoutMs),
+        i2c_master_transmit, i2c_master_receive, i2c_master_transmit_receive);
   }
   if (dev != nullptr) {
     (void)i2c_master_bus_rm_device(dev);

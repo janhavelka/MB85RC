@@ -29,6 +29,7 @@ REQUIRED_FILES = {
     "include/MB85RC/Version.h",
     "examples/01_basic_bringup_cli/main.cpp",
     "examples/espidf_basic/main/main.cpp",
+    "examples/common/IdfI2cTransport.h",
     "examples/common/TypedMemory.h",
     "docs/DEVICE_REFERENCE.md",
     "docs/IDF_PORT.md",

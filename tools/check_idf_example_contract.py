@@ -89,7 +89,7 @@ def fail(msg: str) -> None:
 def example_contract_files(root: pathlib.Path) -> list[pathlib.Path]:
     example_root = root / "examples" / "espidf_basic"
     skipped_dirs = {"build", "managed_components"}
-    files: list[pathlib.Path] = []
+    files: list[pathlib.Path] = [root / "examples" / "common" / "IdfI2cTransport.h"]
     for path in example_root.rglob("*"):
         if not path.is_file():
             continue
@@ -122,13 +122,8 @@ def main() -> int:
     for token in REQUIRED_NATIVE_TOKENS:
         if token not in text:
             fail(f"native ESP-IDF token missing: {token}")
-    tx_only = re.search(
-        r"else\s+if\s*\(\s*rxLen\s*==\s*0U\s*\)\s*\{\s*"
-        r"err\s*=\s*i2c_master_transmit\s*\(\s*dev\s*,\s*tx\s*,\s*txLen\s*,",
-        text,
-    )
-    if tx_only is None:
-        fail("native ESP-IDF write-read callback lacks a TX-only transaction path")
+    # Error/commit mapping and TX-only dispatch are covered by native tests of
+    # the shared adapter; avoid pinning either contract to C++ source shape.
     for token in REQUIRED_CONFIRMATION_TOKENS:
         if token not in text:
             fail(f"confirmation/handler token missing: {token}")

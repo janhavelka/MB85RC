@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The High-speed FakeBus current-address path now composes the address from the
+  slave byte, with regression coverage for `MB85RC1MT` crossing the 64 KiB bank.
+- ESP-IDF example error/commit mapping and RX-only, TX-only, and combined
+  dispatch now share framework-neutral helpers with native regression tests,
+  replacing the TX-only source-shape guard while retaining the framework ban.
 - Current-address reads on `MB85RC04V`, `MB85RC16V`, and `MB85RC1MT` encoded the
   slave byte from the next address instead of the last accessed one. Those parts
   compose the current address from the upper bits in the slave byte plus the low
