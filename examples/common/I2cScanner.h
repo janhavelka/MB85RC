@@ -11,17 +11,23 @@
 #include <Wire.h>
 
 #include "examples/common/Log.h"
+#include "I2cTransport.h"
 
 namespace i2c_scanner {
 
 /**
  * @brief Scan I2C bus and print found devices.
- * @param wire Reference to Wire object (must be initialized).
+ * @param context Adapter context owning the initialized Wire object.
  *
  * The scanner deliberately preserves the application-owned bus clock and
  * timeout configuration.
  */
-inline void scan(TwoWire& wire) {
+inline void scan(transport::WireContext& context) {
+  if (!context.ready || context.wire == nullptr) {
+    LOGE("I2C interface is not ready; run iface_reset first");
+    return;
+  }
+  TwoWire& wire = *context.wire;
   LOGI("Scanning I2C bus (owner-configured timeout)...");
   LOG_SERIAL.flush();
 
@@ -41,7 +47,11 @@ inline void scan(TwoWire& wire) {
       }
 
       wire.beginTransmission(addr);
-      uint8_t error = wire.endTransmission(true);
+      uint8_t error = transport::closeTransmission(context, addr);
+      if (!context.ready) {
+        LOGE("I2C interface failed during scan; run iface_reset first");
+        return;
+      }
 
       if (error == 0) {
         LOG_SERIAL.printf("%02X ", addr);

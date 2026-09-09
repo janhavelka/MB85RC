@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 2: both CLI scan entry points use the configured Wire context,
+  reject an unready interface, and stop safely if a scan invalidates it.
 - Audit item 1: Wire callbacks close failed repeated-start transactions and
   release the ESP32 mutex even if buffers were freed, then require interface
   reset. Native regressions cover the non-STOP error and all write entry points.

@@ -2043,7 +2043,7 @@ void processCommand(const String& cmdLine) {
   }
 
   if (cmd == "scan") {
-    i2c_scanner::scan(Wire);
+    i2c_scanner::scan(wireContext);
     return;
   }
 
@@ -2585,7 +2585,7 @@ void setup() {
   }
   LOGI("I2C initialized (SDA=%d, SCL=%d)", board::I2C_SDA, board::I2C_SCL);
 
-  i2c_scanner::scan(Wire);
+  i2c_scanner::scan(wireContext);
 
   MB85RC::Config cfg;
   cfg.i2cWrite = transport::wireWrite;
