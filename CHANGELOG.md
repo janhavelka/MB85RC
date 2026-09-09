@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 1: Wire callbacks close failed repeated-start transactions and
+  release the ESP32 mutex even if buffers were freed, then require interface
+  reset. Native regressions cover the non-STOP error and all write entry points.
 - The High-speed FakeBus current-address path now composes the address from the
   slave byte, with regression coverage for `MB85RC1MT` crossing the 64 KiB bank.
 - ESP-IDF example error/commit mapping and RX-only, TX-only, and combined

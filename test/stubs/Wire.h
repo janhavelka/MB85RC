@@ -24,6 +24,7 @@ public:
     (void)sda;
     (void)scl;
     (void)frequency;
+    _buffersFreed = !_beginResult;
     return _beginResult;
   }
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
@@ -39,6 +40,9 @@ public:
     _openTransaction = true;
   }
   size_t write(const uint8_t* data, size_t len) {
+    if (_buffersFreed) {
+      return 0U;
+    }
     size_t accepted = _writeReturnOverrideEnabled ? _writeReturnOverride : len;
     if (accepted > len) {
       accepted = len;
@@ -54,9 +58,12 @@ public:
   }
   uint8_t endTransmission(bool stop = true) {
     _lastStop = stop;
+    if (_buffersFreed) {
+      return 4U;
+    }
     if (!stop) {
       // Arduino-ESP32 defers the whole combined transaction to requestFrom().
-      return 0U;
+      return _nonStopEndTransmissionResult;
     }
     _openTransaction = false;
     return _endTransmissionResult;
@@ -64,6 +71,10 @@ public:
 
   size_t requestFrom(uint8_t addr, size_t len) {
     (void)addr;
+    _openTransaction = false;
+    if (_buffersFreed) {
+      return 0U;
+    }
     size_t returned = len > _bufferSize ? _bufferSize : len;
     if (_requestReturnOverrideEnabled && _requestReturnOverride < returned) {
       returned = _requestReturnOverride;
@@ -82,6 +93,10 @@ public:
   // Test helpers
   void _setEndTransmissionResult(uint8_t result) { _endTransmissionResult = result; }
   void _clearEndTransmissionResult() { _endTransmissionResult = 0; }
+  void _setNonStopEndTransmissionResult(uint8_t result) {
+    _nonStopEndTransmissionResult = result;
+  }
+  void _setBuffersFreed(bool freed = true) { _buffersFreed = freed; }
   void _setRxBuffer(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len && i < sizeof(_rxBuf); i++) {
       _rxBuf[i] = data[i];
@@ -117,6 +132,8 @@ private:
   uint32_t _timeoutMs = 50;
   bool _beginResult = true;
   uint8_t _endTransmissionResult = 0;
+  uint8_t _nonStopEndTransmissionResult = 0;
+  bool _buffersFreed = false;
   uint8_t _rxBuf[256] = {};
   size_t _rxLen = 0;
   size_t _rxPos = 0;

@@ -43,6 +43,22 @@ struct WireContext {
   bool ready = false;
 };
 
+inline uint8_t closeTransmission(WireContext& context, uint8_t addr) {
+  const uint8_t result = context.wire->endTransmission(true);
+#if defined(ARDUINO_ARCH_ESP32) || defined(MB85RC_TEST_WIRE_STUB)
+  if (result == 4U) {
+    // ESP32 returns early with a missing TX buffer, even when STOP was requested.
+    // requestFrom checks for missing buffers while holding the lock and releases
+    // it on that failure path. A zero-length request cannot replay memory data.
+    (void)context.wire->requestFrom(addr, static_cast<size_t>(0U));
+    context.ready = false;
+  }
+#else
+  (void)addr;
+#endif
+  return result;
+}
+
 inline bool interfaceReset(WireContext& context, int sda, int scl,
                            uint32_t freq, uint16_t timeoutMs) {
   context.ready = false;
@@ -168,7 +184,7 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
     // Close the transaction to release Wire's lock. Only a local-buffer error
     // or address NACK proves no requested data was accepted; other outcomes
     // leave a nonzero buffered prefix indeterminate.
-    const uint8_t cleanupResult = wire->endTransmission(true);
+    const uint8_t cleanupResult = closeTransmission(*context, addr);
     const size_t completed = (cleanupResult == 0U) ? written : 0U;
     const bool noDataAccepted =
         written == 0U || cleanupResult == 1U || cleanupResult == 2U;
@@ -179,7 +195,7 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
         completed, 0U);
   }
 
-  uint8_t result = wire->endTransmission(true);  // Send STOP
+  uint8_t result = closeTransmission(*context, addr);
   return mapWireResult(result, len, 0U, true);
 }
 
@@ -224,7 +240,7 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     if (written != txLen) {
       // The managed bound makes this abnormal. Closing the transaction may
       // physically send the buffered prefix, which is reported truthfully.
-      const uint8_t cleanupResult = wire->endTransmission(true);
+      const uint8_t cleanupResult = closeTransmission(*context, addr);
       const size_t completed = (cleanupResult == 0U) ? written : 0U;
       return MB85RC::TransportResult::Error(
           MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
@@ -232,8 +248,13 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     }
 
     const bool stopAfterWrite = rxLen == 0U;
-    uint8_t result = wire->endTransmission(stopAfterWrite);
+    uint8_t result = stopAfterWrite ? closeTransmission(*context, addr)
+                                   : wire->endTransmission(false);
     if (result != 0) {
+      if (!stopAfterWrite) {
+        (void)closeTransmission(*context, addr);
+        context->ready = false;
+      }
       return mapWireResult(result, 0U, 0U);
     }
     if (stopAfterWrite) {

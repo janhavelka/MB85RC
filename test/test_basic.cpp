@@ -4445,6 +4445,9 @@ void test_example_transport_maps_wire_errors() {
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
                           static_cast<uint8_t>(st.writeCommit));
+  TEST_ASSERT_FALSE(context.ready);
+  TEST_ASSERT_TRUE(transport::interfaceReset(context, 8, 9, 400000, 77));
+  Wire._clearEndTransmissionResult();
 
   Wire._setWriteReturnOverride(0U);
   st = transport::wireWrite(0x50, &byte, 1, 10, &context);
@@ -4484,6 +4487,50 @@ void test_example_transport_maps_wire_errors() {
 
   Wire._clearEndTransmissionResult();
   Wire._clearWriteReturnOverride();
+}
+
+void test_example_transport_closes_failed_nonstop_transaction() {
+  TwoWire wire;
+  transport::WireContext context;
+  TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 50));
+  wire._setNonStopEndTransmissionResult(4U);
+  const uint8_t tx[2] = {0U, 1U};
+  uint8_t rx = 0U;
+  const TransportResult result =
+      transport::wireWriteRead(0x50U, tx, sizeof(tx), &rx, 1U, 50U, &context);
+  TEST_ASSERT_FALSE(result.ok());
+  TEST_ASSERT_FALSE(wire._isTransactionOpen());
+  TEST_ASSERT_TRUE(wire._lastEndTransmissionSentStop());
+  TEST_ASSERT_FALSE(context.ready);
+}
+
+void test_example_transport_releases_lock_when_buffers_are_freed() {
+  for (int operation : {0, 1, 2}) {
+    TwoWire wire;
+    transport::WireContext context;
+    TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 50));
+    wire._setBuffersFreed();
+    const uint8_t tx[2] = {0U, 1U};
+    uint8_t rx[cmd::DEVICE_ID_LEN] = {};
+    TransportResult result;
+    if (operation == 0) {
+      result = transport::wireWrite(0x50U, tx, sizeof(tx), 50U, &context);
+    } else if (operation == 1) {
+      result = transport::wireWriteRead(0x50U, tx, sizeof(tx), rx, 1U, 50U, &context);
+    } else {
+      I2cSpecialTransfer transfer;
+      transfer.txData = tx;
+      transfer.txLen = 1U;
+      transfer.rxData = rx;
+      transfer.rxLen = sizeof(rx);
+      result = transport::wireSpecial(I2cSpecialOp::READ_DEVICE_ID, transfer, 50U, &context);
+    }
+    TEST_ASSERT_FALSE(result.ok());
+    TEST_ASSERT_FALSE(wire._isTransactionOpen());
+    TEST_ASSERT_FALSE(context.ready);
+    TEST_ASSERT_TRUE(transport::interfaceReset(context, 8, 9, 400000, 50));
+    TEST_ASSERT_TRUE(context.ready);
+  }
 }
 
 void test_example_transport_supports_read_only_transactions() {
@@ -6049,6 +6096,8 @@ int main() {
   RUN_TEST(test_idf_transport_maps_error_codes_and_memory_write_commit);
   RUN_TEST(test_idf_transport_dispatches_read_write_and_combined_transactions);
   RUN_TEST(test_example_transport_maps_wire_errors);
+  RUN_TEST(test_example_transport_closes_failed_nonstop_transaction);
+  RUN_TEST(test_example_transport_releases_lock_when_buffers_are_freed);
   RUN_TEST(test_example_transport_supports_read_only_transactions);
   RUN_TEST(test_example_wire_special_encodes_reserved_device_id_transaction);
 
