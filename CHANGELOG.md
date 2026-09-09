@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 3: a successful CLI interface reset now rebinds the driver and
+  repeats AUTO identification, allowing recovery after failed initialization.
+  Reset also refuses to enter the legacy 3.2.0 Wire core if a failed close may
+  have left its mutex held; that exceptional legacy failure needs a board restart.
 - Audit item 2: both CLI scan entry points use the configured Wire context,
   reject an unready interface, and stop safely if a scan invalidates it.
 - Audit item 1: Wire callbacks close failed repeated-start transactions and

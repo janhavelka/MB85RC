@@ -88,7 +88,7 @@ public:
   int available() { return _rxPos < _rxLen ? 1 : 0; }
   int read() { return _rxPos < _rxLen ? _rxBuf[_rxPos++] : -1; }
 
-  void end() {}
+  void end() { ++_endCalls; }
 
   // Test helpers
   void _setEndTransmissionResult(uint8_t result) { _endTransmissionResult = result; }
@@ -125,6 +125,7 @@ public:
   bool _lastEndTransmissionSentStop() const { return _lastStop; }
 
   uint8_t _addr = 0;
+  uint32_t _endCalls = 0U;
   uint8_t _txBuf[256] = {};
   size_t _txLen = 0;
 

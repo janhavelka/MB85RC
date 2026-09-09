@@ -13,6 +13,9 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_arduino_version.h>
+#endif
 
 #include "MB85RC/Config.h"
 
@@ -41,16 +44,28 @@ static constexpr size_t MAX_RX_BYTES =
 struct WireContext {
   TwoWire* wire = nullptr;
   bool ready = false;
+  bool resetSafe = true;  ///< False if the legacy core may still own its mutex.
 };
+
+#if defined(ARDUINO_ARCH_ESP32)
+static constexpr bool WIRE_RELEASES_MISSING_BUFFERS =
+    ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 3, 11);
+#else
+static constexpr bool WIRE_RELEASES_MISSING_BUFFERS = true;
+#endif
 
 inline uint8_t closeTransmission(WireContext& context, uint8_t addr) {
   const uint8_t result = context.wire->endTransmission(true);
 #if defined(ARDUINO_ARCH_ESP32) || defined(MB85RC_TEST_WIRE_STUB)
   if (result == 4U) {
-    // ESP32 returns early with a missing TX buffer, even when STOP was requested.
-    // requestFrom checks for missing buffers while holding the lock and releases
-    // it on that failure path. A zero-length request cannot replay memory data.
-    (void)context.wire->requestFrom(addr, static_cast<size_t>(0U));
+    // The current ESP32 core releases its mutex from requestFrom's missing-buffer
+    // path. The legacy 3.2.0 core does not; never enter end()/begin() with a
+    // possibly held legacy mutex. That exceptional case needs a board restart.
+    if (WIRE_RELEASES_MISSING_BUFFERS) {
+      (void)context.wire->requestFrom(addr, static_cast<size_t>(0U));
+    } else {
+      context.resetSafe = false;
+    }
     context.ready = false;
   }
 #else
@@ -62,7 +77,7 @@ inline uint8_t closeTransmission(WireContext& context, uint8_t addr) {
 inline bool interfaceReset(WireContext& context, int sda, int scl,
                            uint32_t freq, uint16_t timeoutMs) {
   context.ready = false;
-  if (context.wire == nullptr) {
+  if (context.wire == nullptr || !context.resetSafe) {
     return false;
   }
   TwoWire& wire = *context.wire;

@@ -4533,6 +4533,17 @@ void test_example_transport_releases_lock_when_buffers_are_freed() {
   }
 }
 
+void test_example_transport_refuses_reset_with_a_possibly_held_legacy_mutex() {
+  TwoWire wire;
+  transport::WireContext context;
+  TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 50));
+  context.resetSafe = false;
+  const uint32_t endCalls = wire._endCalls;
+  TEST_ASSERT_FALSE(transport::interfaceReset(context, 8, 9, 400000, 50));
+  TEST_ASSERT_EQUAL_UINT32(endCalls, wire._endCalls);
+  TEST_ASSERT_FALSE(context.ready);
+}
+
 void test_example_transport_supports_read_only_transactions() {
   Wire._clearEndTransmissionResult();
   Wire._clearRequestReturnOverride();
@@ -6098,6 +6109,7 @@ int main() {
   RUN_TEST(test_example_transport_maps_wire_errors);
   RUN_TEST(test_example_transport_closes_failed_nonstop_transaction);
   RUN_TEST(test_example_transport_releases_lock_when_buffers_are_freed);
+  RUN_TEST(test_example_transport_refuses_reset_with_a_possibly_held_legacy_mutex);
   RUN_TEST(test_example_transport_supports_read_only_transactions);
   RUN_TEST(test_example_wire_special_encodes_reserved_device_id_transaction);
 

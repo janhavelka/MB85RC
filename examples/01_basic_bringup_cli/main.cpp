@@ -2025,6 +2025,44 @@ void printVersionInfo() {
 // Command Processing
 // ============================================================================
 
+void bindDriver() {
+  if (!wireContext.ready || wireContext.wire == nullptr) {
+    device.end();
+    LOGE("I2C interface is not ready; run iface_reset first");
+    return;
+  }
+  MB85RC::Config cfg;
+  cfg.i2cWrite = transport::wireWrite;
+  cfg.i2cWriteRead = transport::wireWriteRead;
+  cfg.i2cSpecial = transport::wireSpecial;
+  cfg.i2cUser = &wireContext;
+  cfg.i2cAddress = 0x50;
+  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
+  // The adapter owns/configures the Wire buffer and publishes the matching
+  // total transaction limits. The driver subtracts active address overhead.
+  cfg.maxTxBytes = transport::MAX_TX_BYTES;
+  cfg.maxRxBytes = transport::MAX_RX_BYTES;
+  cfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
+  cfg.nowMs = exampleNowMs;
+  cfg.offlineThreshold = 5;
+
+  MB85RC::Status st = device.bind(cfg);
+  if (!st.ok()) {
+    LOGE("Failed to bind device configuration");
+    printStatus(st);
+    return;
+  }
+
+  MB85RC::DeviceId identity;
+  st = device.readDeviceId(identity);
+  if (st.ok()) {
+    LOGI("Device binding and identity check succeeded");
+  } else {
+    LOGW("Device identity unavailable; passive binding retained for later owner attempts");
+    printStatus(st);
+  }
+}
+
 void processCommand(const String& cmdLine) {
   String cmd = cmdLine;
   cmd.trim();
@@ -2461,7 +2499,8 @@ void processCommand(const String& cmdLine) {
       return;
     }
     LOGI("Interface reset sequence sent (9 SCL pulses + STOP)");
-    LOGI("Current-address tracking may be stale until the next addressed read/write.");
+    bindDriver();
+    LOGI("Current-address tracking cleared; identity check repeated.");
     return;
   }
 
@@ -2587,36 +2626,7 @@ void setup() {
 
   i2c_scanner::scan(wireContext);
 
-  MB85RC::Config cfg;
-  cfg.i2cWrite = transport::wireWrite;
-  cfg.i2cWriteRead = transport::wireWriteRead;
-  cfg.i2cSpecial = transport::wireSpecial;
-  cfg.i2cUser = &wireContext;
-  cfg.i2cAddress = 0x50;
-  cfg.i2cTimeoutMs = board::I2C_TIMEOUT_MS;
-  // The adapter owns/configures the Wire buffer and publishes the matching
-  // total transaction limits. The driver subtracts active address overhead.
-  cfg.maxTxBytes = transport::MAX_TX_BYTES;
-  cfg.maxRxBytes = transport::MAX_RX_BYTES;
-  cfg.expectedVariant = MB85RC::DeviceVariant::AUTO;
-  cfg.nowMs = exampleNowMs;
-  cfg.offlineThreshold = 5;
-
-  MB85RC::Status st = device.bind(cfg);
-  if (!st.ok()) {
-    LOGE("Failed to bind device configuration");
-    printStatus(st);
-    return;
-  }
-
-  MB85RC::DeviceId identity;
-  st = device.readDeviceId(identity);
-  if (st.ok()) {
-    LOGI("Device binding and identity check succeeded");
-  } else {
-    LOGW("Device identity unavailable; passive binding retained for later owner attempts");
-    printStatus(st);
-  }
+  bindDriver();
   printDriverHealth();
   printHelp();
   cli::printPrompt();
