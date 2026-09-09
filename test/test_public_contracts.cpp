@@ -39,6 +39,11 @@ static_assert(std::is_trivially_copyable<::MB85RC::TransferResult>::value,
               "Retained transfer results must remain fixed-memory values");
 static_assert(sizeof(::MB85RC::TransportCode) == sizeof(uint8_t),
               "Transport codes are part of a fixed-width adapter contract");
+static_assert(sizeof(::MB85RC::Err) == sizeof(uint8_t), "Status codes remain fixed-width");
+static_assert(static_cast<uint8_t>(::MB85RC::TransportCode::IO_ERROR) == 5U,
+              "Existing transport values must not change");
+static_assert(static_cast<uint8_t>(::MB85RC::TransportCode::NACK_UNSPECIFIED) == 6U,
+              "New transport values are append-only");
 static_assert(sizeof(::MB85RC::WriteCommit) == sizeof(uint8_t),
               "Write disposition must remain fixed-width");
 static_assert(sizeof(::MB85RC::TransferKind) == sizeof(uint8_t),

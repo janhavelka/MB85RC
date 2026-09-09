@@ -37,6 +37,7 @@ static_assert(static_cast<uint8_t>(Err::VERIFY_MISMATCH) == 16);
 static_assert(static_cast<uint8_t>(Err::UNSUPPORTED) == 17);
 static_assert(static_cast<uint8_t>(Err::NO_RESULT) == 18);
 static_assert(static_cast<uint8_t>(Err::CANCELLED) == 19);
+static_assert(static_cast<uint8_t>(Err::I2C_NACK) == 20);
 static_assert(static_cast<uint8_t>(DriverState::UNINIT) == 0);
 static_assert(static_cast<uint8_t>(DriverState::READY) == 1);
 static_assert(static_cast<uint8_t>(DriverState::DEGRADED) == 2);
@@ -210,6 +211,7 @@ TransportResult transportFailure(const Status& status, WriteCommit commit) {
   switch (status.code) {
     case Err::I2C_NACK_ADDR: code = TransportCode::NACK_ADDRESS; break;
     case Err::I2C_NACK_DATA: code = TransportCode::NACK_DATA; break;
+    case Err::I2C_NACK: code = TransportCode::NACK_UNSPECIFIED; break;
     case Err::I2C_TIMEOUT:
     case Err::TIMEOUT: code = TransportCode::TIMEOUT; break;
     case Err::I2C_BUS: code = TransportCode::BUS_ERROR; break;
@@ -4278,10 +4280,51 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 // Transport adapter tests
 // ===========================================================================
 
+void test_unspecified_nack_preserves_health_and_conservative_write_evidence() {
+  struct Case {
+    WriteCommit supplied;
+    size_t completed;
+    WriteCommit expected;
+  };
+  const Case cases[] = {
+      {WriteCommit::NOT_COMMITTED, 0U, WriteCommit::NOT_COMMITTED},
+      {WriteCommit::NOT_COMMITTED, 3U, WriteCommit::INDETERMINATE},
+      {WriteCommit::INDETERMINATE, 0U, WriteCommit::INDETERMINATE},
+      {WriteCommit::ACCEPTED, 3U, WriteCommit::INDETERMINATE},
+  };
+  for (const Case& entry : cases) {
+    FakeBus bus;
+    MB85RC::MB85RC dev;
+    TEST_ASSERT_TRUE(dev.bind(makeVariantConfig(bus, DeviceVariant::MB85RC256V)).ok());
+    bus.customReadResultOnCall = 1U;
+    bus.customReadResult = TransportResult::Error(
+        TransportCode::NACK_UNSPECIFIED, 0x108, WriteCommit::NOT_APPLICABLE);
+    uint8_t byte = 0xA5U;
+    Status status = dev.readOnce(0U, &byte, 1U);
+    TEST_ASSERT_TRUE(status.is(Err::I2C_NACK));
+    TEST_ASSERT_EQUAL_INT32(0x108, status.detail);
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.readCalls);
+    TEST_ASSERT_EQUAL_UINT32(1U, dev.totalFailures());
+
+    bus.customWriteResultOnCall = 1U;
+    bus.customWriteResult = TransportResult::Error(
+        TransportCode::NACK_UNSPECIFIED, 0x105, entry.supplied, entry.completed, 0U);
+    WriteCommit commit = WriteCommit::NOT_APPLICABLE;
+    status = dev.writeOnce(0U, &byte, 1U, &commit);
+    TEST_ASSERT_TRUE(status.is(Err::I2C_NACK));
+    TEST_ASSERT_EQUAL_INT32(0x105, status.detail);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(entry.expected), static_cast<uint8_t>(commit));
+    TEST_ASSERT_EQUAL_UINT32(1U, bus.writeCalls);
+    TEST_ASSERT_EQUAL_UINT32(2U, dev.totalFailures());
+    TEST_ASSERT_EQUAL_UINT8(2U, dev.consecutiveFailures());
+    TEST_ASSERT_TRUE(dev.state() == DriverState::DEGRADED);
+  }
+}
+
 void test_idf_transport_maps_error_codes_and_memory_write_commit() {
   // esp_err_t values from ESP-IDF esp_err.h. The example binds this same
   // mapper to the SDK constants; no SDK or compatibility facade is needed here.
-  constexpr idf_transport::ResultMapper mapper{0, 0x107, 0x102};
+  constexpr idf_transport::ResultMapper mapper{0, 0x107, 0x102, 0x108, 0x105};
   struct Case {
     const char* name;
     int32_t error;
@@ -4296,10 +4339,10 @@ void test_idf_transport_maps_error_codes_and_memory_write_commit() {
       {"ESP_ERR_INVALID_ARG", 0x102, TransportCode::IO_ERROR, WriteCommit::NOT_COMMITTED, false},
       {"ESP_ERR_INVALID_STATE", 0x103, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
       {"ESP_ERR_INVALID_SIZE", 0x104, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
-      {"ESP_ERR_NOT_FOUND", 0x105, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, true},
+      {"ESP_ERR_NOT_FOUND", 0x105, TransportCode::NACK_UNSPECIFIED, WriteCommit::INDETERMINATE, true},
       {"ESP_ERR_NOT_SUPPORTED", 0x106, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
       {"ESP_ERR_TIMEOUT", 0x107, TransportCode::TIMEOUT, WriteCommit::INDETERMINATE, false},
-      {"ESP_ERR_INVALID_RESPONSE", 0x108, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, true},
+      {"ESP_ERR_INVALID_RESPONSE", 0x108, TransportCode::NACK_UNSPECIFIED, WriteCommit::INDETERMINATE, true},
       {"unknown error", 0x7FFF, TransportCode::IO_ERROR, WriteCommit::INDETERMINATE, false},
   };
 
@@ -4420,9 +4463,9 @@ void test_example_transport_maps_wire_errors() {
 
   Wire._setEndTransmissionResult(2);
   st = transport::wireWrite(0x50, &byte, 1, 123, &context);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_ADDRESS),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_UNSPECIFIED),
                           static_cast<uint8_t>(st.code));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
                           static_cast<uint8_t>(st.writeCommit));
 
   Wire._setEndTransmissionResult(3);
@@ -4463,7 +4506,7 @@ void test_example_transport_maps_wire_errors() {
   Wire._setWriteReturnOverride(2U);
   Wire._setEndTransmissionResult(2U);
   st = transport::wireWrite(0x50, partial, sizeof(partial), 10, &context);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::NOT_COMMITTED),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(WriteCommit::INDETERMINATE),
                           static_cast<uint8_t>(st.writeCommit));
   TEST_ASSERT_EQUAL_UINT32(0U, static_cast<uint32_t>(st.completedTxBytes));
   Wire._clearEndTransmissionResult();
@@ -4604,7 +4647,7 @@ void test_example_transport_supports_read_only_transactions() {
   Wire._setEndTransmissionResult(2U);
   st = transport::wireWriteRead(0x50, tx, sizeof(tx), nullptr, 0U, 50,
                                 &context);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_ADDRESS),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::NACK_UNSPECIFIED),
                           static_cast<uint8_t>(st.code));
   TEST_ASSERT_TRUE(Wire._lastEndTransmissionSentStop());
   TEST_ASSERT_FALSE(Wire._isTransactionOpen());
@@ -6104,6 +6147,7 @@ int main() {
   RUN_TEST(test_semantic_identity_mismatch_does_not_wrap_failure_counter);
 
   // Transport adapter
+  RUN_TEST(test_unspecified_nack_preserves_health_and_conservative_write_evidence);
   RUN_TEST(test_idf_transport_maps_error_codes_and_memory_write_commit);
   RUN_TEST(test_idf_transport_dispatches_read_write_and_combined_transactions);
   RUN_TEST(test_example_transport_maps_wire_errors);

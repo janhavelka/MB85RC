@@ -138,9 +138,7 @@ inline MB85RC::TransportResult mapWireResult(uint8_t result, size_t txBytes,
                                : MB85RC::WriteCommit::NOT_APPLICABLE);
     case 2:
       return MB85RC::TransportResult::Error(
-          MB85RC::TransportCode::NACK_ADDRESS, result,
-          memoryWriteMayCommit ? MB85RC::WriteCommit::NOT_COMMITTED
-                               : MB85RC::WriteCommit::NOT_APPLICABLE);
+          MB85RC::TransportCode::NACK_UNSPECIFIED, result, uncertainCommit);
     case 3:
       return MB85RC::TransportResult::Error(MB85RC::TransportCode::NACK_DATA,
                                              result, uncertainCommit);
@@ -196,13 +194,12 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
   size_t written = wire->write(data, len);
   if (written != len) {
     // The managed buffer bound makes this unreachable during normal operation.
-    // Close the transaction to release Wire's lock. Only a local-buffer error
-    // or address NACK proves no requested data was accepted; other outcomes
-    // leave a nonzero buffered prefix indeterminate.
+    // Close the transaction to release Wire's lock. ESP32 result 2 can represent
+    // a NACK on any byte, so a nonzero buffered prefix remains indeterminate.
     const uint8_t cleanupResult = closeTransmission(*context, addr);
     const size_t completed = (cleanupResult == 0U) ? written : 0U;
     const bool noDataAccepted =
-        written == 0U || cleanupResult == 1U || cleanupResult == 2U;
+        written == 0U || cleanupResult == 1U;
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(written),
         noDataAccepted ? MB85RC::WriteCommit::NOT_COMMITTED
@@ -279,6 +276,8 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
 
   size_t read = wire->requestFrom(addr, static_cast<uint8_t>(rxLen));
   if (read != rxLen) {
+    // Wire discards the backend error: NACK, timeout, and other failures can
+    // all yield a short read. A byte count alone cannot identify a NACK.
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, static_cast<int32_t>(read),
         MB85RC::WriteCommit::NOT_APPLICABLE, 0U, read);

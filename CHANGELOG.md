@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 4: added append-only, source-compatible `TransportCode::NACK_UNSPECIFIED`
+  and `Err::I2C_NACK` values. IDF NACKs and ESP32 Wire result 2 now preserve the
+  unknown byte location and uncertain memory-write effect, including short
+  buffered writes. Wire short reads remain generic errors because the backend
+  does not expose whether their cause was a NACK, timeout, or another failure.
 - Audit item 3: a successful CLI interface reset now rebinds the driver and
   repeats AUTO identification, allowing recovery after failed initialization.
   Reset also refuses to enter the legacy 3.2.0 Wire core if a failed close may

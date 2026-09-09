@@ -29,7 +29,8 @@ enum class Err : uint8_t {
   VERIFY_MISMATCH = 16,      ///< Readback verification did not match expected data
   UNSUPPORTED = 17,          ///< Operation is not supported by the active variant/transport
   NO_RESULT = 18,            ///< No retained terminal staged result is available
-  CANCELLED = 19             ///< Operation was explicitly cancelled by its owner
+  CANCELLED = 19,            ///< Operation was explicitly cancelled by its owner
+  I2C_NACK = 20             ///< I2C NACK with no reliable address/data-byte distinction
 };
 
 /// @brief Machine-readable Status::detail values used with Err::BUSY.

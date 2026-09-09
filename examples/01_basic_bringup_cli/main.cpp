@@ -99,6 +99,7 @@ const char* errToStr(MB85RC::Err err) {
     case Err::UNSUPPORTED:          return "UNSUPPORTED";
     case Err::NO_RESULT:            return "NO_RESULT";
     case Err::CANCELLED:            return "CANCELLED";
+    case Err::I2C_NACK:             return "I2C_NACK";
     default:                        return "UNKNOWN";
   }
 }

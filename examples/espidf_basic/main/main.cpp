@@ -59,17 +59,19 @@ int timeoutArg(uint32_t timeoutMs) {
 }
 
 constexpr idf_transport::ResultMapper I2C_RESULT_MAPPER{
-    ESP_OK, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_ARG};
+    ESP_OK, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_ARG,
+    ESP_ERR_INVALID_RESPONSE, ESP_ERR_NOT_FOUND};
 
 static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_TIMEOUT) == MB85RC::TransportCode::TIMEOUT,
               "ESP-IDF timeout mapping changed");
 static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_FAIL) == MB85RC::TransportCode::IO_ERROR,
               "ESP-IDF generic failure mapping changed");
 static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_INVALID_RESPONSE) ==
-                  MB85RC::TransportCode::IO_ERROR,
-              "ESP-IDF NACK mapping changed");
-static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_NOT_FOUND) == MB85RC::TransportCode::IO_ERROR,
-              "ESP-IDF not-found mapping changed");
+                  MB85RC::TransportCode::NACK_UNSPECIFIED,
+              "ESP-IDF unspecified NACK mapping changed");
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_NOT_FOUND) ==
+                  MB85RC::TransportCode::NACK_UNSPECIFIED,
+              "ESP-IDF not-found NACK mapping changed");
 static_assert(I2C_RESULT_MAPPER.mapI2cFailureCommit(
                   ESP_FAIL, MB85RC::WriteCommit::INDETERMINATE) ==
                   MB85RC::WriteCommit::INDETERMINATE,
@@ -460,13 +462,41 @@ void resetBusPins() {
   puts(initBus() ? "iface_reset: OK" : "iface_reset: FAIL");
 }
 
+const char* errToStr(MB85RC::Err err) {
+  using namespace MB85RC;
+  switch (err) {
+    case Err::OK:                   return "OK";
+    case Err::NOT_INITIALIZED:      return "NOT_INITIALIZED";
+    case Err::INVALID_CONFIG:       return "INVALID_CONFIG";
+    case Err::I2C_ERROR:            return "I2C_ERROR";
+    case Err::TIMEOUT:              return "TIMEOUT";
+    case Err::INVALID_PARAM:        return "INVALID_PARAM";
+    case Err::DEVICE_NOT_FOUND:     return "DEVICE_NOT_FOUND";
+    case Err::DEVICE_ID_MISMATCH:   return "DEVICE_ID_MISMATCH";
+    case Err::ADDRESS_OUT_OF_RANGE: return "ADDRESS_OUT_OF_RANGE";
+    case Err::WRITE_PROTECTED:      return "WRITE_PROTECTED";
+    case Err::BUSY:                 return "BUSY";
+    case Err::IN_PROGRESS:          return "IN_PROGRESS";
+    case Err::I2C_NACK_ADDR:        return "I2C_NACK_ADDR";
+    case Err::I2C_NACK_DATA:        return "I2C_NACK_DATA";
+    case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
+    case Err::I2C_BUS:              return "I2C_BUS";
+    case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
+    case Err::UNSUPPORTED:          return "UNSUPPORTED";
+    case Err::NO_RESULT:            return "NO_RESULT";
+    case Err::CANCELLED:            return "CANCELLED";
+    case Err::I2C_NACK:             return "I2C_NACK";
+    default:                        return "UNKNOWN";
+  }
+}
+
 void printStatus(const char* op, MB85RC::Status st) {
   const char* result = st.ok() ? "OK" :
       (st.code == MB85RC::Err::UNSUPPORTED ? "UNSUPPORTED" : "FAIL");
   printf("%s: %s (code=%u detail=%ld)\n", op, result,
          static_cast<unsigned>(st.code), static_cast<long>(st.detail));
   if (!st.ok() && st.msg != nullptr) {
-    printf("  %s\n", st.msg);
+    printf("  %s: %s\n", errToStr(st.code), st.msg);
   }
 }
 

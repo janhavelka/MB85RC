@@ -163,6 +163,10 @@ configuration. A rejected replacement leaves the previous binding active.
 
 The example transport adapter maps Arduino `Wire` outcomes to terminal
 `TransportResult` values and keeps bus timeout ownership outside the library.
+`TransportCode::NACK_UNSPECIFIED` becomes `Err::I2C_NACK` when the backend
+cannot identify which byte was rejected. ESP32 Wire result 2 does not prove
+that no memory data was accepted; its write effect remains `INDETERMINATE`.
+Wire short reads remain `IO_ERROR` because their cause is not exposed.
 Applications that need meaningful health timestamps or Sleep wake gating should
 inject `Config::nowMs`; otherwise timestamps remain `0` and wake gating
 advances only when the caller supplies time to `tick()`.

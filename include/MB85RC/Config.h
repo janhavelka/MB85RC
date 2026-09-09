@@ -20,7 +20,8 @@ enum class TransportCode : uint8_t {
   NACK_DATA,       ///< A transmitted data byte did not acknowledge.
   TIMEOUT,         ///< The transport's per-transaction deadline expired.
   BUS_ERROR,       ///< Arbitration, controller, or physical bus failure.
-  IO_ERROR         ///< Other terminal transport failure.
+  IO_ERROR,        ///< Other terminal transport failure.
+  NACK_UNSPECIFIED ///< A NACK occurred, but the transport cannot identify the byte.
 };
 
 /// @brief Knowledge of a failed write transaction's physical effect.

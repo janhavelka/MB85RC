@@ -16,12 +16,16 @@ struct ResultMapper {
   int32_t ok;
   int32_t timeout;
   int32_t invalidArgument;
+  int32_t invalidResponse;
+  int32_t notFound;
 
   constexpr MB85RC::TransportCode mapI2cCode(int32_t err) const {
     return err == ok
                ? MB85RC::TransportCode::OK
                : (err == timeout ? MB85RC::TransportCode::TIMEOUT
-                                 : MB85RC::TransportCode::IO_ERROR);
+                  : (err == invalidResponse || err == notFound
+                         ? MB85RC::TransportCode::NACK_UNSPECIFIED
+                         : MB85RC::TransportCode::IO_ERROR));
   }
 
   constexpr MB85RC::WriteCommit mapI2cFailureCommit(

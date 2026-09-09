@@ -1453,6 +1453,7 @@ Status MB85RC::_mapTransportResult(const TransportResult& result,
   const bool knownFailureCode =
       result.code == TransportCode::NACK_ADDRESS ||
       result.code == TransportCode::NACK_DATA ||
+      result.code == TransportCode::NACK_UNSPECIFIED ||
       result.code == TransportCode::TIMEOUT ||
       result.code == TransportCode::BUS_ERROR ||
       result.code == TransportCode::IO_ERROR;
@@ -1499,6 +1500,9 @@ Status MB85RC::_mapTransportResult(const TransportResult& result,
                            result.detail);
     case TransportCode::NACK_DATA:
       return Status::Error(Err::I2C_NACK_DATA, "I2C data not acknowledged",
+                           result.detail);
+    case TransportCode::NACK_UNSPECIFIED:
+      return Status::Error(Err::I2C_NACK, "I2C byte not acknowledged",
                            result.detail);
     case TransportCode::TIMEOUT:
       return Status::Error(Err::I2C_TIMEOUT, "I2C transport timeout",
