@@ -4,6 +4,8 @@
 #include <type_traits>
 
 #include "MB85RC/MB85RC.h"
+#include "common/DiagnosticCore.h"
+#include "common/IdfI2cTransport.h"
 
 static_assert(!std::is_copy_constructible<::MB85RC::MB85RC>::value,
               "A driver instance must have one explicit owner");

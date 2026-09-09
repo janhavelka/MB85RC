@@ -30,7 +30,11 @@ resources:
 - command input: fixed C buffers and `fgets()`
 - runtime framework telemetry: `esp_get_idf_version()` in `version` / `ver`
 
-The Arduino and ESP-IDF examples share a command contract. The native example's
+The Arduino and ESP-IDF examples share a command contract and the pure helpers
+in `examples/common/DiagnosticCore.h`: CRC updates, range checks, verified
+restoration, staged-result handling, bounded polling with an injected clock,
+and enum names. Each main retains its own printing and diagnostic demo suites.
+The native example's
 SDK-independent result mapping and transaction dispatch live in
 `examples/common/IdfI2cTransport.h`, shared with native tests. The example binds
 the SDK's error constants and transaction functions to those helpers.

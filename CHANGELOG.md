@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 7 (stage 1): both CLIs use the framework-neutral `DiagnosticCore.h`
+  for CRC, range checks, verified restoration, staged polling/results, and enum
+  names. Printing and demo suites stay local. Native tests cover the shared
+  behavior, and the IDF framework ban also scans the new header.
 - Audit item 6: retired the contradictory historical audit snapshot, retaining
   only additional datasheet details and remaining documentation, diagnostic,
   and hardware-qualification work.

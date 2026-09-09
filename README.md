@@ -485,6 +485,7 @@ ESP-IDF example transport.
 | `Log.h` | Serial logging helpers |
 | `I2cTransport.h` | Wire-backed transport adapter and owner-level interface reset |
 | `IdfI2cTransport.h` | Framework-neutral IDF result mapping and transaction dispatch, shared with native tests |
+| `DiagnosticCore.h` | Shared CRC, range, verified-restore, staged-transfer, and enum-name helpers |
 | `I2cScanner.h` | Bus scan helper that preserves owner clock/timeout settings |
 | `CliStyle.h` | CLI prompt, help, and color formatting helpers |
 | `CliShell.h` | Simple serial shell helper |

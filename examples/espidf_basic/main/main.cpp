@@ -24,6 +24,7 @@
 #include <freertos/task.h>
 
 #include "MB85RC/MB85RC.h"
+#include "../../common/DiagnosticCore.h"
 #include "../../common/IdfI2cTransport.h"
 
 namespace {
@@ -97,19 +98,6 @@ MB85RC::TransportResult mapI2c(
     esp_err_t err, size_t txBytes, size_t rxBytes,
     MB85RC::WriteCommit failureCommit = MB85RC::WriteCommit::NOT_APPLICABLE) {
   return I2C_RESULT_MAPPER.mapI2c(err, txBytes, rxBytes, failureCommit);
-}
-
-const char* sleepStateName(MB85RC::SleepState state) {
-  switch (state) {
-    case MB85RC::SleepState::AWAKE:
-      return "AWAKE";
-    case MB85RC::SleepState::ASLEEP:
-      return "ASLEEP";
-    case MB85RC::SleepState::WAKING:
-      return "WAKING";
-    default:
-      return "UNKNOWN";
-  }
 }
 
 esp_err_t addDevice(NativeBus& bus, uint8_t addr, i2c_master_dev_handle_t* out) {
@@ -470,41 +458,13 @@ void resetBusPins() {
   puts(initBus() ? "iface_reset: OK" : "iface_reset: FAIL");
 }
 
-const char* errToStr(MB85RC::Err err) {
-  using namespace MB85RC;
-  switch (err) {
-    case Err::OK:                   return "OK";
-    case Err::NOT_INITIALIZED:      return "NOT_INITIALIZED";
-    case Err::INVALID_CONFIG:       return "INVALID_CONFIG";
-    case Err::I2C_ERROR:            return "I2C_ERROR";
-    case Err::TIMEOUT:              return "TIMEOUT";
-    case Err::INVALID_PARAM:        return "INVALID_PARAM";
-    case Err::DEVICE_NOT_FOUND:     return "DEVICE_NOT_FOUND";
-    case Err::DEVICE_ID_MISMATCH:   return "DEVICE_ID_MISMATCH";
-    case Err::ADDRESS_OUT_OF_RANGE: return "ADDRESS_OUT_OF_RANGE";
-    case Err::WRITE_PROTECTED:      return "WRITE_PROTECTED";
-    case Err::BUSY:                 return "BUSY";
-    case Err::IN_PROGRESS:          return "IN_PROGRESS";
-    case Err::I2C_NACK_ADDR:        return "I2C_NACK_ADDR";
-    case Err::I2C_NACK_DATA:        return "I2C_NACK_DATA";
-    case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
-    case Err::I2C_BUS:              return "I2C_BUS";
-    case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
-    case Err::UNSUPPORTED:          return "UNSUPPORTED";
-    case Err::NO_RESULT:            return "NO_RESULT";
-    case Err::CANCELLED:            return "CANCELLED";
-    case Err::I2C_NACK:             return "I2C_NACK";
-    default:                        return "UNKNOWN";
-  }
-}
-
 void printStatus(const char* op, MB85RC::Status st) {
   const char* result = st.ok() ? "OK" :
       (st.code == MB85RC::Err::UNSUPPORTED ? "UNSUPPORTED" : "FAIL");
   printf("%s: %s (code=%u detail=%ld)\n", op, result,
          static_cast<unsigned>(st.code), static_cast<long>(st.detail));
   if (!st.ok() && st.msg != nullptr) {
-    printf("  %s: %s\n", errToStr(st.code), st.msg);
+    printf("  %s: %s\n", diagnostic::errToStr(st.code), st.msg);
   }
 }
 
@@ -539,16 +499,6 @@ bool parseU32(const char* text, uint32_t* out, const char** tail = nullptr) {
   return *end == '\0';
 }
 
-uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= static_cast<uint32_t>(data[i]);
-    for (uint8_t bit = 0; bit < 8U; ++bit) {
-      crc = ((crc & 1U) != 0U) ? ((crc >> 1U) ^ 0xEDB88320UL) : (crc >> 1U);
-    }
-  }
-  return crc;
-}
-
 bool parseByteList(const char* text, uint8_t* out, size_t maxLen, size_t* outLen) {
   if (out == nullptr || outLen == nullptr) {
     return false;
@@ -565,17 +515,6 @@ bool parseByteList(const char* text, uint8_t* out, size_t maxLen, size_t* outLen
     cursor = tail;
   }
   return *outLen > 0U;
-}
-
-bool rangeFits(uint32_t addr, uint32_t len) {
-  const uint32_t capacity = gFram.capacityBytes();
-  return len > 0U && capacity > 0U && addr < capacity && len <= (capacity - addr);
-}
-
-MB85RC::Status restoreVerified(uint32_t address,
-                               const uint8_t* original,
-                               size_t len) {
-  return gFram.writeVerify(address, original, len);
 }
 
 void printConfirmationRequired(const char* command, const char* effect, const char* confirmedForm) {
@@ -672,7 +611,7 @@ void printDrv() {
          static_cast<unsigned long>(snap.maxNormalBusHz),
          static_cast<unsigned long>(snap.maxHighSpeedBusHz),
          snap.sleepModeSupported ? "yes" : "no",
-         sleepStateName(snap.sleepState),
+         diagnostic::sleepStateToStr(snap.sleepState),
          static_cast<unsigned>(snap.sleepRecoveryUs),
          static_cast<unsigned long>(snap.sleepWakeReadyMs));
 }
@@ -724,7 +663,7 @@ void printSleepSupport() {
   puts("Sleep mode:");
   printf("  Active variant: %s\n", snap.variantName);
   printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
-  printf("  State: %s\n", sleepStateName(snap.sleepState));
+  printf("  State: %s\n", diagnostic::sleepStateToStr(snap.sleepState));
   puts("  Entry: F8h + active device address word + repeated-start 86h");
   puts("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
   puts("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
@@ -754,7 +693,7 @@ void handleSleepCommand(const char* full) {
 }
 
 void dumpMemory(uint32_t addr, uint32_t len) {
-  if (!rangeFits(addr, len)) {
+  if (!diagnostic::rangeFits(gFram, addr, len)) {
     printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
            static_cast<unsigned long>(addr),
            static_cast<unsigned long>(len),
@@ -780,7 +719,7 @@ void dumpMemory(uint32_t addr, uint32_t len) {
 }
 
 void textMemory(uint32_t addr, uint32_t len) {
-  if (!rangeFits(addr, len)) {
+  if (!diagnostic::rangeFits(gFram, addr, len)) {
     printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
            static_cast<unsigned long>(addr),
            static_cast<unsigned long>(len),
@@ -810,7 +749,7 @@ void textMemory(uint32_t addr, uint32_t len) {
 }
 
 void stringsMemory(uint32_t addr, uint32_t len, uint32_t minLen) {
-  if (!rangeFits(addr, len)) {
+  if (!diagnostic::rangeFits(gFram, addr, len)) {
     printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
            static_cast<unsigned long>(addr),
            static_cast<unsigned long>(len),
@@ -872,7 +811,7 @@ void stringsMemory(uint32_t addr, uint32_t len, uint32_t minLen) {
 }
 
 void crcMemory(uint32_t addr, uint32_t len) {
-  if (!rangeFits(addr, len)) {
+  if (!diagnostic::rangeFits(gFram, addr, len)) {
     printf("Range outside active capacity: addr=0x%06lX len=%lu capacity=%lu\n",
            static_cast<unsigned long>(addr),
            static_cast<unsigned long>(len),
@@ -889,7 +828,7 @@ void crcMemory(uint32_t addr, uint32_t len) {
       printStatus("crc", st);
       return;
     }
-    crc = crc32Update(crc, buf, chunk);
+    crc = diagnostic::crc32Update(crc, buf, chunk);
     done += static_cast<uint32_t>(chunk);
   }
   crc ^= 0xFFFFFFFFUL;
@@ -900,7 +839,7 @@ void crcMemory(uint32_t addr, uint32_t len) {
 }
 
 void verifyMemory(uint32_t addr, const uint8_t* expected, size_t len) {
-  if (!rangeFits(addr, static_cast<uint32_t>(len))) {
+  if (!diagnostic::rangeFits(gFram, addr, static_cast<uint32_t>(len))) {
     printf("Range outside active capacity: addr=0x%06lX len=%u capacity=%lu\n",
            static_cast<unsigned long>(addr),
            static_cast<unsigned>(len),
@@ -953,7 +892,7 @@ void runSelfTest() {
     printStatus("selftest readback", st);
     printf("selftest_pattern=%s\n", (st.ok() && readBack == 0xA5U) ? "PASS" : "FAIL");
   }
-  printStatus("selftest restore", restoreVerified(0U, &original, 1U));
+  printStatus("selftest restore", diagnostic::restoreVerified(gFram, 0U, &original, 1U));
 }
 
 void runStress(uint32_t count) {
@@ -987,7 +926,7 @@ void runStress(uint32_t count) {
              static_cast<unsigned long>(i), pattern, readBack);
     }
   }
-  printStatus("stress restore", restoreVerified(0U, &original, 1U));
+  printStatus("stress restore", diagnostic::restoreVerified(gFram, 0U, &original, 1U));
   printf("stress_ok=%lu/%lu\n", static_cast<unsigned long>(ok), static_cast<unsigned long>(count));
 }
 
@@ -1032,7 +971,7 @@ void runStressMix(uint32_t count) {
     ++ok;
   }
   printStatus("stress_mix restore",
-              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
+              diagnostic::restoreVerified(gFram, RW_SUITE_ADDR, original, sizeof(original)));
   printf("stress_mix_ok=%lu/%lu\n",
          static_cast<unsigned long>(ok),
          static_cast<unsigned long>(count));
@@ -1054,33 +993,7 @@ void runRwSuite() {
     printStatus("rw_suite fill", st);
   }
   printStatus("rw_suite restore",
-              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
-}
-
-MB85RC::Status takeStagedTerminal(MB85RC::Status terminal) {
-  MB85RC::TransferResult result;
-  const MB85RC::Status taken = gFram.takeTransferResult(result);
-  return taken.ok() ? result.status : terminal;
-}
-
-MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
-  if (len == 0U || chunkSize == 0U) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer bounds");
-  }
-  const uint32_t expectedChunks =
-      static_cast<uint32_t>((len + chunkSize - 1U) / chunkSize);
-  const uint32_t pollLimit = expectedChunks + 3U;
-  for (uint32_t i = 0; i < pollLimit; ++i) {
-    MB85RC::Status st = gFram.pollTransfer(nowMs(nullptr), 1);
-    if (st.inProgress()) {
-      continue;
-    }
-    return takeStagedTerminal(st);
-  }
-  (void)gFram.cancelTransfer();
-  MB85RC::TransferResult cancelled;
-  (void)gFram.takeTransferResult(cancelled);
-  return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
+              diagnostic::restoreVerified(gFram, RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void printXferCheck(const char* name, bool ok, const char* note = "") {
@@ -1110,11 +1023,11 @@ void runXferDemo() {
   };
 
   const uint32_t addr =
-      rangeFits(XFER_DEMO_ADDR, static_cast<uint32_t>(XFER_DEMO_LEN)) ? XFER_DEMO_ADDR : 0U;
-  const size_t len = rangeFits(addr, static_cast<uint32_t>(XFER_DEMO_LEN))
+      diagnostic::rangeFits(gFram, XFER_DEMO_ADDR, static_cast<uint32_t>(XFER_DEMO_LEN)) ? XFER_DEMO_ADDR : 0U;
+  const size_t len = diagnostic::rangeFits(gFram, addr, static_cast<uint32_t>(XFER_DEMO_LEN))
                          ? XFER_DEMO_LEN
                          : static_cast<size_t>(gFram.capacityBytes());
-  if (len == 0U || !rangeFits(addr, static_cast<uint32_t>(len))) {
+  if (len == 0U || !diagnostic::rangeFits(gFram, addr, static_cast<uint32_t>(len))) {
     check("select scratch range", false, "active capacity is zero");
     printf("xfer_demo_result pass=%lu fail=%lu\n",
            static_cast<unsigned long>(pass),
@@ -1151,7 +1064,7 @@ void runXferDemo() {
     MB85RC::Status budgetTwo = gFram.pollTransfer(nowMs(nullptr), 2);
     check("poll budget 2 executes two chunks", budgetTwo.inProgress(),
           budgetTwo.inProgress() ? "" : budgetTwo.msg);
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_READ_CHUNK, nowMs);
     checkStatus("pollRead", st);
     check("readMatchesBackup", st.ok() && memcmp(readBack, original, len) == 0);
   }
@@ -1159,14 +1072,14 @@ void runXferDemo() {
   st = gFram.requestWrite(addr, pattern, len);
   checkStatus("requestWrite", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_WRITE_CHUNK, nowMs);
     checkStatus("pollWrite", st);
   }
 
   st = gFram.requestVerify(addr, pattern, len);
   checkStatus("requestVerifyWrite", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_READ_CHUNK, nowMs);
     checkStatus("pollVerifyWrite", st);
   }
 
@@ -1181,29 +1094,29 @@ void runXferDemo() {
           highBudgetShouldRemainActive ? highBudget.inProgress() : highBudget.ok(),
           highBudget.msg);
     st = highBudget.inProgress()
-             ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
-             : takeStagedTerminal(highBudget);
+             ? diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_FILL_CHUNK, nowMs)
+             : diagnostic::takeStagedTerminal(gFram, highBudget);
     checkStatus("pollFill", st);
   }
 
   st = gFram.requestVerify(addr, fillExpected, len);
   checkStatus("requestVerifyFill", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_READ_CHUNK, nowMs);
     checkStatus("pollVerifyFill", st);
   }
 
   st = gFram.requestWrite(addr, original, len);
   checkStatus("requestRestore", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_WRITE_CHUNK, nowMs);
     checkStatus("pollRestore", st);
   }
 
   st = gFram.requestVerify(addr, original, len);
   checkStatus("requestVerifyRestore", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(gFram, len, MB85RC::cmd::MAX_READ_CHUNK, nowMs);
     checkStatus("pollVerifyRestore", st);
   }
 
@@ -1257,7 +1170,7 @@ void runRandBench(uint32_t count) {
          static_cast<long long>(elapsedUs),
          (st.ok() && verify.match) ? "yes" : "no");
   printStatus("randbench restore",
-              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
+              diagnostic::restoreVerified(gFram, RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void runTypedDemo() {
@@ -1276,7 +1189,7 @@ void runTypedDemo() {
     verifyMemory(RW_SUITE_ADDR, typedBytes, sizeof(typedBytes));
   }
   printStatus("typed_demo restore",
-              restoreVerified(RW_SUITE_ADDR, original, sizeof(original)));
+              diagnostic::restoreVerified(gFram, RW_SUITE_ADDR, original, sizeof(original)));
 }
 
 void handleCommand(char* line) {

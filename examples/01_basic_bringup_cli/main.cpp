@@ -17,6 +17,7 @@
 #include "examples/common/TypedMemory.h"
 
 #include "MB85RC/MB85RC.h"
+#include "examples/common/DiagnosticCore.h"
 
 // ============================================================================
 // Globals
@@ -76,97 +77,11 @@ uint32_t nextRandom(uint32_t& state) {
   return state;
 }
 
-const char* errToStr(MB85RC::Err err) {
-  using namespace MB85RC;
-  switch (err) {
-    case Err::OK:                   return "OK";
-    case Err::NOT_INITIALIZED:      return "NOT_INITIALIZED";
-    case Err::INVALID_CONFIG:       return "INVALID_CONFIG";
-    case Err::I2C_ERROR:            return "I2C_ERROR";
-    case Err::TIMEOUT:              return "TIMEOUT";
-    case Err::INVALID_PARAM:        return "INVALID_PARAM";
-    case Err::DEVICE_NOT_FOUND:     return "DEVICE_NOT_FOUND";
-    case Err::DEVICE_ID_MISMATCH:   return "DEVICE_ID_MISMATCH";
-    case Err::ADDRESS_OUT_OF_RANGE: return "ADDRESS_OUT_OF_RANGE";
-    case Err::WRITE_PROTECTED:      return "WRITE_PROTECTED";
-    case Err::BUSY:                 return "BUSY";
-    case Err::IN_PROGRESS:          return "IN_PROGRESS";
-    case Err::I2C_NACK_ADDR:        return "I2C_NACK_ADDR";
-    case Err::I2C_NACK_DATA:        return "I2C_NACK_DATA";
-    case Err::I2C_TIMEOUT:          return "I2C_TIMEOUT";
-    case Err::I2C_BUS:              return "I2C_BUS";
-    case Err::VERIFY_MISMATCH:      return "VERIFY_MISMATCH";
-    case Err::UNSUPPORTED:          return "UNSUPPORTED";
-    case Err::NO_RESULT:            return "NO_RESULT";
-    case Err::CANCELLED:            return "CANCELLED";
-    case Err::I2C_NACK:             return "I2C_NACK";
-    default:                        return "UNKNOWN";
-  }
-}
-
-const char* stateToStr(MB85RC::DriverState st) {
-  using namespace MB85RC;
-  switch (st) {
-    case DriverState::UNINIT:   return "UNINIT";
-    case DriverState::READY:    return "READY";
-    case DriverState::DEGRADED: return "DEGRADED";
-    case DriverState::OFFLINE:  return "OFFLINE";
-    default:                    return "UNKNOWN";
-  }
-}
-
-const char* sleepStateToStr(MB85RC::SleepState st) {
-  using namespace MB85RC;
-  switch (st) {
-    case SleepState::AWAKE:  return "AWAKE";
-    case SleepState::ASLEEP: return "ASLEEP";
-    case SleepState::WAKING: return "WAKING";
-    default:                 return "UNKNOWN";
-  }
-}
-
 const char* stateColor(MB85RC::DriverState st, bool online, uint8_t consecutiveFailures) {
   if (st == MB85RC::DriverState::UNINIT) {
     return LOG_COLOR_RESET;
   }
   return LOG_COLOR_STATE(online, consecutiveFailures);
-}
-
-const char* addressModelToStr(MB85RC::cmd::AddressModel model) {
-  using MB85RC::cmd::AddressModel;
-  switch (model) {
-    case AddressModel::TWO_BYTE_ADDRESS_PINS:
-      return "2-byte address, A2/A1/A0 select device";
-    case AddressModel::TWO_BYTE_A16_IN_DEVICE_ADDRESS:
-      return "2-byte address, A16 in device address";
-    case AddressModel::ONE_BYTE_UPPER_BITS_IN_DEVICE_ADDRESS:
-      return "1-byte address, upper address bits in device address";
-    case AddressModel::ONE_BYTE_A8_IN_DEVICE_ADDRESS:
-      return "1-byte address, A8 in device address";
-    default:
-      return "unknown";
-  }
-}
-
-const char* deviceVariantToStr(MB85RC::DeviceVariant variant) {
-  switch (variant) {
-    case MB85RC::DeviceVariant::AUTO:
-      return "AUTO";
-    case MB85RC::DeviceVariant::MB85RC256V:
-      return "MB85RC256V";
-    case MB85RC::DeviceVariant::MB85RC64TA:
-      return "MB85RC64TA";
-    case MB85RC::DeviceVariant::MB85RC04V:
-      return "MB85RC04V";
-    case MB85RC::DeviceVariant::MB85RC16V:
-      return "MB85RC16V";
-    case MB85RC::DeviceVariant::MB85RC512T:
-      return "MB85RC512T";
-    case MB85RC::DeviceVariant::MB85RC1MT:
-      return "MB85RC1MT";
-    default:
-      return "UNKNOWN";
-  }
 }
 
 void printVariantInfo(const MB85RC::cmd::VariantInfo& variant) {
@@ -181,7 +96,7 @@ void printVariantInfo(const MB85RC::cmd::VariantInfo& variant) {
     Serial.println("  product=n/a  density=n/a");
   }
   Serial.printf("    %s; runtime driver support=%s; high-speed capability=%s; sleep capability=%s\n",
-                addressModelToStr(variant.addressModel),
+                diagnostic::addressModelToStr(variant.addressModel),
                 variant.supportedByDriver ? "yes" : "no",
                 variant.supportsHighSpeedMode ? "yes" : "no",
                 variant.supportsSleepMode ? "yes" : "no");
@@ -234,7 +149,7 @@ void printStressProgress(uint32_t completed, uint32_t total, uint32_t okCount, u
 void printStatus(const MB85RC::Status& st) {
   Serial.printf("  Status: %s%s%s (code=%u, detail=%ld)\n",
                 LOG_COLOR_RESULT(st.ok()),
-                errToStr(st.code),
+                diagnostic::errToStr(st.code),
                 LOG_COLOR_RESET,
                 static_cast<unsigned>(st.code),
                 static_cast<long>(st.detail));
@@ -269,7 +184,7 @@ void printDriverHealth() {
   Serial.println("=== Driver Health ===");
   Serial.printf("  State: %s%s%s\n",
                 stateColor(st, online, device.consecutiveFailures()),
-                stateToStr(st),
+                diagnostic::stateToStr(st),
                 LOG_COLOR_RESET);
   Serial.printf("  Online: %s%s%s\n",
                 online ? LOG_COLOR_GREEN : LOG_COLOR_RED,
@@ -313,7 +228,7 @@ void printDriverHealth() {
   if (!lastErr.ok()) {
     Serial.printf("  Error code: %s%s%s\n",
                   LOG_COLOR_RED,
-                  errToStr(lastErr.code),
+                  diagnostic::errToStr(lastErr.code),
                   LOG_COLOR_RESET);
     Serial.printf("  Error detail: %ld\n", static_cast<long>(lastErr.detail));
     if (lastErr.msg && lastErr.msg[0]) {
@@ -411,24 +326,6 @@ bool parseCountArg(const String& token, int& outCount) {
   }
   outCount = static_cast<int>(value);
   return true;
-}
-
-bool rangeFitsActiveCapacity(uint32_t address, size_t len) {
-  if (len == 0U || address > device.maxAddress()) {
-    return false;
-  }
-  const uint32_t capacity = device.capacityBytes();
-  if (address >= capacity) {
-    return false;
-  }
-  const size_t remaining = static_cast<size_t>(capacity - address);
-  return len <= remaining;
-}
-
-MB85RC::Status restoreVerified(uint32_t address,
-                               const uint8_t* original,
-                               size_t len) {
-  return device.writeVerify(address, original, len);
 }
 
 void printRangeError(uint32_t address, size_t len) {
@@ -540,7 +437,7 @@ bool parseAddressLengthArgs(const String& args,
 
 template <typename Visitor>
 bool visitMemoryRange(uint32_t address, uint32_t len, Visitor visitor) {
-  if (!rangeFitsActiveCapacity(address, len)) {
+  if (!diagnostic::rangeFits(device, address, len)) {
     printRangeError(address, len);
     return false;
   }
@@ -582,7 +479,7 @@ void printSettings() {
                 LOG_COLOR_RESET);
   Serial.printf("  State: %s%s%s\n",
                 stateColor(snap.state, device.isOnline(), device.consecutiveFailures()),
-                stateToStr(snap.state),
+                diagnostic::stateToStr(snap.state),
                 LOG_COLOR_RESET);
   Serial.printf("  I2C address: 0x%02X\n", snap.i2cAddress);
   Serial.printf("  I2C timeout: %lu ms\n", static_cast<unsigned long>(snap.i2cTimeoutMs));
@@ -597,7 +494,7 @@ void printSettings() {
                 snap.hasNowMsHook ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
                 snap.hasNowMsHook ? "present" : "millis() fallback",
                 LOG_COLOR_RESET);
-  Serial.printf("  Expected variant: %s\n", deviceVariantToStr(snap.expectedVariant));
+  Serial.printf("  Expected variant: %s\n", diagnostic::deviceVariantToStr(snap.expectedVariant));
   Serial.printf("  Active variant: %s%s%s\n",
                 snap.variantKnown ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
                 snap.variantName,
@@ -617,7 +514,7 @@ void printSettings() {
                 snap.highSpeedModeEnabled ? "yes" : "no");
   Serial.printf("  Sleep mode: support=%s state=%s tREC=%u us wakeReadyMs=%lu\n",
                 snap.sleepModeSupported ? "yes" : "no",
-                sleepStateToStr(snap.sleepState),
+                diagnostic::sleepStateToStr(snap.sleepState),
                 static_cast<unsigned>(snap.sleepRecoveryUs),
                 static_cast<unsigned long>(snap.sleepWakeReadyMs));
   Serial.println("  Cross-end bulk operations: rejected");
@@ -669,7 +566,7 @@ void printSleepSupport() {
   Serial.println("Sleep mode:");
   Serial.printf("  Active variant: %s\n", snap.variantName);
   Serial.printf("  Support: %s\n", snap.sleepModeSupported ? "yes" : "no");
-  Serial.printf("  State: %s\n", sleepStateToStr(snap.sleepState));
+  Serial.printf("  State: %s\n", diagnostic::sleepStateToStr(snap.sleepState));
   Serial.println("  Entry: F8h + active device address word + repeated-start 86h");
   Serial.println("  Wake: clock active device address word, wait tREC >= 400 us before access/recover");
   Serial.println("  Core sleep state: tracked separately from driver health; no hidden delay is inserted");
@@ -714,25 +611,11 @@ void printTextRange(uint32_t address, uint32_t len) {
   });
 }
 
-uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= static_cast<uint32_t>(data[i]);
-    for (uint8_t bit = 0; bit < 8U; ++bit) {
-      if ((crc & 1U) != 0U) {
-        crc = (crc >> 1) ^ 0xEDB88320UL;
-      } else {
-        crc >>= 1;
-      }
-    }
-  }
-  return crc;
-}
-
 void printRangeCrc32(uint32_t address, uint32_t len) {
   uint32_t crc = 0xFFFFFFFFUL;
   if (!visitMemoryRange(address, len,
                         [&crc](uint32_t, const uint8_t* data, size_t chunkLen) {
-                          crc = crc32Update(crc, data, chunkLen);
+                          crc = diagnostic::crc32Update(crc, data, chunkLen);
                         })) {
     return;
   }
@@ -865,7 +748,7 @@ void printCurrentAddressReadRange(uint32_t len) {
   static uint8_t readBuf[256];
   uint32_t remaining = len;
   uint32_t startAddr = snap.currentAddress;
-  if (!rangeFitsActiveCapacity(startAddr, len)) {
+  if (!diagnostic::rangeFits(device, startAddr, len)) {
     printRangeError(startAddr, len);
     return;
   }
@@ -926,7 +809,7 @@ void finishStressStats() {
   }
 
   if (!stressStats.lastError.ok()) {
-    Serial.printf("  Last error: %s\n", errToStr(stressStats.lastError.code));
+    Serial.printf("  Last error: %s\n", diagnostic::errToStr(stressStats.lastError.code));
     if (stressStats.lastError.msg && stressStats.lastError.msg[0]) {
       Serial.printf("  Message: %s\n", stressStats.lastError.msg);
     }
@@ -944,7 +827,7 @@ void runStress(int count) {
     return;
   }
   const uint32_t scratchAddr =
-      rangeFitsActiveCapacity(RW_SUITE_ADDR, 1U) ? RW_SUITE_ADDR : 0U;
+      diagnostic::rangeFits(device, RW_SUITE_ADDR, 1U) ? RW_SUITE_ADDR : 0U;
   uint8_t original = 0;
   MB85RC::Status backup = device.readByte(scratchAddr, original);
   printCheckStatus("backup stress byte", backup);
@@ -963,7 +846,7 @@ void runStress(int count) {
       stressStats.errors++;
       stressStats.lastError = st;
       if (verboseMode) {
-        Serial.printf("  [%d] write failed: %s\n", i, errToStr(st.code));
+        Serial.printf("  [%d] write failed: %s\n", i, diagnostic::errToStr(st.code));
       }
     } else {
       uint8_t readBack = 0;
@@ -972,7 +855,7 @@ void runStress(int count) {
         stressStats.errors++;
         stressStats.lastError = st;
         if (verboseMode) {
-          Serial.printf("  [%d] read failed: %s\n", i, errToStr(st.code));
+          Serial.printf("  [%d] read failed: %s\n", i, diagnostic::errToStr(st.code));
         }
       } else if (readBack != pattern) {
         stressStats.errors++;
@@ -991,7 +874,7 @@ void runStress(int count) {
                         stressStats.errors);
   }
 
-  MB85RC::Status restore = restoreVerified(scratchAddr, &original, 1U);
+  MB85RC::Status restore = diagnostic::restoreVerified(device, scratchAddr, &original, 1U);
   printCheckStatus("restore stress byte", restore);
   if (!restore.ok()) {
     stressStats.errors++;
@@ -1040,7 +923,7 @@ void runStressMix(int count) {
   }
   static constexpr size_t STRESS_MIX_SCRATCH_LEN = 16U;
   const uint32_t scratchAddr =
-      rangeFitsActiveCapacity(RW_SUITE_ADDR, STRESS_MIX_SCRATCH_LEN)
+      diagnostic::rangeFits(device, RW_SUITE_ADDR, STRESS_MIX_SCRATCH_LEN)
           ? RW_SUITE_ADDR
           : 0U;
   uint8_t original[STRESS_MIX_SCRATCH_LEN] = {};
@@ -1125,7 +1008,7 @@ void runStressMix(int count) {
       stats[op].fail++;
       failTotal++;
       if (verboseMode) {
-        Serial.printf("  [%d] %s failed: %s\n", i, stats[op].name, errToStr(st.code));
+        Serial.printf("  [%d] %s failed: %s\n", i, stats[op].name, diagnostic::errToStr(st.code));
       }
     }
 
@@ -1136,7 +1019,7 @@ void runStressMix(int count) {
   }
 
   MB85RC::Status restore =
-      restoreVerified(scratchAddr, original, sizeof(original));
+      diagnostic::restoreVerified(device, scratchAddr, original, sizeof(original));
   printCheckStatus("restore stress_mix scratch", restore);
   if (!restore.ok()) {
     failTotal++;
@@ -1236,7 +1119,7 @@ void runSelfTest() {
                   skipCountColor(result.skip), static_cast<unsigned long>(result.skip), LOG_COLOR_RESET);
     return;
   }
-  reportCheck("probe responds", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("probe responds", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   const bool probeNoTrack = device.totalSuccess() == succBefore &&
                             device.totalFailures() == failBefore &&
                             device.consecutiveFailures() == consBefore;
@@ -1249,7 +1132,7 @@ void runSelfTest() {
   } else {
     MB85RC::DeviceId id;
     st = device.readDeviceId(id);
-    reportCheck("readDeviceId", st.ok(), st.ok() ? "" : errToStr(st.code));
+    reportCheck("readDeviceId", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
     reportCheck("manufacturer ID = 0x00A",
                 st.ok() && id.manufacturerId == MB85RC::cmd::MANUFACTURER_ID, "");
     reportCheck("product ID matches active variant",
@@ -1258,75 +1141,75 @@ void runSelfTest() {
                 st.ok() && activeVariant != nullptr && id.densityCode == activeVariant->densityCode, "");
     MB85RC::DeviceIdRaw rawId;
     st = device.readDeviceIdRaw(rawId);
-    reportCheck("readDeviceIdRaw", st.ok(), st.ok() ? "" : errToStr(st.code));
+    reportCheck("readDeviceIdRaw", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   }
 
   // Write/Read test at address 0x0000
   // Save original value first
   uint8_t origVal = 0;
   st = device.readByte(0x0000, origVal);
-  reportCheck("readByte(0x0000)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readByte(0x0000)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   const uint8_t testPattern = 0xA5;
   st = device.writeByte(0x0000, testPattern);
-  reportCheck("writeByte(0x0000, 0xA5)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("writeByte(0x0000, 0xA5)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   uint8_t readBack = 0;
   st = device.readByte(0x0000, readBack);
-  reportCheck("readBack(0x0000)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readBack(0x0000)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   reportCheck("verify data = 0xA5", st.ok() && readBack == testPattern, "");
 
   // Restore original value
   st = device.writeByte(0x0000, origVal);
-  reportCheck("restoreByte(0x0000)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("restoreByte(0x0000)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   if (st.ok()) {
     uint8_t restored = 0;
     st = device.readByte(0x0000, restored);
     reportCheck("verify restore(0x0000)", st.ok() && restored == origVal,
-                st.ok() ? "" : errToStr(st.code));
+                st.ok() ? "" : diagnostic::errToStr(st.code));
   } else {
-    reportCheck("verify restore(0x0000)", false, errToStr(st.code));
+    reportCheck("verify restore(0x0000)", false, diagnostic::errToStr(st.code));
   }
 
   // Multi-byte write/read
   uint8_t testBuf[4] = {0xDE, 0xAD, 0xBE, 0xEF};
   uint8_t origBuf[4] = {};
   st = device.read(0x0010, origBuf, 4);
-  reportCheck("read(0x0010, 4)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("read(0x0010, 4)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   st = device.write(0x0010, testBuf, 4);
-  reportCheck("write(0x0010, 4)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("write(0x0010, 4)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   uint8_t verifyBuf[4] = {};
   st = device.read(0x0010, verifyBuf, 4);
-  reportCheck("readBack(0x0010, 4)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readBack(0x0010, 4)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   const bool multimatch = (verifyBuf[0] == 0xDE && verifyBuf[1] == 0xAD &&
                            verifyBuf[2] == 0xBE && verifyBuf[3] == 0xEF);
   reportCheck("verify multi-byte data", st.ok() && multimatch, "");
 
   // Restore original
   st = device.write(0x0010, origBuf, 4);
-  reportCheck("restore(0x0010, 4)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("restore(0x0010, 4)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   if (st.ok()) {
     uint8_t restoredBuf[4] = {};
     st = device.read(0x0010, restoredBuf, 4);
     const bool restoreMatch = st.ok() && (std::memcmp(restoredBuf, origBuf, sizeof(origBuf)) == 0);
-    reportCheck("verify restore(0x0010, 4)", restoreMatch, st.ok() ? "" : errToStr(st.code));
+    reportCheck("verify restore(0x0010, 4)", restoreMatch, st.ok() ? "" : diagnostic::errToStr(st.code));
   } else {
-    reportCheck("verify restore(0x0010, 4)", false, errToStr(st.code));
+    reportCheck("verify restore(0x0010, 4)", false, diagnostic::errToStr(st.code));
   }
 
   // Fill test
   uint8_t origFill[8] = {};
   st = device.read(0x0020, origFill, 8);
-  reportCheck("read fill area", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("read fill area", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   st = device.fill(0x0020, 0x55, 8);
-  reportCheck("fill(0x0020, 0x55, 8)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("fill(0x0020, 0x55, 8)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   uint8_t fillVerify[8] = {};
   st = device.read(0x0020, fillVerify, 8);
-  reportCheck("readBack fill area", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readBack fill area", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   bool fillOk = true;
   for (int i = 0; i < 8; ++i) {
     if (fillVerify[i] != 0x55) {
@@ -1338,87 +1221,87 @@ void runSelfTest() {
 
   // Restore original
   st = device.write(0x0020, origFill, 8);
-  reportCheck("restore fill area", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("restore fill area", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   if (st.ok()) {
     uint8_t restoredFill[8] = {};
     st = device.read(0x0020, restoredFill, 8);
     const bool restoreFillOk = st.ok() && (std::memcmp(restoredFill, origFill, sizeof(origFill)) == 0);
-    reportCheck("verify restore fill area", restoreFillOk, st.ok() ? "" : errToStr(st.code));
+    reportCheck("verify restore fill area", restoreFillOk, st.ok() ? "" : diagnostic::errToStr(st.code));
   } else {
-    reportCheck("verify restore fill area", false, errToStr(st.code));
+    reportCheck("verify restore fill area", false, diagnostic::errToStr(st.code));
   }
 
   // Settings snapshot + current address read at the active variant boundary
   MB85RC::SettingsSnapshot snap;
   st = device.getSettings(snap);
-  reportCheck("getSettings", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("getSettings", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   reportCheck("current address known", st.ok() && snap.currentAddressKnown, "");
   reportCheck("runtime capacity valid", st.ok() && snap.capacityBytes == capacity, "");
 
   uint8_t lastOrig = 0;
   uint8_t firstOrig = 0;
   st = device.readByte(maxAddr, lastOrig);
-  reportCheck("readByte(max address)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readByte(max address)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   st = device.readByte(0x0000, firstOrig);
-  reportCheck("readByte(0x0000)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("readByte(0x0000)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   st = device.writeByte(maxAddr, 0x3C);
-  reportCheck("writeByte(max address, 0x3C)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("writeByte(max address, 0x3C)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   st = device.writeByte(0x0000, 0xC3);
-  reportCheck("writeByte(0x0000, 0xC3)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("writeByte(0x0000, 0xC3)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 
   uint8_t tailValue = 0;
   st = device.readByte(maxAddr, tailValue);
   reportCheck("verify tail data = 0x3C", st.ok() && tailValue == 0x3C,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
 
   uint8_t currentVal = 0;
   st = device.readCurrentAddress(currentVal);
   reportCheck("readCurrentAddress follows max address", st.ok() && currentVal == 0xC3,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
 
   st = device.getSettings(snap);
   reportCheck("tracked current address = 0x0001",
               st.ok() && snap.currentAddressKnown && snap.currentAddress == 0x0001,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
 
   st = device.writeByte(maxAddr, lastOrig);
-  reportCheck("restoreByte(max address)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("restoreByte(max address)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   st = device.writeByte(0x0000, firstOrig);
-  reportCheck("restoreByte(0x0000 after boundary check)", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("restoreByte(0x0000 after boundary check)", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   if (st.ok()) {
     uint8_t verifyFirst = 0;
     st = device.readByte(0x0000, verifyFirst);
     reportCheck("verify restore(0x0000 after boundary check)",
                 st.ok() && verifyFirst == firstOrig,
-                st.ok() ? "" : errToStr(st.code));
+                st.ok() ? "" : diagnostic::errToStr(st.code));
   } else {
-    reportCheck("verify restore(0x0000 after boundary check)", false, errToStr(st.code));
+    reportCheck("verify restore(0x0000 after boundary check)", false, diagnostic::errToStr(st.code));
   }
   uint8_t verifyLast = 0;
   st = device.readByte(maxAddr, verifyLast);
   reportCheck("verify restore(max address)",
               st.ok() && verifyLast == lastOrig,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
 
   // Invalid address handling
   uint8_t invalidRead = 0;
   st = device.readByte(invalidAddr, invalidRead);
   reportCheck("readByte(first invalid address) rejects",
               st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
   st = device.writeByte(invalidAddr, 0x00);
   reportCheck("writeByte(first invalid address) rejects",
               st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
   st = device.fill(invalidAddr, 0x00, 1);
   reportCheck("fill(first invalid address, 1) rejects",
               st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE,
-              st.ok() ? "" : errToStr(st.code));
+              st.ok() ? "" : diagnostic::errToStr(st.code));
 
   // Recover
   st = device.recover();
-  reportCheck("recover", st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportCheck("recover", st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   reportCheck("isOnline", device.isOnline(), "");
 
   // Memory size
@@ -1456,7 +1339,7 @@ void runReadWriteSuite() {
     }
   };
   auto reportStatus = [&](const char* name, const MB85RC::Status& st) {
-    reportCheck(name, st.ok(), st.ok() ? "" : errToStr(st.code));
+    reportCheck(name, st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
   };
 
   Serial.println("=== Read/Write Suite ===");
@@ -1474,8 +1357,8 @@ void runReadWriteSuite() {
     return;
   }
   const bool fixedRegionsFit =
-      rangeFitsActiveCapacity(RW_SUITE_ADDR, RW_SUITE_LEN) &&
-      rangeFitsActiveCapacity(RW_SUITE_FILL_ADDR, RW_SUITE_FILL_LEN);
+      diagnostic::rangeFits(device, RW_SUITE_ADDR, RW_SUITE_LEN) &&
+      diagnostic::rangeFits(device, RW_SUITE_FILL_ADDR, RW_SUITE_FILL_LEN);
   const uint32_t scratchAddr = fixedRegionsFit ? RW_SUITE_ADDR : 0U;
   const uint32_t fillAddr =
       fixedRegionsFit ? RW_SUITE_FILL_ADDR
@@ -1555,19 +1438,19 @@ void runReadWriteSuite() {
 
   if (haveScratch) {
     reportStatus("restore scratch region",
-                 restoreVerified(scratchAddr,
+                 diagnostic::restoreVerified(device, scratchAddr,
                                  originalScratch,
                                  sizeof(originalScratch)));
   }
   if (haveFill) {
     reportStatus("restore fill region",
-                 restoreVerified(fillAddr,
+                 diagnostic::restoreVerified(device, fillAddr,
                                  originalFill,
                                  sizeof(originalFill)));
   }
   if (haveTail) {
     reportStatus("restore tail region",
-                 restoreVerified(tailAddr, originalTail, sizeof(originalTail)));
+                 diagnostic::restoreVerified(device, tailAddr, originalTail, sizeof(originalTail)));
   }
 
   Serial.printf("Read/write suite result: pass=%s%lu%s fail=%s%lu%s\n",
@@ -1598,7 +1481,7 @@ void reportXferDemoCheck(XferDemoResult& result, const char* name, bool ok, cons
 }
 
 void reportXferDemoStatus(XferDemoResult& result, const char* name, const MB85RC::Status& st) {
-  reportXferDemoCheck(result, name, st.ok(), st.ok() ? "" : errToStr(st.code));
+  reportXferDemoCheck(result, name, st.ok(), st.ok() ? "" : diagnostic::errToStr(st.code));
 }
 
 uint32_t stagedDemoAddress() {
@@ -1616,32 +1499,6 @@ size_t stagedDemoLength(uint32_t address) {
   }
   const uint32_t remaining = capacity - address;
   return (remaining > XFER_DEMO_LEN) ? XFER_DEMO_LEN : static_cast<size_t>(remaining);
-}
-
-MB85RC::Status takeStagedTerminal(MB85RC::Status terminal) {
-  MB85RC::TransferResult result;
-  const MB85RC::Status taken = device.takeTransferResult(result);
-  return taken.ok() ? result.status : terminal;
-}
-
-MB85RC::Status pollStagedTransferToCompletion(size_t len, size_t chunkSize) {
-  if (len == 0U || chunkSize == 0U) {
-    return MB85RC::Status::Error(MB85RC::Err::INVALID_PARAM, "Invalid staged transfer poll bounds");
-  }
-  const uint32_t expectedChunks =
-      static_cast<uint32_t>((len + chunkSize - 1U) / chunkSize);
-  const uint32_t pollLimit = expectedChunks + 3U;
-  for (uint32_t i = 0; i < pollLimit; ++i) {
-    MB85RC::Status st = device.pollTransfer(millis(), 1);
-    if (st.inProgress()) {
-      continue;
-    }
-    return takeStagedTerminal(st);
-  }
-  (void)device.cancelTransfer();
-  MB85RC::TransferResult cancelled;
-  (void)device.takeTransferResult(cancelled);
-  return MB85RC::Status::Error(MB85RC::Err::TIMEOUT, "Staged transfer poll limit exhausted");
 }
 
 void printHeapTelemetry() {
@@ -1692,17 +1549,17 @@ void runTransferDemo() {
   if (st.ok()) {
     MB85RC::Status zeroBudget = device.pollTransfer(millis(), 0);
     reportXferDemoCheck(result, "zero-budget poll remains in progress", zeroBudget.inProgress(),
-                        zeroBudget.inProgress() ? "" : errToStr(zeroBudget.code));
+                        zeroBudget.inProgress() ? "" : diagnostic::errToStr(zeroBudget.code));
     uint8_t tmp = 0;
     MB85RC::Status busy = device.readByte(addr, tmp);
     reportXferDemoCheck(result, "sync read rejected while transfer busy",
                         busy.code == MB85RC::Err::BUSY,
-                        busy.ok() ? "" : errToStr(busy.code));
+                        busy.ok() ? "" : diagnostic::errToStr(busy.code));
     MB85RC::Status budgetTwo = device.pollTransfer(millis(), 2);
     reportXferDemoCheck(result, "poll budget 2 executes two chunks",
                         budgetTwo.inProgress(),
-                        budgetTwo.inProgress() ? "" : errToStr(budgetTwo.code));
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+                        budgetTwo.inProgress() ? "" : diagnostic::errToStr(budgetTwo.code));
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_READ_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll read with one-instruction budget", st);
     reportXferDemoCheck(result, "staged read bytes match backup",
                         st.ok() && std::memcmp(readBack, original, len) == 0, "");
@@ -1711,14 +1568,14 @@ void runTransferDemo() {
   st = device.requestWrite(addr, pattern, len);
   reportXferDemoStatus(result, "requestWrite staged pattern", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_WRITE_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll write with one-instruction budget", st);
   }
 
   st = device.requestVerify(addr, pattern, len);
   reportXferDemoStatus(result, "requestVerify staged pattern", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_READ_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll verify staged pattern", st);
   }
 
@@ -1733,29 +1590,29 @@ void runTransferDemo() {
                         highBudgetShouldRemainActive ? highBudget.inProgress() : highBudget.ok(),
                         highBudget.msg);
     st = highBudget.inProgress()
-             ? pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_FILL_CHUNK)
-             : takeStagedTerminal(highBudget);
+             ? diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_FILL_CHUNK, exampleNowMs)
+             : diagnostic::takeStagedTerminal(device, highBudget);
     reportXferDemoStatus(result, "poll fill with one-instruction budget", st);
   }
 
   st = device.requestVerify(addr, fillExpected, len);
   reportXferDemoStatus(result, "requestVerify staged fill", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_READ_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll verify staged fill", st);
   }
 
   st = device.requestWrite(addr, original, len);
   reportXferDemoStatus(result, "requestWrite restore backup", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_WRITE_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_WRITE_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll restore backup", st);
   }
 
   st = device.requestVerify(addr, original, len);
   reportXferDemoStatus(result, "requestVerify restored bytes", st);
   if (st.ok()) {
-    st = pollStagedTransferToCompletion(len, MB85RC::cmd::MAX_READ_CHUNK);
+    st = diagnostic::pollStagedTransferToCompletion(device, len, MB85RC::cmd::MAX_READ_CHUNK, exampleNowMs);
     reportXferDemoStatus(result, "poll verify restored bytes", st);
   }
 
@@ -1767,7 +1624,7 @@ void runTransferDemo() {
 void runRandomBench(int count) {
   Serial.println("=== Random Access Benchmark ===");
   const uint32_t benchAddr = randomBenchAddress();
-  if (!rangeFitsActiveCapacity(benchAddr, RANDOM_BENCH_LEN)) {
+  if (!diagnostic::rangeFits(device, benchAddr, RANDOM_BENCH_LEN)) {
     printRangeError(benchAddr, RANDOM_BENCH_LEN);
     return;
   }
@@ -1807,7 +1664,7 @@ void runRandomBench(int count) {
   if (!st.ok()) {
     printStatus(st);
     printCheckStatus("restore benchmark window after write failure",
-                     restoreVerified(benchAddr,
+                     diagnostic::restoreVerified(device, benchAddr,
                                      originalWindow,
                                      sizeof(originalWindow)));
     return;
@@ -1832,7 +1689,7 @@ void runRandomBench(int count) {
   if (!st.ok()) {
     printStatus(st);
     printCheckStatus("restore benchmark window after read failure",
-                     restoreVerified(benchAddr,
+                     diagnostic::restoreVerified(device, benchAddr,
                                      originalWindow,
                                      sizeof(originalWindow)));
     return;
@@ -1859,7 +1716,7 @@ void runRandomBench(int count) {
   printBenchmarkLine("random-read-byte", static_cast<uint32_t>(count), readElapsedUs, 1U);
   Serial.printf("  Read mismatches: %lu\n", static_cast<unsigned long>(mismatches));
 
-  st = restoreVerified(benchAddr, originalWindow, sizeof(originalWindow));
+  st = diagnostic::restoreVerified(device, benchAddr, originalWindow, sizeof(originalWindow));
   printCheckStatus("restore benchmark window", st);
 }
 
@@ -1951,7 +1808,7 @@ void runTypedDemo() {
                 st.code == MB85RC::Err::ADDRESS_OUT_OF_RANGE ? "PASS" : "FAIL",
                 LOG_COLOR_RESET);
 
-  st = restoreVerified(TYPED_DEMO_ADDR, original, sizeof(original));
+  st = diagnostic::restoreVerified(device, TYPED_DEMO_ADDR, original, sizeof(original));
   printCheckStatus("restore typed demo region", st);
 }
 
@@ -2230,7 +2087,7 @@ void processCommand(const String& cmdLine) {
         return;
       }
     }
-    if (!rangeFitsActiveCapacity(addr, len)) {
+    if (!diagnostic::rangeFits(device, addr, len)) {
       printRangeError(addr, len);
       return;
     }
@@ -2317,7 +2174,7 @@ void processCommand(const String& cmdLine) {
       LOGW("No verify data provided");
       return;
     }
-    if (!rangeFitsActiveCapacity(addr, count)) {
+    if (!diagnostic::rangeFits(device, addr, count)) {
       printRangeError(addr, count);
       return;
     }
@@ -2395,7 +2252,7 @@ void processCommand(const String& cmdLine) {
       LOGW("No data to write");
       return;
     }
-    if (!rangeFitsActiveCapacity(addr, count)) {
+    if (!diagnostic::rangeFits(device, addr, count)) {
       printRangeError(addr, count);
       return;
     }
@@ -2450,7 +2307,7 @@ void processCommand(const String& cmdLine) {
       LOGW("Invalid length");
       return;
     }
-    if (!rangeFitsActiveCapacity(addr, len)) {
+    if (!diagnostic::rangeFits(device, addr, len)) {
       printRangeError(addr, len);
       return;
     }

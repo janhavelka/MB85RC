@@ -18,6 +18,7 @@ REQUIRED_COMMON = [
     "CliShell.h",
     "CliStyle.h",
     "TypedMemory.h",
+    "DiagnosticCore.h",
 ]
 
 DEVICE_ID_CORE_TOKENS = [

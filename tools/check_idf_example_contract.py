@@ -89,7 +89,10 @@ def fail(msg: str) -> None:
 def example_contract_files(root: pathlib.Path) -> list[pathlib.Path]:
     example_root = root / "examples" / "espidf_basic"
     skipped_dirs = {"build", "managed_components"}
-    files: list[pathlib.Path] = [root / "examples" / "common" / "IdfI2cTransport.h"]
+    files: list[pathlib.Path] = [
+        root / "examples" / "common" / name
+        for name in ("IdfI2cTransport.h", "DiagnosticCore.h")
+    ]
     for path in example_root.rglob("*"):
         if not path.is_file():
             continue

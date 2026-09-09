@@ -9,6 +9,7 @@
 #define private public
 #include "MB85RC/MB85RC.h"
 #undef private
+#include "common/DiagnosticCore.h"
 #include "common/IdfI2cTransport.h"
 #include "common/I2cTransport.h"
 #include "common/TypedMemory.h"
@@ -4280,6 +4281,95 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 // Transport adapter tests
 // ===========================================================================
 
+void test_diagnostic_crc_range_and_status_names() {
+  const uint8_t data[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
+  const uint32_t crc = diagnostic::crc32Update(0xFFFFFFFFU, data, sizeof(data));
+  TEST_ASSERT_EQUAL_HEX32(0xCBF43926U, crc ^ 0xFFFFFFFFU);
+  uint32_t split = diagnostic::crc32Update(0xFFFFFFFFU, data, 3U);
+  split = diagnostic::crc32Update(split, data + 3U, sizeof(data) - 3U);
+  TEST_ASSERT_EQUAL_HEX32(crc, split);
+
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  TEST_ASSERT_FALSE(diagnostic::rangeFits(dev, 0U, 1U));
+  TEST_ASSERT_TRUE(dev.bind(makeVariantConfig(bus, DeviceVariant::MB85RC1MT)).ok());
+  TEST_ASSERT_TRUE(diagnostic::rangeFits(dev, 0x10000U, 0x10000U));
+  TEST_ASSERT_TRUE(diagnostic::rangeFits(dev, 0x1FFFFU, 1U));
+  TEST_ASSERT_FALSE(diagnostic::rangeFits(dev, 0x1FFFFU, 2U));
+  TEST_ASSERT_FALSE(diagnostic::rangeFits(dev, 0U, 0U));
+  TEST_ASSERT_FALSE(diagnostic::rangeFits(dev, 1U, std::numeric_limits<size_t>::max()));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+  TEST_ASSERT_EQUAL_STRING("I2C_NACK", diagnostic::errToStr(Err::I2C_NACK));
+  TEST_ASSERT_EQUAL_STRING("CANCELLED", diagnostic::errToStr(Err::CANCELLED));
+  TEST_ASSERT_EQUAL_STRING("NO_RESULT", diagnostic::errToStr(Err::NO_RESULT));
+  TEST_ASSERT_EQUAL_STRING("UNKNOWN", diagnostic::errToStr(static_cast<Err>(0xFFU)));
+}
+
+void test_diagnostic_poll_returns_and_consumes_terminal_results() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = makeVariantConfig(bus, DeviceVariant::MB85RC256V);
+  cfg.maxRxBytes = 16U;
+  TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+  uint8_t data[48] = {};
+  for (size_t i = 0; i < sizeof(data); ++i) {
+    bus.mem[i] = static_cast<uint8_t>(i + 1U);
+  }
+  uint32_t clockCalls = 0U;
+  auto clock = [](void* user) { return ++*static_cast<uint32_t*>(user); };
+  TEST_ASSERT_TRUE(dev.requestRead(0U, data, sizeof(data)).ok());
+  TEST_ASSERT_TRUE(diagnostic::pollStagedTransferToCompletion(
+      dev, sizeof(data), 16U, clock, &clockCalls).ok());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(bus.mem, data, sizeof(data));
+  TEST_ASSERT_EQUAL_UINT32(3U, bus.readCalls);
+  TEST_ASSERT_EQUAL_UINT32(3U, clockCalls);
+  TransferResult result;
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).is(Err::NO_RESULT));
+
+  bus.readErrorRemaining = 1;
+  bus.readError = Status::Error(Err::I2C_NACK, "forced NACK", 0x108);
+  TEST_ASSERT_TRUE(dev.requestRead(0U, data, sizeof(data)).ok());
+  const Status status = diagnostic::pollStagedTransferToCompletion(
+      dev, sizeof(data), 16U, clock, &clockCalls);
+  TEST_ASSERT_TRUE(status.is(Err::I2C_NACK));
+  TEST_ASSERT_EQUAL_INT32(0x108, status.detail);
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).is(Err::NO_RESULT));
+  TEST_ASSERT_TRUE(diagnostic::takeStagedTerminal(dev, status).is(Err::I2C_NACK));
+}
+
+void test_diagnostic_poll_exhaustion_and_verified_restore() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = makeVariantConfig(bus, DeviceVariant::MB85RC256V);
+  cfg.maxRxBytes = 1U;
+  TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+  TEST_ASSERT_TRUE(diagnostic::pollStagedTransferToCompletion(
+      dev, 0U, 1U, fakeNowMs, &bus).is(Err::INVALID_PARAM));
+  TEST_ASSERT_TRUE(diagnostic::pollStagedTransferToCompletion(
+      dev, 1U, 0U, fakeNowMs, &bus).is(Err::INVALID_PARAM));
+  TEST_ASSERT_TRUE(diagnostic::pollStagedTransferToCompletion(
+      dev, 1U, 1U, nullptr).is(Err::INVALID_PARAM));
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+  uint8_t data[16] = {};
+  TEST_ASSERT_TRUE(dev.requestRead(0U, data, sizeof(data)).ok());
+  // Deliberately undersized polling allowance must cancel and consume the job.
+  TEST_ASSERT_TRUE(diagnostic::pollStagedTransferToCompletion(
+      dev, 1U, 1U, fakeNowMs, &bus).is(Err::TIMEOUT));
+  TEST_ASSERT_FALSE(dev.isTransferBusy());
+  TEST_ASSERT_EQUAL_UINT32(4U, bus.readCalls);
+  TransferResult result;
+  TEST_ASSERT_TRUE(dev.takeTransferResult(result).is(Err::NO_RESULT));
+
+  const uint8_t original[2] = {0xA5U, 0x5AU};
+  TEST_ASSERT_TRUE(diagnostic::restoreVerified(dev, 0U, original, sizeof(original)).ok());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, bus.mem, sizeof(original));
+  bus.writeProtectHigh = true;
+  const uint8_t changed[2] = {0x11U, 0x22U};
+  TEST_ASSERT_TRUE(diagnostic::restoreVerified(dev, 0U, changed, sizeof(changed))
+                       .is(Err::VERIFY_MISMATCH));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, bus.mem, sizeof(original));
+}
+
 void test_unspecified_nack_preserves_health_and_conservative_write_evidence() {
   struct Case {
     WriteCommit supplied;
@@ -6147,6 +6237,9 @@ int main() {
   RUN_TEST(test_semantic_identity_mismatch_does_not_wrap_failure_counter);
 
   // Transport adapter
+  RUN_TEST(test_diagnostic_crc_range_and_status_names);
+  RUN_TEST(test_diagnostic_poll_returns_and_consumes_terminal_results);
+  RUN_TEST(test_diagnostic_poll_exhaustion_and_verified_restore);
   RUN_TEST(test_unspecified_nack_preserves_health_and_conservative_write_evidence);
   RUN_TEST(test_idf_transport_maps_error_codes_and_memory_write_commit);
   RUN_TEST(test_idf_transport_dispatches_read_write_and_combined_transactions);
