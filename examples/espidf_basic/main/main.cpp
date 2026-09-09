@@ -62,6 +62,14 @@ constexpr idf_transport::ResultMapper I2C_RESULT_MAPPER{
     ESP_OK, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_ARG,
     ESP_ERR_INVALID_RESPONSE, ESP_ERR_NOT_FOUND};
 
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_OK) == MB85RC::TransportCode::OK,
+              "ESP-IDF success mapping changed");
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_INVALID_STATE) ==
+                  MB85RC::TransportCode::IO_ERROR,
+              "ESP-IDF invalid-state mapping changed");
+static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_INVALID_ARG) ==
+                  MB85RC::TransportCode::IO_ERROR,
+              "ESP-IDF invalid-argument mapping changed");
 static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_ERR_TIMEOUT) == MB85RC::TransportCode::TIMEOUT,
               "ESP-IDF timeout mapping changed");
 static_assert(I2C_RESULT_MAPPER.mapI2cCode(ESP_FAIL) == MB85RC::TransportCode::IO_ERROR,

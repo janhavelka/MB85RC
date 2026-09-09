@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 5: clarified Sleep preflight, AUTO selection failure, and terminal
+  reconciliation fields; documented shared IDF helpers and legacy Wire limits.
+  All four Arduino mode transitions now consistently report `UNSUPPORTED`,
+  with matching HIL expectations, and the example transaction timeout is 10 ms.
 - Audit item 4: added append-only, source-compatible `TransportCode::NACK_UNSPECIFIED`
   and `Err::I2C_NACK` values. IDF NACKs and ESP32 Wire result 2 now preserve the
   unknown byte location and uncertain memory-write effect, including short
@@ -21,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit item 2: both CLI scan entry points use the configured Wire context,
   reject an unready interface, and stop safely if a scan invalidates it.
 - Audit item 1: Wire callbacks close failed repeated-start transactions and
-  release the ESP32 mutex even if buffers were freed, then require interface
+  release the current ESP32 core's mutex if buffers were freed, then require interface
   reset. Native regressions cover the non-STOP error and all write entry points.
 - The High-speed FakeBus current-address path now composes the address from the
   slave byte, with regression coverage for `MB85RC1MT` crossing the 64 KiB bank.

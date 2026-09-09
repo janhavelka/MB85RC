@@ -642,21 +642,23 @@ void printHighSpeedSupport() {
   Serial.println("  Hardware validation: not claimed by this diagnostic");
 }
 
+void reportUnsupportedMode() {
+  // Setting the HS flag performs no I2C, but it would route later memory I/O
+  // through HIGH_SPEED_WRITE[_READ], which this adapter cannot execute. Keep
+  // all four mode transitions consistent with the adapter's capabilities.
+  printStatus(MB85RC::Status::Error(
+      MB85RC::Err::UNSUPPORTED,
+      "Arduino diagnostic transport does not implement raw HS/Sleep transitions"));
+  LOGW("This diagnostic adapter implements only the Device ID special operation.");
+}
+
 void handleHighSpeedCommand(const String& cmd) {
   printHighSpeedSupport();
   if (cmd == "hs" || cmd == "hs support") {
     return;
   }
-  if (cmd == "hs enter") {
-    MB85RC::Status st = MB85RC::Status::Error(
-        MB85RC::Err::UNSUPPORTED,
-        "Arduino diagnostic transport does not implement raw HS transfers");
-    printStatus(st);
-    LOGW("This diagnostic adapter implements only the Device ID special operation.");
-    return;
-  }
-  if (cmd == "hs exit") {
-    printStatus(device.exitHighSpeedMode());
+  if (cmd == "hs enter" || cmd == "hs exit") {
+    reportUnsupportedMode();
     return;
   }
   LOGW("Usage: hs | hs support | hs enter | hs exit");
@@ -680,20 +682,8 @@ void handleSleepCommand(const String& cmd) {
   if (cmd == "sleep" || cmd == "sleep support") {
     return;
   }
-  if (cmd == "sleep enter") {
-    MB85RC::Status st = MB85RC::Status::Error(
-        MB85RC::Err::UNSUPPORTED,
-        "Arduino diagnostic transport does not implement raw Sleep entry");
-    printStatus(st);
-    LOGW("This diagnostic adapter implements only the Device ID special operation.");
-    return;
-  }
-  if (cmd == "sleep wake") {
-    MB85RC::Status st = MB85RC::Status::Error(
-        MB85RC::Err::UNSUPPORTED,
-        "Arduino diagnostic transport does not implement raw Sleep wake");
-    printStatus(st);
-    LOGW("This diagnostic adapter implements only the Device ID special operation.");
+  if (cmd == "sleep enter" || cmd == "sleep wake") {
+    reportUnsupportedMode();
     return;
   }
   LOGW("Usage: sleep | sleep support | sleep enter | sleep wake");

@@ -454,8 +454,11 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
                     allowed_failure_statuses=hs_enter_allowed_statuses,
                     exclusive_pairs=hs_enter_exclusive),
         CommandStep("HIL-015A", "modes", "hs exit",
-                    expected_any=(("High-speed mode:", "Status:", "OK"),
-                                  ("High-speed mode:", "hs exit: OK"))),
+                    expected_any=(("High-speed mode:", "Status: UNSUPPORTED"),)
+                    if profile == "arduino" else (("High-speed mode:", "hs exit: OK"),),
+                    allowed_failure_statuses=("UNSUPPORTED",) if profile == "arduino" else (),
+                    exclusive_pairs=(("Status: OK", "Status: UNSUPPORTED"),)
+                    if profile == "arduino" else ()),
         CommandStep("HIL-015B", "modes", "hs support",
                     expected_all=("High-speed mode:", "Enabled: no")),
         CommandStep("HIL-016", "modes", "sleep support",
@@ -1214,6 +1217,7 @@ def parser_self_test() -> int:
     }
     for test_id, output in (
         ("HIL-015", "High-speed mode:\n  Status: UNSUPPORTED\n> "),
+        ("HIL-015A", "High-speed mode:\n  Status: UNSUPPORTED\n> "),
         ("HIL-017", "Sleep mode:\n  Status: UNSUPPORTED\n> "),
         ("HIL-017A", "Sleep mode:\n  Status: UNSUPPORTED\n> "),
     ):
@@ -1254,6 +1258,7 @@ def parser_self_test() -> int:
     }
     idf_mode_samples = (
         ("HIL-015", "High-speed mode:\n  Support: yes\nhs enter: OK (code=0 detail=0)\n> "),
+        ("HIL-015A", "High-speed mode:\nhs exit: OK (code=0 detail=0)\n> "),
         ("HIL-015", "High-speed mode:\n  Support: no\nhs enter: UNSUPPORTED (code=17 detail=0)\n> "),
         ("HIL-017", "Sleep mode:\n  Support: yes\nsleep enter: OK (code=0 detail=0)\n> "),
         ("HIL-017", "Sleep mode:\n  Support: no\nsleep enter: UNSUPPORTED (code=17 detail=0)\n> "),

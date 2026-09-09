@@ -170,6 +170,11 @@ static constexpr uint32_t AUTOMATIC_REQUEST_ID_FIRST = 0x80000000UL;
 /// zero. Cancellation and owner timeout use the completed-prefix offset with a
 /// zero length when no transport chunk failed first; reconciliation waiting
 /// preserves the original failed-write chunk evidence.
+/// A cancelled/timed-out request can also have a fully completed prefix, so
+/// state is the authority for success, not the failed-chunk fields alone.
+/// Successful reconciliation adopts the success offset/length convention:
+/// writeStatus retains the original write failure, while writeCommit becomes
+/// VERIFIED after matching readback.
 struct TransferResult {
   uint32_t requestId = 0;             ///< Caller-supplied or automatically generated nonzero correlation ID.
   TransferKind kind = TransferKind::NONE; ///< Requested cooperative operation.
@@ -211,6 +216,9 @@ struct TransferResult {
 /// Device-ID I/O also report BUSY while the tracked Sleep state is ASLEEP,
 /// WAKING, or unknown. Cache-only queries and transfer-result inspection do
 /// not have these bus-access preconditions.
+/// Parameter/pointer validation precedes the Sleep gate: after sleep/wake
+/// invalidates the tracked pointer, readCurrentAddress() reports INVALID_PARAM
+/// until an addressed memory access establishes a new pointer.
 class MB85RC {
 public:
   MB85RC() = default;
@@ -282,6 +290,9 @@ public:
   /// passive health diagnostics; identity mismatches remain semantic errors.
   /// Does not reset, reconfigure, or recover the physical I2C bus; application
   /// bus recovery and retry policy remain outside the core driver.
+  /// Under AUTO, the readDeviceId() selection-failure rules also apply here:
+  /// rejected identity/configuration clears selection and capacity until a
+  /// later successful identification. Transport failures retain selection.
   /// @return Status::Ok() if device now responsive, error otherwise
   Status recover();
   
@@ -588,6 +599,11 @@ public:
   /// Uses the reserved I2C addresses 0xF8/0xF9. The read phase must NACK the
   /// final ID byte and STOP; ACK after byte 3 may repeat the ID stream.
   /// Returns INVALID_PARAM when the active variant has no Device ID command.
+  /// Under AUTO, an unknown/unsupported identity or a configuration incompatible
+  /// with the detected variant clears the active variant, cached identity,
+  /// High-speed flag, and current-address pointer. capacityBytes() becomes zero;
+  /// memory access requires a later successful readDeviceId()/recover(). A
+  /// transport failure before identity validation retains the previous selection.
   /// @param id Output Device ID fields
   /// @return Status::Ok() on success
   Status readDeviceId(DeviceId& id);
@@ -834,6 +850,8 @@ public:
   Status takeTransferResult(TransferResult& out);
 
   /// Authorize verify-only reconciliation after an indeterminate write.
+  /// On eventual success, failed-chunk fields use the success convention;
+  /// writeStatus retains the failed write and writeCommit becomes VERIFIED.
   /// @param requestId Exact active request correlation ID.
   /// @return Status::Ok() when verify-only readback is resumed.
   Status resumeVerifiedWrite(uint32_t requestId);

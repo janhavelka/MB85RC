@@ -36,9 +36,9 @@ static constexpr uint32_t I2C_FREQ_HZ = 400000;
 
 /// @brief I2C timeout in milliseconds for example transactions.
 ///
-/// Five milliseconds covers one 128-byte transaction at the configured
-/// 400 kHz clock while exercising a production-style bounded owner deadline.
-static constexpr uint16_t I2C_TIMEOUT_MS = 5;
+/// Ten milliseconds leaves controller/scheduling margin above the roughly
+/// 3 ms wire time for a 128-byte transaction at the configured 400 kHz clock.
+static constexpr uint16_t I2C_TIMEOUT_MS = 10;
 
 /// @brief Initialize I2C for examples using the default config.
 inline bool initI2c(transport::WireContext& context, TwoWire& wire) {

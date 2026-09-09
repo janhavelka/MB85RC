@@ -30,8 +30,11 @@ resources:
 - command input: fixed C buffers and `fgets()`
 - runtime framework telemetry: `esp_get_idf_version()` in `version` / `ver`
 
-The Arduino and ESP-IDF examples share a command contract, not implementation
-source. The IDF example must not include Arduino sources or compatibility
+The Arduino and ESP-IDF examples share a command contract. The native example's
+SDK-independent result mapping and transaction dispatch live in
+`examples/common/IdfI2cTransport.h`, shared with native tests. The example binds
+the SDK's error constants and transaction functions to those helpers.
+The IDF example must not include Arduino sources or compatibility
 facades such as `Arduino.h`, `Wire.h`, `String`, `Serial`, or `TwoWire`.
 `tools/check_idf_example_contract.py` enforces this native-IDF boundary and the
 expected command coverage.

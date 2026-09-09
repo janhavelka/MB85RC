@@ -484,6 +484,7 @@ ESP-IDF example transport.
 | `BuildConfig.h` | Compile-time log-level configuration |
 | `Log.h` | Serial logging helpers |
 | `I2cTransport.h` | Wire-backed transport adapter and owner-level interface reset |
+| `IdfI2cTransport.h` | Framework-neutral IDF result mapping and transaction dispatch, shared with native tests |
 | `I2cScanner.h` | Bus scan helper that preserves owner clock/timeout settings |
 | `CliStyle.h` | CLI prompt, help, and color formatting helpers |
 | `CliShell.h` | Simple serial shell helper |
@@ -496,6 +497,10 @@ Espressif platform `55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and
 require PlatformIO Core `6.1.19` or newer. The `esp32s3dev_legacy_54`
 environment is a build-only source-compatibility check for the previous
 `54.03.20` stack; normal builds and HIL use the current pin.
+The legacy 3.2.0 Wire core can retain its mutex when buffers are missing. After
+an ambiguous close failure the adapter refuses further reset attempts on that
+core; restart the board. The current core has a public cleanup path for this
+case. Ordinary failed initialization remains retryable with `iface_reset`.
 
 On Windows hosts where long-path support is disabled, the Arduino 3.3.11
 package can exceed the default PlatformIO extraction path. Enable Windows long
