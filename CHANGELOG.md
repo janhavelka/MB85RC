@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Audit item 6: retired the contradictory historical audit snapshot, retaining
+  only additional datasheet details and remaining documentation, diagnostic,
+  and hardware-qualification work.
 - Audit item 5: clarified Sleep preflight, AUTO selection failure, and terminal
   reconciliation fields; documented shared IDF helpers and legacy Wire limits.
   All four Arduino mode transitions now consistently report `UNSUPPORTED`,
