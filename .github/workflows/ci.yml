@@ -170,4 +170,6 @@ jobs:
           sudo apt-get install -y doxygen
 
       - name: Build Doxygen documentation
-        run: doxygen Doxyfile
+        run: |
+          mkdir -p .pio/doxygen
+          doxygen Doxyfile

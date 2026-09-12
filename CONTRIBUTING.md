@@ -52,6 +52,7 @@ python tools/test_hil_health_snapshot.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 .\scripts\pio.cmd test -e native
+New-Item -ItemType Directory -Force .pio/doxygen | Out-Null
 doxygen Doxyfile
 ```
 

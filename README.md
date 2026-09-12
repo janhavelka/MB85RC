@@ -514,8 +514,8 @@ power profile, and bus topology; qualify each production configuration.
 ## Documentation
 
 The public headers under `include/MB85RC/` are the authoritative API contract.
-Run `doxygen Doxyfile` from the checkout to generate the reference under
-`.pio/doxygen/`. Strict generation rejects undocumented public API,
+Create `.pio/doxygen/`, then run `doxygen Doxyfile` from the checkout to
+generate the reference there. Strict generation rejects undocumented public API,
 parameter/return omissions, invalid commands, and unresolved documentation links.
 
 - `CHANGELOG.md` - release history and GitHub release note source

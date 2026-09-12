@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release version generation now recognizes the README's package-metadata
   qualifier, so `generate_version.py set` updates all synchronized files
   instead of stopping after a partial metadata update.
+- CI now creates the ignored Doxygen output tree before invoking Doxygen 1.9.8,
+  allowing strict documentation generation from a clean checkout.
 - Confirmed native-IDF diagnostic commands such as `rw_suite!` and `stress!`
   now receive complete payload, counter, and restore validation. The collector
   previously skipped these checks because it matched only unconfirmed command

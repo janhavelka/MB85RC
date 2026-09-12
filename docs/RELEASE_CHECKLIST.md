@@ -44,7 +44,9 @@ Use this checklist before tagging and publishing a release.
   `.\scripts\pio.cmd pkg pack --output MB85RC.tar.gz`, then
   `python tools/check_package_contents.py MB85RC.tar.gz`. Remove the generated
   artifact after inspection.
-- Run `doxygen Doxyfile`. The strict configuration must complete with no
+- Create the ignored output directory with
+  `New-Item -ItemType Directory -Force .pio/doxygen | Out-Null`, then run
+  `doxygen Doxyfile`. The strict configuration must complete with no
   undocumented-public-API, parameter/return, or documentation warnings.
   Generated output belongs in `.pio/doxygen/`, outside maintained docs.
 - Check maintained Markdown links and ensure `README.md`,
