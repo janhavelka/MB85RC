@@ -4282,6 +4282,138 @@ void test_semantic_identity_mismatch_does_not_wrap_failure_counter() {
 // Transport adapter tests
 // ===========================================================================
 
+void test_diagnostic_interface_reset_clears_state_before_wake_and_identity() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  Config cfg = make64TaConfig(bus);
+  cfg.expectedVariant = DeviceVariant::AUTO;
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0x123U, value).ok());
+  TEST_ASSERT_TRUE(dev.enterHighSpeedMode().ok());
+  TEST_ASSERT_TRUE(dev.getSettings().currentAddressKnown);
+  const uint32_t originalTraffic = busTraffic(bus);
+  uint32_t stage = 0U;
+  // The device may also have stayed asleep across an external MCU reset.
+  bus.sleeping = true;
+  const Status result = diagnostic::resetAndRebind(dev, [&]() {
+    TEST_ASSERT_EQUAL_UINT32(0U, stage++);
+    TEST_ASSERT_FALSE(dev.isInitialized());
+    TEST_ASSERT_FALSE(dev.getSettings().currentAddressKnown);
+    TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+    TEST_ASSERT_EQUAL_UINT32(0U, dev.capacityBytes());
+    TEST_ASSERT_EQUAL_UINT32(originalTraffic, busTraffic(bus));
+    return Status::Ok();
+  }, [&]() {
+    TEST_ASSERT_EQUAL_UINT32(1U, stage++);
+    TEST_ASSERT_FALSE(dev.isInitialized());
+    I2cSpecialTransfer wake;
+    wake.i2cAddress = cfg.i2cAddress;
+    TEST_ASSERT_TRUE(fakeSpecial(I2cSpecialOp::WAKE_FROM_SLEEP, wake,
+                                 cfg.i2cTimeoutMs, &bus).ok());
+    bus.nowMs += cmd::SLEEP_RECOVERY_MS;
+    return Status::Ok();
+  }, [&]() {
+    TEST_ASSERT_EQUAL_UINT32(2U, stage++);
+    TEST_ASSERT_FALSE(bus.sleeping);
+    TEST_ASSERT_TRUE(bus.nowMs >= cmd::SLEEP_RECOVERY_MS);
+    return dev.begin(cfg);
+  });
+  TEST_ASSERT_TRUE(result.ok());
+  TEST_ASSERT_EQUAL_UINT32(3U, stage);
+  TEST_ASSERT_TRUE(dev.isInitialized());
+  TEST_ASSERT_EQUAL_UINT32(cmd::MEMORY_SIZE_MB85RC64TA, dev.capacityBytes());
+  TEST_ASSERT_FALSE(dev.highSpeedModeEnabled());
+  TEST_ASSERT_FALSE(dev.getSettings().currentAddressKnown);
+  TEST_ASSERT_EQUAL_UINT32(originalTraffic + 2U, busTraffic(bus));
+  TEST_ASSERT_TRUE(dev.readCurrentAddress(value).is(Err::INVALID_PARAM));
+  TEST_ASSERT_EQUAL_UINT32(originalTraffic + 2U, busTraffic(bus));
+  TEST_ASSERT_TRUE(dev.readByte(0x123U, value).ok());
+}
+
+void test_diagnostic_interface_reset_failure_waits_for_awake_retry() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  const Config cfg = make64TaConfig(bus);
+  TEST_ASSERT_TRUE(dev.begin(cfg).ok());
+  TEST_ASSERT_TRUE(dev.enterSleep().ok());
+  const uint32_t originalTraffic = busTraffic(bus);
+  bool resetSucceeds = false;
+  bool wakeSucceeds = false;
+  uint32_t wakeAttempts = 0U;
+  uint32_t bindAttempts = 0U;
+  auto reset = [&]() {
+    TEST_ASSERT_FALSE(dev.isInitialized());
+    return resetSucceeds ? Status::Ok()
+                         : Status::Error(Err::I2C_ERROR, "reset failed", 101);
+  };
+  auto wake = [&]() {
+    ++wakeAttempts;
+    if (!wakeSucceeds) {
+      return Status::Error(Err::I2C_ERROR, "wake failed", 102);
+    }
+    I2cSpecialTransfer stimulus;
+    TEST_ASSERT_TRUE(fakeSpecial(I2cSpecialOp::WAKE_FROM_SLEEP, stimulus,
+                                 cfg.i2cTimeoutMs, &bus).ok());
+    bus.nowMs += cmd::SLEEP_RECOVERY_MS;
+    return Status::Ok();
+  };
+  auto bind = [&]() {
+    ++bindAttempts;
+    TEST_ASSERT_FALSE(bus.sleeping);
+    TEST_ASSERT_TRUE(bus.nowMs >= cmd::SLEEP_RECOVERY_MS);
+    return dev.begin(cfg);
+  };
+  Status result = diagnostic::resetAndRebind(dev, reset, wake, bind);
+  TEST_ASSERT_TRUE(result.is(Err::I2C_ERROR));
+  TEST_ASSERT_EQUAL_INT32(101, result.detail);
+  TEST_ASSERT_FALSE(dev.isInitialized());
+  TEST_ASSERT_TRUE(bus.sleeping);
+  TEST_ASSERT_EQUAL_UINT32(0U, wakeAttempts);
+  TEST_ASSERT_EQUAL_UINT32(0U, bindAttempts);
+  TEST_ASSERT_EQUAL_UINT32(originalTraffic, busTraffic(bus));
+
+  resetSucceeds = true;
+  result = diagnostic::resetAndRebind(dev, reset, wake, bind);
+  TEST_ASSERT_TRUE(result.is(Err::I2C_ERROR));
+  TEST_ASSERT_EQUAL_INT32(102, result.detail);
+  TEST_ASSERT_FALSE(dev.isInitialized());
+  TEST_ASSERT_TRUE(bus.sleeping);
+  TEST_ASSERT_EQUAL_UINT32(1U, wakeAttempts);
+  TEST_ASSERT_EQUAL_UINT32(0U, bindAttempts);
+  TEST_ASSERT_EQUAL_UINT32(originalTraffic, busTraffic(bus));
+
+  wakeSucceeds = true;
+  TEST_ASSERT_TRUE(diagnostic::resetAndRebind(dev, reset, wake, bind).ok());
+  TEST_ASSERT_TRUE(dev.isInitialized());
+  TEST_ASSERT_EQUAL_UINT32(2U, wakeAttempts);
+  TEST_ASSERT_EQUAL_UINT32(1U, bindAttempts);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SleepState::AWAKE),
+                          static_cast<uint8_t>(dev.sleepState()));
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.readByte(0U, value).ok());
+}
+
+void test_diagnostic_interface_reset_preserves_unconsumed_transfer_result() {
+  FakeBus bus;
+  MB85RC::MB85RC dev;
+  const Config cfg = make64TaConfig(bus);
+  TEST_ASSERT_TRUE(dev.bind(cfg).ok());
+  uint8_t value = 0U;
+  TEST_ASSERT_TRUE(dev.requestRead(0x123U, 0U, &value, 1U).ok());
+  const Status result = diagnostic::resetAndRebind(
+      dev, []() { return Status::Ok(); }, []() { return Status::Ok(); },
+      [&]() { return dev.begin(cfg); });
+  TEST_ASSERT_TRUE(result.is(Err::BUSY));
+  TEST_ASSERT_FALSE(dev.isInitialized());
+  TEST_ASSERT_EQUAL_UINT32(0U, busTraffic(bus));
+  TransferResult retained;
+  TEST_ASSERT_TRUE(dev.takeTransferResult(retained).ok());
+  TEST_ASSERT_EQUAL_UINT32(0x123U, retained.requestId);
+  TEST_ASSERT_TRUE(retained.status.is(Err::CANCELLED));
+  TEST_ASSERT_TRUE(dev.takeTransferResult(retained).is(Err::NO_RESULT));
+}
+
 void test_diagnostic_crc_range_and_status_names() {
   const uint8_t data[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
   const uint32_t crc = diagnostic::crc32Update(0xFFFFFFFFU, data, sizeof(data));
@@ -6368,6 +6500,9 @@ int main() {
   RUN_TEST(test_semantic_identity_mismatch_does_not_wrap_failure_counter);
 
   // Transport adapter
+  RUN_TEST(test_diagnostic_interface_reset_clears_state_before_wake_and_identity);
+  RUN_TEST(test_diagnostic_interface_reset_failure_waits_for_awake_retry);
+  RUN_TEST(test_diagnostic_interface_reset_preserves_unconsumed_transfer_result);
   RUN_TEST(test_diagnostic_crc_range_and_status_names);
   RUN_TEST(test_diagnostic_poll_returns_and_consumes_terminal_results);
   RUN_TEST(test_diagnostic_poll_exhaustion_and_verified_restore);

@@ -37,8 +37,7 @@ inline bool fitsContiguous(const MB85RC::MB85RC& device, uint32_t address, size_
   if (len == 0U || capacity == 0U || address >= capacity) {
     return false;
   }
-  const size_t remaining = static_cast<size_t>(capacity - address);
-  return len <= remaining;
+  return len <= capacity - address;
 }
 
 inline MB85RC::Status writeBytes(MB85RC::MB85RC& device,

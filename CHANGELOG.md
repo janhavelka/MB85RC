@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Append-only `TransportCode::NACK_UNSPECIFIED` and `Err::I2C_NACK` values for
+  backends that cannot identify which byte was rejected. Existing enum values
+  and widths are unchanged; this is an additive, source-compatible extension.
+
 ### Fixed
 
 - Require complete, unique HIL health snapshots, including success totals,
@@ -28,31 +34,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound SCL stretching during the Arduino example's open-drain interface
   reset and reject a still-LOW SDA or SCL before restarting Wire. Runtime
   reset retains its existing detach-before-GPIO ownership order.
-- Audit item 7 (stage 1): both CLIs use the framework-neutral `DiagnosticCore.h`
-  for CRC, range checks, verified restoration, staged polling/results, and enum
-  names. Printing and demo suites stay local. Native tests cover the shared
-  behavior, and the IDF framework ban also scans the new header.
-- Audit item 6: retired the contradictory historical audit snapshot, retaining
-  only additional datasheet details and remaining documentation, diagnostic,
-  and hardware-qualification work.
-- Audit item 5: clarified Sleep preflight, AUTO selection failure, and terminal
-  reconciliation fields; documented shared IDF helpers and legacy Wire limits.
-  All four Arduino mode transitions now consistently report `UNSUPPORTED`,
-  with matching HIL expectations, and the example transaction timeout is 10 ms.
-- Audit item 4: added append-only, source-compatible `TransportCode::NACK_UNSPECIFIED`
-  and `Err::I2C_NACK` values. IDF NACKs and ESP32 Wire result 2 now preserve the
-  unknown byte location and uncertain memory-write effect, including short
-  buffered writes. Wire short reads remain generic errors because the backend
+- IDF NACKs and ESP32 Wire result 2 now preserve the unknown byte location and
+  uncertain memory-write effect, including short buffered writes. Wire short
+  reads remain generic errors because the backend
   does not expose whether their cause was a NACK, timeout, or another failure.
-- Audit item 3: a successful CLI interface reset now rebinds the driver and
+- A successful Arduino CLI interface reset now rebinds the driver and
   repeats AUTO identification, allowing recovery after failed initialization.
   Reset also refuses to enter the legacy 3.2.0 Wire core if a failed close may
   have left its mutex held; that exceptional legacy failure needs a board restart.
-- Audit item 2: both CLI scan entry points use the configured Wire context,
+- Native ESP-IDF startup and `iface_reset` invalidate cached driver state before
+  initializing the bus, send an address-only wake and wait for recovery, then
+  bind and identify the device. Failed interface recovery leaves the driver
+  unbound; a later successful reset can retry. Controller deletion and GPIO
+  failures are reported instead of discarding a live bus handle or claiming
+  reset success.
+- Both CLI scan entry points use the configured Wire context,
   reject an unready interface, and stop safely if a scan invalidates it.
-- Audit item 1: Wire callbacks close failed repeated-start transactions and
-  release the current ESP32 core's mutex if buffers were freed, then require interface
+- Wire callbacks close failed repeated-start transactions and release the
+  current ESP32 core's mutex if buffers were freed, then require interface
   reset. Native regressions cover the non-STOP error and all write entry points.
+- All four Arduino High-speed/Sleep mode transitions consistently report
+  `UNSUPPORTED`, with matching HIL expectations.
 - The High-speed FakeBus current-address path now composes the address from the
   slave byte, with regression coverage for `MB85RC1MT` crossing the 64 KiB bank.
 - ESP-IDF example error/commit mapping and RX-only, TX-only, and combined
@@ -102,11 +104,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagnostic output.
 - The native ESP-IDF write-read callback now handles transmit-only requests with
   a STOP-terminated transmit. Its error-code and write-commit mappings are
-  centralized and protected by compile-time assertions.
+  centralized and protected by native tests and compile-time assertions.
 - Example CLI `errToStr()` covers `Err::NO_RESULT` and `Err::CANCELLED`.
+- Example typed-memory range checks no longer narrow remaining device capacity
+  to `size_t`, matching the core's comparison for hosts with narrower sizes.
+- README and public API documentation now describe wake behavior without a
+  clock hook, bus-silent High-speed enablement, callback and staged-buffer
+  lifetimes, and the new binding retained after a `begin()` identity failure.
+  The documented Arduino timeout and unsupported mode commands match the code.
 
 ### Changed
 
+- Both CLIs use the framework-neutral `DiagnosticCore.h` for CRC, range checks,
+  verified restoration, staged polling/results, and enum names. Printing and
+  demo suites stay local. Native tests cover the shared behavior, and the IDF
+  framework ban also scans the new header.
+- The Arduino example transaction timeout is 10 ms, leaving controller and
+  scheduling margin above the wire time of its configured 128-byte buffer.
+- Clarified Sleep preflight, AUTO selection failure, and terminal reconciliation
+  fields; documented the shared helpers, legacy Wire recovery limits, and
+  application-owned integration responsibilities.
+- Replaced the contradictory historical audit snapshot with additional
+  datasheet details and remaining documentation, diagnostic, and hardware
+  qualification work.
 - `_specialTransfer()` uses the active variant's tREC, matching
   `sleepRecoveryUs()`.
 - Staged transfer requests validate their parameters before the Sleep gate, so a

@@ -91,7 +91,7 @@ struct SettingsSnapshot {
   uint32_t sleepWakeReadyMs = 0;   ///< Millisecond deadline for WAKING -> AWAKE.
   uint16_t sleepRecoveryUs = 0;    ///< Datasheet tREC contract for active variant.
   bool currentAddressKnown = false; ///< True after a successful memory access seeds the pointer; false after conservative invalidation.
-  uint32_t currentAddress = 0;    ///< Next byte address for Current Address Read.
+  uint32_t currentAddress = 0;    ///< Next byte address for Current Address Read; usable only when currentAddressKnown is true.
 };
 
 /// @brief Result of comparing expected bytes with FRAM contents.
@@ -201,14 +201,19 @@ struct TransferResult {
 /// @brief MB85RC-family FRAM driver class.
 ///
 /// MB85RC instances are not internally thread-safe. Use one task or provide
-/// external serialization around all public methods that can touch driver state
-/// or I2C. APIs that perform I2C are not ISR-safe because they can call
+/// external serialization around all instance methods, including cache-only
+/// queries while another task can modify state. Bus locking alone does not
+/// serialize the driver's state or a multi-transaction operation. APIs that
+/// perform I2C are not ISR-safe because they can call
 /// transport callbacks and may block until the transport timeout. Transport
 /// callbacks must not recursively call back into the same MB85RC instance.
 ///
 /// The core driver does not own the I2C bus: bus initialization, locking,
-/// timeout policy, retry policy, and recovery policy belong to the injected
-/// transport callbacks or the application bus manager.
+/// and per-transaction timeout enforcement belong to the injected transport.
+/// Retry and recovery policy belong to the application bus manager, outside
+/// callbacks. Multiple instances or other bus users accessing the same chip
+/// also need owner coordination for current-address and Sleep state, and for
+/// write/readback sequences that must observe their own data.
 ///
 /// @note Except for pollTransfer(), bus-touching methods require a successful
 /// binding and no active cooperative transfer. They report NOT_INITIALIZED or
@@ -236,6 +241,10 @@ public:
   /// Fixed variants become immediately usable for validation, address encoding,
   /// and owner-directed transactions. AUTO remains bound but cannot perform
   /// memory access until readDeviceId() selects a supported variant.
+  /// Configuration validation failure preserves an existing binding. Success
+  /// resets cached health, identity, mode flags, and current-address state;
+  /// the application must supply an initialized bus and an awake device before
+  /// subsequent I2C. Binding does not physically wake or reset the chip.
   /// @param config Configuration including terminal transport callbacks.
   /// @return Status::Ok() when the passive binding is valid; BUSY when a
   /// transfer is active or a terminal transfer result has not been consumed.
@@ -243,7 +252,10 @@ public:
 
   /// Compatibility lifecycle: bind, then perform one explicit presence/identity
   /// transaction. A transport/identity failure is returned but the valid passive
-  /// binding is retained so the external owner may try again later.
+  /// binding to the new configuration is retained so the external owner may
+  /// try again later. This includes a fixed Device-ID-capable variant supplied
+  /// without i2cSpecial: bind() can succeed for normal memory access while
+  /// begin() returns INVALID_CONFIG from its identity check.
   /// Does not configure or take ownership of the caller-managed I2C bus.
   /// @param config Configuration including transport callbacks
   /// @return Status::Ok() when binding and the compatibility check succeeds;
@@ -265,7 +277,9 @@ public:
   /// retains no caller buffer pointer and remains available for exactly-once
   /// consumption. An already-terminal result is also retained. Call
   /// takeTransferResult() before bind()/begin() when either case leaves a
-  /// result pending.
+  /// result pending. This releases all borrowed transfer and configuration
+  /// pointers but does not wake a sleeping chip or interrupt a callback already
+  /// executing; the instance serialization contract still applies.
   void end();
   
   // =========================================================================
@@ -363,6 +377,9 @@ public:
   /// The core does not change the controller clock. When enabled, each memory
   /// or current-address transaction is emitted through Config::i2cSpecial with
   /// a High-speed master-code prefix because a STOP exits the bus HS state.
+  /// Enabling performs no I2C and cannot test the backend's raw HS capability;
+  /// the configured special callback must implement it. Variant support alone
+  /// does not establish that a particular transport supports the feature.
   /// Device ID uses the explicit special callback; probe()/recover() use the
   /// protocol appropriate to the active variant.
   /// @param enabled true to use HS-prefixed transfers; false to use normal I2C.
@@ -480,6 +497,9 @@ public:
 
   /// Perform exactly one addressed read transaction.
   /// `len` must fit the configured RX transport capability.
+  /// On transport failure, buffer contents are unspecified and current-address
+  /// tracking is invalidated; completion counts do not authorize reuse of a
+  /// partially received chunk.
   /// @param address Starting memory address within active capacity.
   /// @param buf Output buffer that receives exactly len bytes on success.
   /// @param len Number of bytes in `1..maxReadDataBytes()`.
@@ -492,6 +512,10 @@ public:
   /// that must advance one backend transfer per scheduler poll should use a
   /// staged adapter/API rather than this whole-range helper.
   /// The full range must fit before the active variant's end address.
+  /// On failure, earlier successful chunks remain in the output buffer, but
+  /// this convenience API returns no completed-prefix count and the failed
+  /// chunk's contents are unspecified. Use requestRead()/getTransferProgress()
+  /// when that prefix must be reported.
   /// @param address Starting memory address within the active variant capacity.
   /// @param buf Output buffer
   /// @param len Number of bytes to read
@@ -515,9 +539,10 @@ public:
 
   /// Perform exactly one addressed write transaction.
   ///
-  /// On a transport failure `writeCommit` preserves whether no data was
-  /// accepted or the physical effect is indeterminate. This method never
-  /// retries. Transport acceptance does not prove persistence while WP is high.
+  /// On a transport failure `writeCommit` preserves proven non-acceptance,
+  /// proven full acceptance before a later controller error, or an
+  /// indeterminate physical effect. This method never retries. Transport
+  /// acceptance does not prove persistence while WP is high.
   /// @param address Starting memory address within active capacity.
   /// @param buf Input data that remains valid for the synchronous call.
   /// @param len Number of bytes in `1..maxWriteDataBytes()`.
@@ -624,6 +649,9 @@ public:
   /// address-setting transaction, such as a successful addressed memory
   /// read/write by this instance. Failed transactions and recovery paths
   /// conservatively invalidate cached current-address state.
+  /// Other users of the same chip or external power/bus resets can invalidate
+  /// the physical pointer without notifying this instance. Coordinate those
+  /// users and perform a fresh addressed access before relying on this API.
   /// @param value Output byte
   /// @return Status::Ok() on success
   Status readCurrentAddress(uint8_t& value);
@@ -636,8 +664,11 @@ public:
   /// address-setting transaction, such as a successful addressed memory
   /// read/write by this instance. Failed transactions and recovery paths
   /// conservatively invalidate cached current-address state.
-  /// Performs exactly `len` one-byte transport callbacks; use read() for bulk
-  /// transfers that should use bounded multi-byte chunks.
+  /// Uses the same exclusive-pointer ownership requirement as the single-byte
+  /// overload. The whole requested range must fit before the capacity boundary;
+  /// a transfer that ends at that boundary leaves the next pointer at zero.
+  /// Performs exactly `len` one-byte transport callbacks on success and stops
+  /// at the first failure; use read() for bounded multi-byte chunks.
   /// @param buf Output buffer
   /// @param len Number of bytes to read
   /// @return Status::Ok() on success
@@ -726,7 +757,9 @@ public:
   /// AUTOMATIC_REQUEST_ID_FIRST.
   /// @param address Starting memory address within the active variant capacity.
   /// @param data Output buffer that must remain valid until the request reaches
-  /// a terminal state; the completed prefix may change after each poll.
+  /// a terminal state; the completed prefix may change after each poll. On a
+  /// read failure, bytesCompleted excludes the entire failed chunk, whose
+  /// buffer contents are unspecified.
   /// @param length Number of bytes to read.
   /// @return Status::Ok() when queued, BUSY if another transfer is active or
   /// Sleep state blocks memory I2C.
@@ -807,9 +840,11 @@ public:
   /// Queue a bounded cooperative write followed by readback verification.
   ///
   /// The complete request must fit one configured write and one configured read
-  /// transaction. A successful write advances to verify without replay. An
-  /// indeterminate failed write enters WAITING_FOR_RECONCILIATION: polling then
-  /// performs zero callbacks until resumeVerifiedWrite() authorizes readback.
+  /// transaction. A successful write advances to verify without replay. A
+  /// failed write with INDETERMINATE or ACCEPTED effect enters
+  /// WAITING_FOR_RECONCILIATION: polling then performs zero callbacks until
+  /// resumeVerifiedWrite() authorizes readback. Proven NOT_COMMITTED failure
+  /// terminates immediately. No failed write is automatically replayed.
   /// `data` must remain valid and unmodified until the request reaches a
   /// terminal state, including throughout reconciliation waiting.
   /// @param requestId Caller-supplied correlation ID in 1..0x7FFFFFFF.
@@ -825,9 +860,12 @@ public:
   /// A random-read chunk, sequential-write chunk, or verify readback chunk is
   /// one instruction. `maxInstructions == 0` performs no I2C and returns the
   /// current transfer status. Values above
-  /// cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL are clamped. Device ID and
-  /// current-address reads remain single-instruction synchronous diagnostics
-  /// outside this staged API.
+  /// cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL are clamped. Each instruction
+  /// invokes a synchronous terminal callback, which may block for its configured
+  /// I2C timeout. The instruction budget is not an elapsed-time deadline and
+  /// cannot preempt a callback. The owner enforces a whole-request deadline
+  /// between polls with timeoutTransfer(). Device ID and single-byte
+  /// current-address reads remain synchronous diagnostics outside this API.
   /// @param nowMs Current timestamp in milliseconds for Sleep wake advancement.
   /// @param maxInstructions Maximum transfer chunks to execute this poll.
   /// @return IN_PROGRESS while queued work remains, OK on completion, or error.
@@ -849,7 +887,10 @@ public:
   /// @return Status::Ok() when consumed, otherwise NO_RESULT.
   Status takeTransferResult(TransferResult& out);
 
-  /// Authorize verify-only reconciliation after an indeterminate write.
+  /// Authorize verify-only reconciliation after a failed possibly accepted write.
+  /// Applies to INDETERMINATE and ACCEPTED failed-write evidence. The owner
+  /// must make the bus usable before authorizing readback; this performs no
+  /// bus recovery and never replays the write.
   /// On eventual success, failed-chunk fields use the success convention;
   /// writeStatus retains the failed write and writeCommit becomes VERIFIED.
   /// @param requestId Exact active request correlation ID.
@@ -860,7 +901,9 @@ public:
   ///
   /// Cancellation emits no I2C traffic. Already accepted write/fill chunks are
   /// not rolled back; current-address tracking remains whatever the last
-  /// successful chunk established.
+  /// successful chunk established unless a failed transaction invalidated it.
+  /// Cancellation is requested between polls, never concurrently with a
+  /// callback; it cannot interrupt a blocked transport.
   /// @return Status::Ok() when the active request is cancelled, otherwise
   /// NO_RESULT.
   Status cancelTransfer();

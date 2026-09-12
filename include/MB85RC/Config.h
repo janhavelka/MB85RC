@@ -13,7 +13,10 @@ namespace MB85RC {
 ///
 /// A callback represents exactly one completed physical I2C transaction. It
 /// must return only after that transaction has reached a terminal outcome; the
-/// transport contract has no queued or in-progress result.
+/// transport contract has no queued or in-progress result. The core cannot
+/// interrupt a blocked callback, so the backend must enforce the supplied
+/// timeout and release its bus lock on every terminal path. Callback buffer
+/// pointers are borrowed only for the invocation and must not be retained.
 enum class TransportCode : uint8_t {
   OK = 0,          ///< The complete requested transaction was transferred.
   NACK_ADDRESS,    ///< The addressed device did not acknowledge.
@@ -29,7 +32,10 @@ enum class TransportCode : uint8_t {
 /// This describes transport acceptance, not durable FRAM persistence: hardware
 /// WP can allow an acknowledged transaction while suppressing the memory
 /// change. `INDETERMINATE` prevents the core from replaying a possibly accepted
-/// write; callers must reconcile it by readback.
+/// write; callers must reconcile it by readback. A NACK classification alone
+/// does not prove `NOT_COMMITTED`: that claim requires independent evidence
+/// that no requested memory data was accepted. Use `INDETERMINATE` when the
+/// backend does not expose reliable progress.
 enum class WriteCommit : uint8_t {
   NOT_APPLICABLE = 0, ///< No memory-data write was requested.
   NOT_COMMITTED,      ///< Transport proves that no requested data was accepted.
@@ -39,6 +45,13 @@ enum class WriteCommit : uint8_t {
 };
 
 /// @brief Typed, terminal outcome of one injected transport callback.
+///
+/// `OK` requires exact completion counts for both requested buffer lengths;
+/// a short or oversized success report becomes `Err::I2C_ERROR`. For failed
+/// writes, the core accepts `NOT_COMMITTED` only with counts showing no memory
+/// data completion. `ACCEPTED` additionally requires complete counts and a
+/// TIMEOUT, BUS_ERROR, or IO_ERROR after acceptance; NACKs cannot prove full
+/// acceptance. Contradictory evidence is normalized to `INDETERMINATE`.
 struct TransportResult {
   TransportCode code = TransportCode::IO_ERROR; ///< Terminal transport classification.
   int32_t detail = 0; ///< Transport-owned numeric detail; no borrowed text pointer.
@@ -105,9 +118,9 @@ struct TransportResult {
 
 /// I2C write callback signature.
 ///
-/// The application-owned transport controls bus locking, timeout enforcement,
-/// retry policy, and bus recovery. Callbacks must not recursively call public
-/// methods on the same MB85RC instance.
+/// The application-owned transport controls bus locking and timeout enforcement.
+/// Retry and recovery decisions belong to the owner after the callback returns.
+/// Callbacks must not recursively call public methods on the same MB85RC instance.
 /// @param addr I2C device address (7-bit)
 /// @param data Pointer to data to write
 /// @param len Number of bytes to write
@@ -125,9 +138,9 @@ using I2cWriteFn = TransportResult (*)(uint8_t addr, const uint8_t* data, size_t
 
 /// I2C write-then-read callback signature.
 ///
-/// The application-owned transport controls bus locking, timeout enforcement,
-/// retry policy, and bus recovery. Callbacks must not recursively call public
-/// methods on the same MB85RC instance.
+/// The application-owned transport controls bus locking and timeout enforcement.
+/// Retry and recovery decisions belong to the owner after the callback returns.
+/// Callbacks must not recursively call public methods on the same MB85RC instance.
 /// @param addr I2C device address (7-bit)
 /// @param txData Pointer to data to write (nullable when txLen == 0)
 /// @param txLen Number of bytes to write (0 allowed for read-only transactions)
@@ -137,8 +150,9 @@ using I2cWriteFn = TransportResult (*)(uint8_t addr, const uint8_t* data, size_t
 /// @param user User context pointer passed through from Config
 /// `OK` means the complete TX and RX lengths were transferred. When both phases
 /// are present, the callback must issue a repeated START with no STOP between
-/// them. RX contents are unspecified after failure. The callback must not retry
-/// or recover the bus internally.
+/// them. A read-only request uses no TX phase; a TX-only request ends with STOP.
+/// RX contents are unspecified after failure, including bytes reported as
+/// received. The callback must not retry or recover the bus internally.
 /// @return Terminal result of this one physical transaction.
 using I2cWriteReadFn = TransportResult (*)(uint8_t addr, const uint8_t* txData, size_t txLen,
                                            uint8_t* rxData, size_t rxLen,
@@ -183,12 +197,17 @@ struct I2cSpecialTransfer {
 /// master code, bus clock selection, sleep wake timing policy, and locking.
 /// READ_DEVICE_ID must implement the reserved F8h/F9h sequence described by the
 /// datasheet; it must not route address 0x7C through a normal-device backend.
-/// It must not recursively call public methods on the same MB85RC instance.
+/// The same terminal-outcome, borrowed-buffer, timeout, and no-internal-retry
+/// rules as the normal callbacks apply. It must not recursively call public
+/// methods on the same MB85RC instance.
 using I2cSpecialFn = TransportResult (*)(I2cSpecialOp op,
                                          const I2cSpecialTransfer& transfer,
                                          uint32_t timeoutMs, void* user);
 
 /// Millisecond timestamp callback.
+/// Use the same clock domain for timestamps passed to tick() and pollTransfer().
+/// Unsigned 32-bit millisecond rollover is supported. Keep the callback short
+/// and do not re-enter public methods on the same instance from it.
 /// @param user User context pointer passed through from Config
 /// @return Current monotonic milliseconds
 using NowMsFn = uint32_t (*)(void* user);
@@ -220,11 +239,13 @@ static_assert(cmd::MAX_FILL_CHUNK <= cmd::MAX_WRITE_DATA_BYTES,
 
 /// @brief Configuration for MB85RC driver.
 ///
-/// `i2cUser`, `timeUser`, and the state they reference must remain valid until
-/// end() or until a later successful bind()/begin() replaces the configuration.
-/// A failed replacement leaves the previous binding intact. Callback
-/// invocations are synchronous and never outlive the public call that made
-/// them.
+/// The configuration is copied; `i2cUser`, `timeUser`, and the state they
+/// reference remain application-owned. Keep them valid until end() or until
+/// a later bind() accepts replacement configuration. Failed bind() validation
+/// leaves the previous binding intact. begin() first calls bind(): once that
+/// succeeds, the new configuration remains installed even if the subsequent
+/// presence/identity check fails. Callback invocations are synchronous and
+/// never outlive the public call that made them.
 struct Config {
   // === I2C Transport (required) ===
   I2cWriteFn i2cWrite = nullptr;         ///< I2C write function pointer

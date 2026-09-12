@@ -422,7 +422,10 @@ MB85RC::TransportResult i2cSpecial(
   return mapI2c(err, completedTxBytes, completedRxBytes, failureCommit);
 }
 
-bool initBus() {
+esp_err_t initBus() {
+  if (gBus.bus != nullptr) {
+    return ESP_ERR_INVALID_STATE;
+  }
   i2c_master_bus_config_t cfg = {};
   cfg.i2c_port = I2C_NUM_0;
   cfg.sda_io_num = I2C_SDA;
@@ -430,32 +433,64 @@ bool initBus() {
   cfg.clk_source = I2C_CLK_SRC_DEFAULT;
   cfg.glitch_ignore_cnt = 7;
   cfg.flags.enable_internal_pullup = true;
-  return i2c_new_master_bus(&cfg, &gBus.bus) == ESP_OK;
+  return i2c_new_master_bus(&cfg, &gBus.bus);
 }
 
-void resetBusPins() {
+esp_err_t resetBusPins() {
   if (gBus.bus != nullptr) {
-    (void)i2c_del_master_bus(gBus.bus);
+    const esp_err_t removed = i2c_del_master_bus(gBus.bus);
+    if (removed != ESP_OK) {
+      // The controller still owns this live handle and its pins. Retain the
+      // handle for a later retry and do not drive recovery pulses underneath it.
+      return removed;
+    }
     gBus.bus = nullptr;
   }
-  gpio_set_direction(I2C_SDA, GPIO_MODE_INPUT_OUTPUT_OD);
-  gpio_set_pull_mode(I2C_SDA, GPIO_PULLUP_ONLY);
-  gpio_set_direction(I2C_SCL, GPIO_MODE_OUTPUT_OD);
-  gpio_set_pull_mode(I2C_SCL, GPIO_PULLUP_ONLY);
-  gpio_set_level(I2C_SDA, 1);
+  gpio_config_t pins = {};
+  pins.pin_bit_mask = (1ULL << I2C_SDA) | (1ULL << I2C_SCL);
+  pins.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+  pins.pull_up_en = GPIO_PULLUP_ENABLE;
+  pins.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  pins.intr_type = GPIO_INTR_DISABLE;
+  esp_err_t err = gpio_config(&pins);
+  if (err != ESP_OK) {
+    return err;
+  }
+  err = gpio_set_level(I2C_SDA, 1);
+  if (err != ESP_OK) {
+    return err;
+  }
   for (int i = 0; i < 9; ++i) {
-    gpio_set_level(I2C_SCL, 0);
+    err = gpio_set_level(I2C_SCL, 0);
+    if (err != ESP_OK) {
+      return err;
+    }
     esp_rom_delay_us(5);
-    gpio_set_level(I2C_SCL, 1);
+    err = gpio_set_level(I2C_SCL, 1);
+    if (err != ESP_OK) {
+      return err;
+    }
     esp_rom_delay_us(5);
   }
-  gpio_set_level(I2C_SDA, 0);
+  err = gpio_set_level(I2C_SDA, 0);
+  if (err != ESP_OK) {
+    return err;
+  }
   esp_rom_delay_us(5);
-  gpio_set_level(I2C_SCL, 1);
+  err = gpio_set_level(I2C_SCL, 1);
+  if (err != ESP_OK) {
+    return err;
+  }
   esp_rom_delay_us(5);
-  gpio_set_level(I2C_SDA, 1);
+  err = gpio_set_level(I2C_SDA, 1);
+  if (err != ESP_OK) {
+    return err;
+  }
   esp_rom_delay_us(5);
-  puts(initBus() ? "iface_reset: OK" : "iface_reset: FAIL");
+  if (gpio_get_level(I2C_SDA) == 0 || gpio_get_level(I2C_SCL) == 0) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  return initBus();
 }
 
 void printStatus(const char* op, MB85RC::Status st) {
@@ -543,7 +578,13 @@ void formatWriteConfirmation(uint32_t addr, const uint8_t* data, size_t dataLen,
   }
 }
 
-void beginDriver() {
+MB85RC::Status beginDriver() {
+  if (gBus.bus == nullptr) {
+    gFram.end();
+    return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR,
+                                 "I2C interface is not initialized",
+                                 ESP_ERR_INVALID_STATE);
+  }
   gCfg.i2cWrite = i2cWrite;
   gCfg.i2cWriteRead = i2cWriteRead;
   gCfg.i2cSpecial = i2cSpecial;
@@ -554,10 +595,47 @@ void beginDriver() {
   const MB85RC::Status bound = gFram.bind(gCfg);
   printStatus("bind", bound);
   if (!bound.ok()) {
-    return;
+    return bound;
+  }
+  if (gCfg.expectedVariant == MB85RC::DeviceVariant::MB85RC16V) {
+    const MB85RC::Status present = gFram.probe();
+    printStatus("presence", present);
+    return present;
   }
   MB85RC::DeviceId identity;
-  printStatus("identity", gFram.readDeviceId(identity));
+  const MB85RC::Status identified = gFram.readDeviceId(identity);
+  printStatus("identity", identified);
+  return identified;
+}
+
+MB85RC::Status initializeDriverInterface(bool resetPins) {
+  const uint16_t priorRecoveryUs = gFram.sleepRecoveryUs();
+  return diagnostic::resetAndRebind(gFram, [resetPins]() {
+    const esp_err_t err = resetPins ? resetBusPins() : initBus();
+    return err == ESP_OK
+               ? MB85RC::Status::Ok()
+               : MB85RC::Status::Error(MB85RC::Err::I2C_ERROR,
+                                        "I2C interface initialization failed", err);
+  }, [priorRecoveryUs]() {
+    // FRAM may remain asleep across MCU startup or a previous failed reset.
+    // An address-only wake never writes memory. Always send it, then allow tREC
+    // before a fresh binding forgets the old power state and reads identity.
+    MB85RC::I2cSpecialTransfer transfer;
+    transfer.i2cAddress = gCfg.i2cAddress;
+    const esp_err_t err = wakeRaw(gBus, transfer, gCfg.i2cTimeoutMs);
+    if (err != ESP_OK) {
+      return MB85RC::Status::Error(MB85RC::Err::I2C_ERROR,
+                                    "I2C interface wake stimulus failed", err);
+    }
+    uint32_t recoveryUs =
+        gCfg.sleepRecoveryUs > MB85RC::cmd::SLEEP_RECOVERY_US
+            ? gCfg.sleepRecoveryUs : MB85RC::cmd::SLEEP_RECOVERY_US;
+    if (priorRecoveryUs > recoveryUs) {
+      recoveryUs = priorRecoveryUs;
+    }
+    esp_rom_delay_us(recoveryUs);
+    return MB85RC::Status::Ok();
+  }, beginDriver);
 }
 
 void printHelp() {
@@ -1215,7 +1293,7 @@ void handleCommand(char* line) {
   } else if (strcmp(full, "recover") == 0) {
     printStatus("recover", gFram.recover());
   } else if (strcmp(full, "iface_reset") == 0) {
-    resetBusPins();
+    printStatus("iface_reset", initializeDriverInterface(true));
   } else if (strcmp(full, "drv") == 0 || strcmp(full, "cfg") == 0 ||
              strcmp(full, "settings") == 0) {
     printDrv();
@@ -1471,10 +1549,7 @@ extern "C" void app_main(void) {
   puts("\nMB85RC native ESP-IDF CLI");
   puts("Diagnostic-only example: owns the I2C bus and blocks on console input.");
   puts("Production systems should serialize shared-bus access in their own bus manager.");
-  if (!initBus()) {
-    puts("I2C init failed");
-  }
-  beginDriver();
+  printStatus("I2C init", initializeDriverInterface(false));
   printHelp();
   char line[LINE_LEN] = {};
   while (true) {

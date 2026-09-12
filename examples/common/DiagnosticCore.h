@@ -11,6 +11,25 @@
 
 namespace diagnostic {
 
+// Invalidate driver caches before owner-level electrical recovery. A failed
+// interface reset leaves the driver unbound and must not attempt identification.
+// wakeDevice must complete the wake stimulus and the caller-owned recovery wait
+// before returning success, including retries after old Sleep state was cleared.
+// end() retains any staged terminal result; this helper does not discard it.
+template <typename ResetInterface, typename WakeDevice, typename BindDriver>
+MB85RC::Status resetAndRebind(MB85RC::MB85RC& dev,
+                              ResetInterface resetInterface,
+                              WakeDevice wakeDevice,
+                              BindDriver bindDriver) {
+  dev.end();
+  const MB85RC::Status reset = resetInterface();
+  if (!reset.ok()) {
+    return reset;
+  }
+  const MB85RC::Status awake = wakeDevice();
+  return awake.ok() ? bindDriver() : awake;
+}
+
 inline const char* errToStr(MB85RC::Err err) {
   using namespace MB85RC;
   switch (err) {

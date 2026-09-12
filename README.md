@@ -30,6 +30,12 @@ matrix. Do not treat CI, native tests, fake-bus WP simulation, or evidence from
 one fixture as proof for a different FRAM variant, board, address strap,
 pull-up network, WP wiring, power profile, or shared-bus topology.
 
+Remaining software maintenance includes diagnostic CLI parity and documentation
+consolidation. The diagnostic CLIs share pure helpers, while
+their printing and demo suites remain separate; scratch ranges and stress limits
+still need a parity review. Application-owned bus scheduling, recovery, and
+atomic storage records remain integration responsibilities, described below.
+
 ## Installation
 
 ### PlatformIO
@@ -73,9 +79,10 @@ version telemetry are maintained in the [ESP-IDF port notes](docs/IDF_PORT.md).
 ## Quick Start
 
 This snippet uses the repository's example-only Arduino transport adapter from
-`examples/common/I2cTransport.h`. It is not installed as part of the public
-library. Production applications should provide an equivalent adapter around
-their application-owned bus, locking, timeout, and recovery policy.
+`examples/common/I2cTransport.h`. It is packaged with the examples and remains
+outside the public library API. Production applications should provide an
+equivalent adapter around their application-owned bus, locking, timeout, and
+recovery policy.
 
 ```cpp
 #include <Wire.h>
@@ -149,8 +156,9 @@ must be in `MB85RC::MIN_I2C_TIMEOUT_MS..MB85RC::MAX_I2C_TIMEOUT_MS`
 (`1..1000`). The injected transport owns the actual controller timeout; this
 value is the per-transaction deadline passed to callbacks.
 
-`Config::maxTxBytes` and `Config::maxRxBytes` describe the complete transaction
-capacity of the injected transport, including memory-address bytes. `bind()`
+`Config::maxTxBytes` and `Config::maxRxBytes` describe the TX and RX buffer
+capacities of the injected transport. TX capacity includes memory-address bytes;
+RX capacity covers returned data. `bind()`
 rejects a capacity too small for one valid transaction without I2C. Capabilities
 larger than the core's fixed 128-byte buffers are valid; active operations clamp
 to the smaller core limit. For a two-byte-address variant and
@@ -158,8 +166,12 @@ to the smaller core limit. For a two-byte-address variant and
 payload plus its two address bytes.
 
 `Config::i2cUser`, `Config::timeUser`, and the state they reference must remain
-valid until `end()` or a later successful `bind()`/`begin()` replaces the
-configuration. A rejected replacement leaves the previous binding active.
+valid until `end()` or another accepted binding replaces the configuration.
+A rejected `bind()` preserves the previous binding. Compatibility `begin()`
+binds first, then identifies or probes the device: a later identification/probe
+failure leaves the new configuration active even though `begin()` returns an
+error. Prefer `bind()` followed by explicit identity checks for clear lifecycle
+control.
 
 The example transport adapter maps Arduino `Wire` outcomes to terminal
 `TransportResult` values and keeps bus timeout ownership outside the library.
@@ -174,8 +186,8 @@ cannot identify which byte was rejected. ESP32 Wire result 2 does not prove
 that no memory data was accepted; its write effect remains `INDETERMINATE`.
 Wire short reads remain `IO_ERROR` because their cause is not exposed.
 Applications that need meaningful health timestamps or Sleep wake gating should
-inject `Config::nowMs`; otherwise timestamps remain `0` and wake gating
-advances only when the caller supplies time to `tick()`.
+inject `Config::nowMs`. Without it, health timestamps remain `0` and a successful
+`wake()` reports `AWAKE` immediately; the caller must enforce the recovery wait.
 
 ## I2C Ownership And Concurrency
 
@@ -188,7 +200,9 @@ context pointer.
 Each transport callback is synchronous and represents exactly one completed
 physical transaction. `TransportCode::OK` means the complete requested TX/RX
 lengths were transferred; short completion is rejected by the core. A
-write-read callback must use a repeated START with no intervening STOP.
+write-read callback with both TX and RX must use a repeated START with no
+intervening STOP. TX-only requests end with STOP; RX-only requests perform a
+current-address read without an address-setting write.
 Callbacks return no queued/in-progress state, perform no hidden retry or bus
 recovery, and never recursively call the same driver. Failed-read buffers are
 unspecified. Failed writes report `WriteCommit::NOT_COMMITTED` only when the
@@ -246,32 +260,37 @@ callbacks and issue no I2C. A synchronous callback already in flight cannot be
 interrupted by the core, so its own `T` bound remains mandatory. Accepted
 prefixes are never rolled back.
 
-An indeterminate verified-write failure enters
+If the write step of a cooperative verified write fails with
+`WriteCommit::INDETERMINATE` or `WriteCommit::ACCEPTED`, it enters
 `WAITING_FOR_RECONCILIATION`. Polling then performs zero callbacks until the
 owner has recovered the bus and calls `resumeVerifiedWrite(requestId)`. Resume
 authorizes readback only; the write is never replayed. Progress/results retain
-request ID, kind, terminal state, byte counts, failed chunk, original write and
-verify statuses, commit state, and mismatch evidence without retaining buffer
-pointers. One terminal result blocks replacement work until
-`takeTransferResult()` consumes it exactly once.
+request ID, kind, terminal state, byte counts, failed chunk, original write
+status, readback status, commit state, and mismatch evidence without retaining buffer
+pointers in those snapshots. Caller buffers must remain valid while the request
+is active or waiting for reconciliation, and input bytes must remain unchanged.
+One terminal result blocks new cooperative requests and rebinding until
+`takeTransferResult()` consumes it exactly once. Inspect terminal state and
+status even when the completed byte count equals the request length: a full
+accepted prefix can still end in cancellation, timeout, or failed verification.
 
 ### Rare Or Maintenance Operations
 
 Whole-range synchronous helpers are intentionally allowed to use the same
 finite chunk formulas in one blocking call. Across the largest supported
 128 KiB part, their upper bound is therefore finite and derived from capacity,
-`W`, `R`, and `T`. For length `N`, read/verify use at most `ceil(N/R)`
-callbacks, write uses `ceil(N/W)`, fill uses `ceil(N/min(W,64))`,
-`writeVerify()` uses `ceil(N/W) + ceil(N/R)`, and `fillVerify()` uses
-`ceil(N/min(W,64)) + ceil(N/R)`. The diagnostic
-`readCurrentAddress(buffer,N)` uses exactly `N` one-byte callbacks. Each bound
+`W`, `R`, and `T`. Read, write, fill, and verify use the chunk counts above;
+`writeVerify()` adds the write and verify counts, and `fillVerify()` adds the
+fill and verify counts. The diagnostic `readCurrentAddress(buffer,N)` uses at
+most `N` one-byte callbacks, completing all `N` on success. Each bound
 therefore has worst-case transport occupancy equal to its callback count times
 `T`. Use these helpers only in startup, diagnostics, commissioning, or a
 maintenance window whose caller budget can tolerate that occupancy.
 
-Device ID is one explicit special callback. High-speed entry selection, Sleep
-entry, and wake stimulus are also individually bounded special operations;
-Sleep recovery advances from caller-supplied time and inserts no hidden delay.
+Device ID, Sleep entry, and wake stimulus each use at most one special callback.
+High-speed enable/disable changes driver state without I2C; enabled memory
+transfers carry the prefix in their own callback. With an injected clock, Sleep
+recovery advances from caller-supplied time and inserts no hidden delay.
 FRAM has no EEPROM-style program cycle, ACK polling, erase procedure, or
 automatic retry. Large destructive writes remain non-atomic, endurance remains
 the application's data-layout concern, and ambiguous effects must be verified
@@ -286,8 +305,8 @@ avoids consuming endurance unnecessarily without adding hidden driver reads.
 Local datasheets document High-speed mode and Sleep mode only for
 MB85RC64TA, MB85RC512T, and MB85RC1MT. The driver exposes variant-gated
 capability metadata and APIs for those parts. `MB85RC04V`, `MB85RC16V`, and
-`MB85RC256V` return `UNSUPPORTED` for these mode requests and perform no bus
-traffic.
+`MB85RC256V` return `UNSUPPORTED` for High-speed enablement and Sleep entry/wake
+and perform no bus traffic.
 
 MB85RC core does not change the MCU I2C clock, pins, controller mode, or bus
 locking. `enterHighSpeedMode()` enables HS-prefixed memory/current-address
@@ -303,11 +322,14 @@ Sleep entry is emitted through `Config::i2cSpecial` as `F8h` plus the active
 device address word, repeated START, then `86h`. On success the driver marks the
 device asleep and invalidates current-address tracking. `wake()` sends the wake
 stimulus, then the application must wait `tREC >= 400 us` before access or
-`recover()`; the core records a conservative millisecond wake gate and inserts
-no hidden delay. A timeout, bus/I/O error, or malformed completion during Sleep
-entry can leave the hardware effect ambiguous; the driver then reports
+`recover()`. With `Config::nowMs` supplied, the core records a conservative
+millisecond wake gate; otherwise the caller owns that wait and the driver reports
+`AWAKE` immediately. The core inserts no hidden delay. An unspecified NACK,
+timeout, bus/I/O error, or malformed completion during Sleep entry can leave the
+hardware effect ambiguous; the driver then reports
 `SleepState::UNKNOWN`, blocks normal I2C, and requires an explicit `wake()`.
-A failed wake remains `UNKNOWN`; a successful wake enters `WAKING` until tREC.
+A failed wake remains `UNKNOWN`; with an injected clock, a successful wake enters
+`WAKING` until the recovery gate expires.
 
 ## API Documentation
 
@@ -416,6 +438,12 @@ the application layer:
 
 ## Examples
 
+Both bundled CLIs configure `Config::expectedVariant` as `DeviceVariant::AUTO`.
+The `variants` command lists supported-part metadata; it does not select a
+different part. To use `MB85RC16V`, set the example's `expectedVariant` to
+`DeviceVariant::MB85RC16V` and rebuild, because that part has no Device ID
+command. Other fixed-variant configurations also require editing this setting.
+
 - `examples/01_basic_bringup_cli/`
   - Arduino diagnostic/bring-up CLI; not a production storage stack or shared-bus manager.
   - `cfg` / `settings` for runtime/config snapshots
@@ -436,10 +464,15 @@ The Arduino stress commands temporarily mutate only a bounded scratch byte or
 completed run. A failed restore is reported explicitly; the commands never
 claim that temporary writes are atomic or safe against power loss.
 
-The bundled board configuration uses a 5 ms controller/callback timeout and
-configures the pinned ESP32 Wire buffer for 128-byte TX/RX transactions. On
+The bundled Arduino board configuration uses a 10 ms controller/callback timeout
+and configures the pinned ESP32 Wire buffer for 128-byte TX/RX transactions. On
 two-byte-address variants this permits 126-byte write-data and 128-byte read
 chunks while keeping timeout ownership in the example transport.
+
+If the Arduino interface becomes unready, `scan` and transport operations refuse
+further bus traffic. Run `iface_reset` to reinitialize it; a successful reset
+rebinds the driver and repeats Device ID selection. The Validation section
+below describes the legacy-core recovery exception.
 
 - `examples/espidf_basic/`
   - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.
@@ -475,7 +508,7 @@ sleep wake                # Wake, wait recovery interval, then recover
 ```
 
 The bundled Arduino `Wire` adapter implements the Device ID special operation
-only. Its CLI rejects `hs enter`, `sleep enter`, and `sleep wake` as
+only. Its CLI rejects `hs enter`, `hs exit`, `sleep enter`, and `sleep wake` as
 `UNSUPPORTED` before bus traffic. Full HS/Sleep diagnostics
 require an application-owned raw special-operation adapter, such as the native
 ESP-IDF example transport.

@@ -33,9 +33,9 @@ resources:
 The Arduino and ESP-IDF examples share a command contract and the pure helpers
 in `examples/common/DiagnosticCore.h`: CRC updates, range checks, verified
 restoration, staged-result handling, bounded polling with an injected clock,
-and enum names. Each main retains its own printing and diagnostic demo suites.
-The native example's
-SDK-independent result mapping and transaction dispatch live in
+and enum names. That header also supplies the native example's reset/rebind
+ordering, tested without an SDK. Each main retains its own printing and
+diagnostic demo suites. SDK-independent result mapping and transaction dispatch live in
 `examples/common/IdfI2cTransport.h`, shared with native tests. The example binds
 the SDK's error constants and transaction functions to those helpers.
 The IDF example must not include Arduino sources or compatibility
@@ -47,12 +47,17 @@ expected command coverage.
 
 The native IDF CLI exposes the same driver-facing workflows as the Arduino CLI:
 
-- variant selection, active capacity, and Device ID diagnostics
+- AUTO variant discovery, active capacity, and Device ID diagnostics
 - addressed read, dump/hexdump, text, strings, CRC, and verify commands
 - current-address reads for diagnostics
 - HS/Sleep support, entry/wake, and driver diagnostics
 - heap telemetry with `heap`
 - stress, selftest, random benchmark, and typed demo commands
+
+Both example CLIs configure `DeviceVariant::AUTO`; `variants` lists device
+metadata and does not select a variant. For the no-Device-ID `MB85RC16V`, set
+`expectedVariant` explicitly in the example configuration and rebuild before
+running memory diagnostics. The core already supports that explicit binding.
 
 Destructive FRAM commands require explicit confirmation forms:
 
@@ -84,6 +89,15 @@ therefore maps an invalid-response/not-found result to
 `WriteCommit::INDETERMINATE` once a memory write was issued;
 it never upgrades that outcome to `NOT_COMMITTED` or encourages a blind retry.
 
+Startup and `iface_reset` clear cached driver state before initializing the
+interface. Once the bus is usable, the example sends an address-only wake and
+waits at least the configured/datasheet recovery time before binding and checking
+identity. This also handles a FRAM that stayed asleep while the MCU restarted.
+An interface or wake failure leaves the driver unbound so a later reset can
+retry. Failed identification retains the new binding for explicit `id`/`recover`
+attempts. Reset does not consume retained cooperative results or restore
+partially written memory.
+
 This demonstrates the protocol path, but it does not prove real
 3.4 MHz operation or Sleep current on hardware until board validation is
 recorded.
@@ -102,7 +116,8 @@ For a production adapter:
   requested memory data was accepted;
 - implement Device ID, High-speed, Sleep, and wake framing only through
   `Config::i2cSpecial`, without admitting reserved `0x7C` as a normal device;
-- keep callback contexts alive through `end()` or successful rebinding; and
+- keep callback contexts alive until `end()` or an accepted replacement binding,
+  including when `begin()` binds successfully but its identity check fails; and
 - serialize all calls touching the same instance because the driver is not
   internally thread-safe or ISR-safe.
 
