@@ -1,42 +1,22 @@
 # MB85RC Driver Library
 
-Production-oriented MB85RC-family FRAM I2C driver for ESP32-S2 / ESP32-S3 using Arduino/PlatformIO and ESP-IDF.
+Framework-neutral MB85RC-family FRAM I2C driver with Arduino/PlatformIO and
+ESP-IDF examples for ESP32-S2 / ESP32-S3.
 
-Library version: `4.1.0` (package metadata).
-Latest published release: [v4.1.0](https://github.com/janhavelka/MB85RC/releases/tag/v4.1.0).
-This checkout also contains the changes listed under [Unreleased](CHANGELOG.md#unreleased).
+Library version: `4.2.0` (package metadata).
+Release tag: [v4.2.0](https://github.com/janhavelka/MB85RC/releases/tag/v4.2.0).
+Later development changes are listed under [Unreleased](CHANGELOG.md#unreleased).
 
 ## Features
 
-- Injected, terminal I2C transport with no `Wire` dependency in library code
-- Zero-I/O `bind()` plus compatibility `begin()`, bus-silent `tick()`, and `end()`
-- Diagnostic `READY`, `DEGRADED`, and `OFFLINE` health that never gates owner-directed work
-- Runtime variant selection for `MB85RC04V`, `MB85RC16V`, `MB85RC64TA`, `MB85RC256V`, `MB85RC512T`, and `MB85RC1MT`
-- Exact one-transaction read, write, and verify primitives plus bounded chunked helpers
-- Current-address read support for the documented internal address-pointer flow, including multi-byte helper coverage
-- Explicit Device ID through a special transport operation, without broadening normal 7-bit scan policy
-- Raw Device ID access where available and verify/compare helpers for diagnostics
-- Runtime settings snapshot API for bus-silent examples and diagnostics
-- Request identity, retained exactly-once results, cancellation, timeout, partial progress, and indeterminate-write reconciliation for cooperative jobs
-
-## Production Readiness Summary
-
-This library is production-oriented in API shape and test coverage: the core is
-framework-neutral, uses injected I2C callbacks, rejects invalid ranges before
-bus traffic, tracks health, and documents FRAM-specific write semantics. Native
-unit tests and CI builds cover the supported runtime variants and examples.
-
-Hardware validation remains board- and variant-dependent. The
-[release checklist](docs/RELEASE_CHECKLIST.md) is the canonical qualification
-matrix. Do not treat CI, native tests, fake-bus WP simulation, or evidence from
-one fixture as proof for a different FRAM variant, board, address strap,
-pull-up network, WP wiring, power profile, or shared-bus topology.
-
-Remaining software maintenance includes diagnostic CLI parity and documentation
-consolidation. The diagnostic CLIs share pure helpers, while
-their printing and demo suites remain separate; scratch ranges and stress limits
-still need a parity review. Application-owned bus scheduling, recovery, and
-atomic storage records remain integration responsibilities, described below.
+- Injected, terminal I2C callbacks with no framework dependency in library code
+- Zero-I/O `bind()`, bus-silent `tick()` and `end()`, plus compatibility `begin()`
+- Six runtime variants, covering 512 B through 128 KiB
+- One-transaction read/write/verify primitives and bounded chunked helpers
+- Cooperative jobs with request IDs, cancellation, timeout, partial progress,
+  readback reconciliation, and retained exactly-once results
+- Current-address reads, Device ID, and variant-gated High-speed/Sleep operations
+- Cache-only settings and diagnostic health that never suppresses owner-directed work
 
 ## Installation
 
@@ -49,8 +29,9 @@ lib_deps =
   https://github.com/janhavelka/MB85RC.git#<reviewed-immutable-commit>
 ```
 
-Use `#v4.1.0` for the reviewed release. Production integrations should pin the
-release tag or its full commit, not a branch name.
+Use `#v4.2.0` for this release. To use changes listed under Unreleased,
+pin a reviewed full commit containing them. Keep production dependencies on an
+immutable release or commit.
 
 ### Manual
 
@@ -67,8 +48,7 @@ The component metadata requires ESP-IDF 6.0.1 or newer. CI builds the declared
 6.0.1 floor and 6.0.2 for both supported targets. Local validation requires
 `idf.py` on PATH.
 
-The ESP-IDF bring-up CLI is implemented as a native IDF diagnostic-only example
-with matching diagnostic coverage. Build it with:
+Build the native ESP-IDF diagnostic CLI with:
 
 ```bash
 idf.py -C examples/espidf_basic set-target esp32s3 build
@@ -84,7 +64,7 @@ This snippet uses the repository's example-only Arduino transport adapter from
 `examples/common/I2cTransport.h`. It is packaged with the examples and remains
 outside the public library API. Production applications should provide an
 equivalent adapter around their application-owned bus, locking, timeout, and
-recovery policy.
+recovery policy. Make `examples/` available on the include path for this snippet.
 
 ```cpp
 #include <Wire.h>
@@ -160,9 +140,9 @@ value is the per-transaction deadline passed to callbacks.
 
 `Config::maxTxBytes` and `Config::maxRxBytes` describe the TX and RX buffer
 capacities of the injected transport. TX capacity includes memory-address bytes;
-RX capacity covers returned data. `bind()`
-rejects a capacity too small for one valid transaction without I2C. Capabilities
-larger than the core's fixed 128-byte buffers are valid; active operations clamp
+RX capacity covers returned data. `bind()` rejects a capacity too small for one
+valid transaction without I2C. Capacities larger than the core's fixed 128-byte
+buffers are valid; active operations clamp
 to the smaller core limit. For a two-byte-address variant and
 `maxTxBytes = 126`, `maxWriteDataBytes()` is 124, matching a 124-byte owner
 payload plus its two address bytes.
@@ -175,18 +155,6 @@ failure leaves the new configuration active even though `begin()` returns an
 error. Prefer `bind()` followed by explicit identity checks for clear lifecycle
 control.
 
-The example transport adapter maps Arduino `Wire` outcomes to terminal
-`TransportResult` values and keeps bus timeout ownership outside the library.
-Each callback temporarily applies its supplied `1..1000` ms controller timeout
-and restores the prior Wire timeout on every return path, including failures.
-The application must serialize the bus for the complete callback and keep the
-Wire/controller mutex uncontended: Arduino's mutex wait is not bounded by its
-controller timeout. Scheduler and framework overhead are not a hard real-time
-guarantee.
-`TransportCode::NACK_UNSPECIFIED` becomes `Err::I2C_NACK` when the backend
-cannot identify which byte was rejected. ESP32 Wire result 2 does not prove
-that no memory data was accepted; its write effect remains `INDETERMINATE`.
-Wire short reads remain `IO_ERROR` because their cause is not exposed.
 Applications that need meaningful health timestamps or Sleep wake gating should
 inject `Config::nowMs`. Without it, health timestamps remain `0` and a successful
 `wake()` reports `AWAKE` immediately; the caller must enforce the recovery wait.
@@ -208,7 +176,7 @@ current-address read without an address-setting write.
 Callbacks return no queued/in-progress state, perform no hidden retry or bus
 recovery, and never recursively call the same driver. Failed-read buffers are
 unspecified. Failed writes report `WriteCommit::NOT_COMMITTED` only when the
-transport can prove no requested data was accepted; otherwise they report
+transport can prove no requested data was accepted; an uncertain effect is
 `INDETERMINATE`. Completion counts cover the callback buffers, so memory-write
 TX counts include the one- or two-byte memory-address prefix. Special-operation
 counts cover only `I2cSpecialTransfer::txData`/`rxData`, not hidden Device-ID,
@@ -219,25 +187,32 @@ normalized conservatively.
 `MB85RC` instances are not internally thread-safe. Use one task, or serialize
 all public calls that can touch driver state or I2C. Public I2C APIs are not
 ISR-safe because transport callbacks can block until the configured timeout.
-Transport callbacks must not recursively call back into the same `MB85RC`
-instance.
 
-The Arduino and ESP-IDF CLIs are diagnostic bring-up examples. They own their
-example buses and are not production shared-bus manager templates.
+The example Wire adapter temporarily applies each callback's supplied
+`1..1000` ms timeout, restoring the prior controller timeout on return. Serialize
+the complete callback and keep Wire's mutex uncontended: the controller timeout
+does not bound its mutex wait or scheduler overhead.
+
+`TransportCode::NACK_UNSPECIFIED` becomes `Err::I2C_NACK` when the backend cannot
+identify which byte was rejected. ESP32 Wire result 2 and IDF NACK outcomes
+retain `INDETERMINATE` once a memory write was issued. Wire short reads remain
+`IO_ERROR` because their cause is not exposed.
 
 ## Bounded Operation Classes
 
 Let `T` be `Config::i2cTimeoutMs`, `W` be `maxWriteDataBytes()`, `R` be
 `maxReadDataBytes()`, and `B` be the caller's poll budget clamped to
-`cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL` (`8`). These bounds exclude caller-
-owned queueing time and bus recovery, which the library never performs.
+`cmd::MAX_TRANSFER_INSTRUCTIONS_PER_POLL` (`8`). The core bounds callback counts;
+the time estimates below assume the transport enforces its callback deadline.
+They exclude owner queueing, framework/scheduler overhead, and bus recovery.
 
 ### Steady-State Owner Operations
 
 `readOnce()`, `writeOnce()`, and `verifyOnce()` validate the complete request
 before I2C and invoke zero or one transport callback. Valid work therefore has
-a worst-case callback occupancy of `T`. Length must be `1..R` for reads/verifies
-or `1..W` for writes. There is no hidden wait, retry, recovery, or allocation.
+transport occupancy bounded by `T` when the callback enforces that deadline.
+Length must be `1..R` for reads/verifies or `1..W` for writes. There is no hidden
+wait, retry, recovery, or allocation.
 `writeOnce()` returns the transport's commit knowledge; an accepted write is
 still not persistence proof when WP is high.
 
@@ -249,6 +224,8 @@ bus-owner task when one physical transaction per scheduler poll is required.
 `requestRead()`, `requestWrite()`, `requestFill()`, `requestVerify()`, and
 `requestVerifiedWrite()` perform zero I2C. `pollTransfer(nowMs, B)` performs at
 most `B` complete callbacks, so one call occupies at most `B * T` in transport.
+`B = 0` performs no I2C; the budget cannot preempt a callback or enforce an
+elapsed-time deadline.
 A length-`N` read/verify takes at most `ceil(N/R)` callbacks; a write takes at
 most `ceil(N/W)`; a fill uses at most `ceil(N/min(W, 64))`. A verified write
 must fit one write and one read transaction and takes at most two callbacks,
@@ -268,9 +245,9 @@ If the write step of a cooperative verified write fails with
 owner has recovered the bus and calls `resumeVerifiedWrite(requestId)`. Resume
 authorizes readback only; the write is never replayed. Progress/results retain
 request ID, kind, terminal state, byte counts, failed chunk, original write
-status, readback status, commit state, and mismatch evidence without retaining buffer
-pointers in those snapshots. Caller buffers must remain valid while the request
-is active or waiting for reconciliation, and input bytes must remain unchanged.
+status, readback status, commit state, and mismatch evidence without retaining
+buffer pointers in those snapshots. Caller buffers must remain valid while the
+request is active or waiting for reconciliation, and input bytes must remain unchanged.
 One terminal result blocks new cooperative requests and rebinding until
 `takeTransferResult()` consumes it exactly once. Inspect terminal state and
 status even when the completed byte count equals the request length: a full
@@ -293,32 +270,20 @@ Device ID, Sleep entry, and wake stimulus each use at most one special callback.
 High-speed enable/disable changes driver state without I2C; enabled memory
 transfers carry the prefix in their own callback. With an injected clock, Sleep
 recovery advances from caller-supplied time and inserts no hidden delay.
-FRAM has no EEPROM-style program cycle, ACK polling, erase procedure, or
-automatic retry. Large destructive writes remain non-atomic, endurance remains
-the application's data-layout concern, and ambiguous effects must be verified
-before any repair write.
-
-Before an intentional maintenance rewrite, verify the desired bytes first and
-skip the write when they already match. This keeps rewrite policy explicit and
-avoids consuming endurance unnecessarily without adding hidden driver reads.
 
 ## High-Speed And Sleep Modes
 
-Local datasheets document High-speed mode and Sleep mode only for
-MB85RC64TA, MB85RC512T, and MB85RC1MT. The driver exposes variant-gated
-capability metadata and APIs for those parts. `MB85RC04V`, `MB85RC16V`, and
-`MB85RC256V` return `UNSUPPORTED` for High-speed enablement and Sleep entry/wake
-and perform no bus traffic.
+The supported-variant table below lists High-speed/Sleep capability. Other parts
+return `UNSUPPORTED` for High-speed enablement and Sleep entry/wake without bus
+traffic.
 
 MB85RC core does not change the MCU I2C clock, pins, controller mode, or bus
 locking. `enterHighSpeedMode()` enables HS-prefixed memory/current-address
 transfers through the optional `Config::i2cSpecial` callback; each transfer
 sends the `0000 1XXX` master-code prefix because a STOP exits HS state. The
 application bus manager must configure and validate 3.4 MHz operation if that
-bus speed is used. The Arduino diagnostic CLI reports capability and missing
-raw-special callback support honestly. The native ESP-IDF diagnostic CLI can
-emit the HS prefix through `Config::i2cSpecial`. Neither example proves real
-3.4 MHz hardware operation without board-level validation.
+bus speed is used. The example adapters' different capabilities are listed in
+the Examples section.
 
 Sleep entry is emitted through `Config::i2cSpecial` as `F8h` plus the active
 device address word, repeated START, then `86h`. On success the driver marks the
@@ -333,25 +298,12 @@ hardware effect ambiguous; the driver then reports
 A failed wake remains `UNKNOWN`; with an injected clock, a successful wake enters
 `WAKING` until the recovery gate expires.
 
-## API Documentation
-
-The public headers under `include/MB85RC/` are the authoritative API contract.
-Run `doxygen Doxyfile` to build the complete reference; strict generation fails
-on undocumented public members and enum values, missing parameter/return
-contracts, invalid commands, and unresolved documentation links. Release and
-migration history lives in [CHANGELOG.md](CHANGELOG.md).
-
-For orientation, the API is grouped into passive lifecycle and variant
-selection, one-transaction primitives, synchronous chunked convenience calls,
-request-qualified cooperative jobs, High-speed/Sleep control, and bus-silent
-diagnostics. The operation bounds and scheduling guidance above explain when to
-use each group. Prefer the generated reference over copying method inventories
-into integration documentation.
+## Data And Driver State
 
 ### FRAM Write Semantics
 
-FRAM writes are immediate for supported variants. The driver does not add
-EEPROM-style write delays or ACK polling after writes.
+FRAM writes are immediate for supported variants. There is no EEPROM-style
+program cycle, erase procedure, write delay, or ACK polling.
 
 `writeByte()`, `write()`, and `fill()` report transport acceptance. A successful
 status means the addressed I2C write transaction, or every chunk in a bulk
@@ -364,18 +316,21 @@ Bulk `write()` and `fill()` calls may be split into multiple I2C chunks. They ar
 not atomic: if a later chunk fails, earlier accepted chunks are not rolled back.
 The simple APIs return the first failing `Status`; use `writeDetailed()` or
 `fillDetailed()` when recovery code needs the accepted-prefix length. Their
-`bytesAccepted` field is not committed persistence. Only bytes read back
-successfully by `verify()` or `verifyDetailed()` should be treated as verified.
+`bytesAccepted` field is not committed persistence. Only bytes confirmed equal
+by `verify()` or `verifyDetailed()` should be treated as verified.
 For critical writes or fills, use `writeVerify()` / `fillVerify()` or call
 `verify()` after `write()` / `fill()`.
 
-If a write or fill chunk returns `I2C_TIMEOUT` or another indeterminate
-transport failure, the failed chunk's physical effect remains observable as
-`WriteCommit::INDETERMINATE`. Synchronous `writeVerify()` and `fillVerify()`
+An uncertain write/fill chunk retains `WriteCommit::INDETERMINATE`; a timeout
+alone does not prove that no bytes were accepted. Synchronous `writeVerify()` and `fillVerify()`
 return the write/fill error without issuing readback. The cooperative
 `requestVerifiedWrite()` instead pauses without bus traffic, lets the external
 owner recover the bus, and resumes with readback only. Never resend an
 indeterminate write before reconciliation.
+
+Before an intentional maintenance rewrite, verify the desired bytes first and
+skip the write when they already match. Endurance and atomic record updates
+remain the application's data-layout responsibility.
 
 ### Current Address Semantics
 
@@ -395,9 +350,10 @@ never for transport admission policy: `OFFLINE` never suppresses an
 owner-requested transaction or claims bus-recovery authority.
 
 `getSettings()` returns a cache-only `SettingsSnapshot` and never touches the
-bus or health counters. Lifetime `totalSuccess()`/`totalFailures()` are
-`uint32_t` and wrap at `UINT32_MAX`; the `consecutiveFailures()` streak is
-`uint8_t` and saturates.
+bus or health counters. `totalSuccess()`/`totalFailures()` count tracked results
+since the latest accepted binding; `end()` also clears them. They are `uint32_t`
+and wrap at `UINT32_MAX`; the `consecutiveFailures()` streak is `uint8_t` and
+saturates.
 
 ## Supported Runtime Variants
 
@@ -409,12 +365,6 @@ bus or health counters. Lifetime `totalSuccess()`/`totalFailures()` are
 | `MB85RC256V` | 32 KiB | Device ID, `AUTO` supported | No |
 | `MB85RC512T` | 64 KiB | Device ID, `AUTO` supported | Yes |
 | `MB85RC1MT` | 128 KiB | Device ID, `AUTO` supported | Yes |
-
-`AUTO` uses the Device ID command and therefore works only on variants that
-implement Device ID. `MB85RC16V` must be selected explicitly. The driver
-derives runtime transaction addresses from `Config::i2cAddress` plus the active
-variant's address model, and rejects ambiguous base addresses before normal
-operation.
 
 The maintained [device reference](docs/DEVICE_REFERENCE.md) is the canonical
 source for address encoding, product IDs, electrical limits, bus modes,
@@ -440,31 +390,37 @@ the application layer:
 
 ## Examples
 
+The Arduino CLI in `examples/01_basic_bringup_cli/` and the native ESP-IDF CLI
+in `examples/espidf_basic/` own their diagnostic buses. Use an application bus
+manager and storage policy for production integrations.
+
 Both bundled CLIs configure `Config::expectedVariant` as `DeviceVariant::AUTO`.
 The `variants` command lists supported-part metadata; it does not select a
 different part. To use `MB85RC16V`, set the example's `expectedVariant` to
 `DeviceVariant::MB85RC16V` and rebuild, because that part has no Device ID
 command. Other fixed-variant configurations also require editing this setting.
 
-- `examples/01_basic_bringup_cli/`
-  - Arduino diagnostic/bring-up CLI; not a production storage stack or shared-bus manager.
-  - `cfg` / `settings` for runtime/config snapshots
-  - `read` / `dump` / `hexdump` for active-capacity-bounded hex+ASCII memory dumps
-  - `text`, `strings`, `crc`, and `verify` for live memory inspection on hardware
-  - `current` / `cur` for current-address reads
-  - `id` / `idraw` for parsed and raw Device ID visibility
-  - `hs`, `hs support`, `hs enter`, and `hs exit` for High-speed capability diagnostics
-  - `sleep`, `sleep support`, `sleep enter`, and `sleep wake` for Sleep mode diagnostics
-  - `drv`, `heap`, `probe`, `recover`, and restore-verified `selftest`, `stress`, `stress_mix` diagnostics
-  - `rw_suite` for read/write/fill/verify diagnostics with readback-verified restore
-  - `xfer_demo` for poll-chunked transfer API diagnostics with a staged verify of the restored bytes, including zero-budget, two-instruction, and high-budget-clamp polling checks
-  - `randbench [N]` for random-access timing over a scratch window with compact restore status
-  - `typed_demo` for fixed-width integer/float/double storage with compact pass/fail status
+Both CLIs expose these workflows; `help` lists complete syntax:
 
-The Arduino stress commands temporarily mutate only a bounded scratch byte or
-16-byte scratch window, back it up first, and write-verify restoration on every
-completed run. A failed restore is reported explicitly; the commands never
-claim that temporary writes are atomic or safe against power loss.
+| Commands | Purpose |
+| --- | --- |
+| `cfg` / `settings`, `drv`, `heap` | Configuration, driver health, and firmware heap |
+| `id`, `idraw`, `variants`, `size` | Identity, supported parts, and active capacity |
+| `read` / `dump` / `hexdump`, `text`, `strings`, `crc`, `verify` | Memory inspection and comparison |
+| `current` / `cur` | Current-address reads after a known addressed access |
+| `hs`, `sleep` | Capability reports and supported mode transitions |
+| `scan`, `probe`, `recover`, `iface_reset` | Bus and device diagnostics/recovery |
+| `selftest`, `rw_suite`, `xfer_demo`, `typed_demo` | Read/write/verify, cooperative transfer, and typed storage demos |
+| `stress`, `stress_mix`, `randbench` | Scratch-memory stress and timing |
+
+ESP-IDF requires explicit confirmation before changing FRAM contents:
+`write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`, `stress_mix!`,
+`xfer_demo!`, `randbench!`, and `typed_demo!`. Arduino uses the unsuffixed
+command names. Temporary diagnostic writes require backup and verified
+restoration; interruption or a failed restore can leave changed memory. Scratch
+ranges and stress limits differ between the examples.
+
+### Adapter Capabilities
 
 The bundled Arduino board configuration uses a 10 ms controller/callback timeout
 and configures the pinned ESP32 Wire buffer for 128-byte TX/RX transactions. On
@@ -476,65 +432,48 @@ further bus traffic. Run `iface_reset` to reinitialize it; a successful reset
 rebinds the driver and repeats Device ID selection. The Validation section
 below describes the legacy-core recovery exception.
 
-- `examples/espidf_basic/`
-  - Native ESP-IDF diagnostic-only build of the bring-up CLI command contract.
-  - Uses `app_main`, `driver/i2c_master.h`, `esp_timer`, `vTaskDelay`, and fixed C buffers.
-  - Owns its example I2C bus and blocks on console input; production systems must serialize shared-bus access externally.
-  - Preserves current-address, Device ID, raw ID, active-capacity, heap, HS/Sleep diagnostics, stress, self-test, benchmark, and typed-demo command coverage.
-  - Requires explicit `!` confirmation forms before changing FRAM contents:
-    `write!`, `fill!`, `selftest!`, `rw_suite!`, `stress!`, `stress_mix!`,
-    `xfer_demo!`, `randbench!`, and `typed_demo!`.
-  - `tools/check_idf_example_contract.py` rejects Arduino compatibility facades and checks the native IDF command surface.
+The Arduino `Wire` adapter implements the Device ID special operation only;
+`hs enter`, `hs exit`, `sleep enter`, and `sleep wake` return `UNSUPPORTED`
+before bus traffic. The native ESP-IDF adapter implements Device ID, HS-prefixed
+transfers, Sleep entry, and wake stimulus. Actual 3.4 MHz operation and Sleep
+current require hardware qualification.
+
+ESP-IDF startup and `iface_reset` invalidate cached driver state, initialize the
+interface, and wake the FRAM before binding and checking identity. This handles
+a part that stayed asleep through an MCU reset. See the
+[ESP-IDF port notes](docs/IDF_PORT.md) for reset failure and retained-result
+behavior.
 
 ### ESP-IDF CLI Inspection Examples
 
 ```text
 hexdump 0x0000 128        # Hex + ASCII view of a region
-text 0x0000 64            # Escaped text-oriented view
-strings                   # Scan the whole chip for printable ASCII strings
+text 0x0000 64           # Unescaped text display
 strings 0x1000 512 6      # Scan a window with a minimum string length
-crc 0x0000 1024           # CRC32 over a region for quick verification
+crc 0x0000 1024          # CRC32 over a region for quick verification
 verify 0x0020 55 55 55 55 # Compare live FRAM bytes against expected values
-idraw                     # Show the raw 3-byte Device ID payload
-heap                      # Example firmware heap telemetry
-current 16                # Read 16 bytes from the current internal address
-rw_suite!                 # Confirmed deterministic read/write/fill/verify suite
-xfer_demo!                # Confirmed poll-chunked transfer API demo
-randbench! 4096           # Confirmed random writes + random reads timing
-typed_demo!               # Confirmed explicit typed value storage demo
-hs support                # Show active variant High-speed capability
-hs enter / hs exit        # Enable/disable HS-prefixed transfers when the adapter supports raw HS
-sleep support             # Show active variant Sleep capability and tREC
-sleep enter               # Send Sleep entry sequence if supported
-sleep wake                # Wake, wait recovery interval, then recover
+current 16               # Continue after a known successful addressed access
+rw_suite!                # Confirmed deterministic read/write/fill/verify suite
+xfer_demo!               # Confirmed poll-chunked transfer API demo
+sleep wake               # Wake, wait recovery interval, then recover
 ```
-
-The bundled Arduino `Wire` adapter implements the Device ID special operation
-only. Its CLI rejects `hs enter`, `hs exit`, `sleep enter`, and `sleep wake` as
-`UNSUPPORTED` before bus traffic. Full HS/Sleep diagnostics
-require an application-owned raw special-operation adapter, such as the native
-ESP-IDF example transport.
 
 ### Example Helpers
 
-`examples/common/` is example-only glue and is not part of the public library API.
+`examples/common/` is outside the public library API. Its integration helpers are:
 
 | File | Purpose |
 |------|---------|
 | `BoardConfig.h` | Board-specific pin defaults and `Wire` setup |
-| `BuildConfig.h` | Compile-time log-level configuration |
-| `Log.h` | Serial logging helpers |
 | `I2cTransport.h` | Wire-backed transport adapter and owner-level interface reset |
 | `IdfI2cTransport.h` | Framework-neutral IDF result mapping and transaction dispatch, shared with native tests |
 | `DiagnosticCore.h` | Shared CRC, range, verified-restore, staged-transfer, and enum-name helpers |
 | `I2cScanner.h` | Bus scan helper that preserves owner clock/timeout settings |
-| `CliStyle.h` | CLI prompt, help, and color formatting helpers |
-| `CliShell.h` | Simple serial shell helper |
 | `TypedMemory.h` | Example-only fixed-width integer/float/double codec on top of the raw driver |
 
 ## Validation
 
-Release `v4.1.0` Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino
+The Arduino ESP32-S3/S2 examples are exact-pinned to pioarduino
 Espressif platform `55.03.311` (Arduino-ESP32 `3.3.11`, ESP-IDF `5.5.5`) and
 require PlatformIO Core `6.1.19` or newer. The `esp32s3dev_legacy_54`
 environment is a build-only source-compatibility check for the previous
@@ -549,36 +488,35 @@ package can exceed the default PlatformIO extraction path. Enable Windows long
 paths or use a short session-local core path, for example
 `$env:PLATFORMIO_CORE_DIR='C:/pio'`, before installing/building the environment.
 
-```powershell
-.\scripts\pio.cmd test -e native
-python tools/hil_runner.py --parser-self-test
-python tools/test_hil_runner.py
-python tools/test_hil_health_snapshot.py
-python tools/check_cli_contract.py
-python tools/check_core_timing_guard.py
-python tools/check_idf_example_contract.py
-python scripts/generate_version.py check
-python tools/check_metadata_consistency.py
-doxygen Doxyfile
-```
+Run the required native tests, Python contract/evidence checks, and strict
+Doxygen build listed in [Contributing](CONTRIBUTING.md#validation). The
+[release checklist](docs/RELEASE_CHECKLIST.md) adds complete Arduino/ESP-IDF
+builds, packaging, and physical qualification. On Windows, use
+`.\scripts\pio.cmd` for PlatformIO commands.
 
 `hil_runner.py` requires an explicit `--port` for both plan-only and real runs;
-`--dry-run` never opens hardware. The canonical full build, package, and real
-strict-HIL commands, including framework, transport-envelope, heap, and soak
-gates are in the [release checklist](docs/RELEASE_CHECKLIST.md).
+`--dry-run` never opens hardware. Its current functional and soak plans require
+Device ID. Explicit `MB85RC16V` configuration enables CLI memory diagnostics,
+but that part needs a dedicated/manual plan without `id`/`idraw`;
+`--require-variant` checks identity and does not change the plan.
 
-Start each collector run with a fresh CLI startup prompt. Responses are written
-to the transcript as they arrive. A missing prompt, short command write, or
-serial failure stops the run without hidden resynchronization or reconnect;
-the collector does not call an unbounded serial flush. A returned prompt alone
-does not prove delivery: memory byte counts, diagnostic counters, restoration
-results, and normal driver health are checked separately. Native ESP-IDF's
-ambiguous unescaped `text` display is excluded from automatic byte validation;
-its hexadecimal reads and CRC remain covered. Full transcripts and result
-excerpts can contain original FRAM contents, so keep them private and publish
-only reviewed summaries without those bytes.
+HIL checks response completeness, memory byte counts, restoration results, and
+driver health. Native ESP-IDF's unescaped `text` output is excluded from
+automatic byte validation; hexadecimal reads and CRC remain covered. Keep full
+transcripts and result excerpts private because they can contain original FRAM
+contents. The release checklist describes collection integrity, strict gates,
+and how to share reviewed summaries.
+
+Native tests and CI builds cannot qualify electrical behavior. Hardware evidence
+applies only to the tested revision, variant, board, address straps, WP wiring,
+power profile, and bus topology; qualify each production configuration.
 
 ## Documentation
+
+The public headers under `include/MB85RC/` are the authoritative API contract.
+Run `doxygen Doxyfile` from the checkout to generate the reference under
+`.pio/doxygen/`. Strict generation rejects undocumented public API,
+parameter/return omissions, invalid commands, and unresolved documentation links.
 
 - `CHANGELOG.md` - release history and GitHub release note source
 - `docs/DEVICE_REFERENCE.md` - maintained MB85RC-family behavior reference

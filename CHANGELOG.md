@@ -7,14 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-12
+
 ### Added
 
+- Device-free HIL collector and health-snapshot regression tests, run in CI
+  with the parser self-test.
 - Append-only `TransportCode::NACK_UNSPECIFIED` and `Err::I2C_NACK` values for
   backends that cannot identify which byte was rejected. Existing enum values
   and widths are unchanged; this is an additive, source-compatible extension.
 
 ### Fixed
 
+- Release version generation now recognizes the README's package-metadata
+  qualifier, so `generate_version.py set` updates all synchronized files
+  instead of stopping after a partial metadata update.
+- Confirmed native-IDF diagnostic commands such as `rw_suite!` and `stress!`
+  now receive complete payload, counter, and restore validation. The collector
+  previously skipped these checks because it matched only unconfirmed command
+  names; regression tests now use the actual functional and soak plans.
 - Require complete, unique HIL health snapshots, including success totals,
   percentages, timestamps and retained error details. Truncated or stale
   Arduino and native-IDF records cannot pass from healthy state tokens alone.
@@ -23,10 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Calculate the Arduino diagnostic success percentage using a 64-bit total,
   preventing overflow when adding the two 32-bit health counters.
 - The HIL collector retains serial data live, rejects short command writes,
-  and stops at its first failed command. Lost framing cannot trigger a hidden
-  resynchronization or reconnect. Complete memory payloads, diagnostic counts,
-  restoration results, and healthy driver fields are required even when the
-  final prompt arrives.
+  and stops each command sequence at its first failed result. Functional
+  failures skip soak; final diagnostics can still run when framing is intact.
+  Lost framing stops further commands without hidden resynchronization or
+  reconnect. Complete memory payloads, diagnostic counts, restoration results,
+  and healthy driver fields are required even when the final prompt arrives.
 - Arduino Wire callbacks now apply the requested per-transaction timeout and
   restore the owner's previous timeout on success and failure, instead of
   treating the supplied limit as advisory. Invalid timeout values fail before
@@ -48,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unbound; a later successful reset can retry. Controller deletion and GPIO
   failures are reported instead of discarding a live bus handle or claiming
   reset success.
-- Both CLI scan entry points use the configured Wire context,
+- Both Arduino CLI scan entry points use the configured Wire context,
   reject an unready interface, and stop safely if a scan invalidates it.
 - Wire callbacks close failed repeated-start transactions and release the
   current ESP32 core's mutex if buffers were freed, then require interface
@@ -112,9 +124,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clock hook, bus-silent High-speed enablement, callback and staged-buffer
   lifetimes, and the new binding retained after a `begin()` identity failure.
   The documented Arduino timeout and unsupported mode commands match the code.
+- Health counter documentation now identifies totals as belonging to the
+  current binding, reset by successful `bind()` or `end()`. Validation guides
+  include the CI host tests, private HIL evidence handling, and the separate
+  qualification plan required for no-Device-ID parts.
 
 ### Changed
 
+- Generated Doxygen HTML now goes to `.pio/doxygen/html/`, outside maintained
+  documentation. Device facts and the vendor PDF inventory are consolidated
+  in `docs/DEVICE_REFERENCE.md`; README focuses on usage and integration.
+- Installation guidance distinguishes release tags from additional changes in
+  a development checkout.
 - Both CLIs use the framework-neutral `DiagnosticCore.h` for CRC, range checks,
   verified restoration, staged polling/results, and enum names. Printing and
   demo suites stay local. Native tests cover the shared behavior, and the IDF
@@ -124,9 +145,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified Sleep preflight, AUTO selection failure, and terminal reconciliation
   fields; documented the shared helpers, legacy Wire recovery limits, and
   application-owned integration responsibilities.
-- Replaced the contradictory historical audit snapshot with additional
-  datasheet details and remaining documentation, diagnostic, and hardware
-  qualification work.
 - `_specialTransfer()` uses the active variant's tREC, matching
   `sleepRecoveryUs()`.
 - Staged transfer requests validate their parameters before the Sleep gate, so a
@@ -144,6 +162,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Completed audit notes and fixture-run narratives from maintained docs. Useful
+  device facts, all seven vendor PDFs, release changes, and qualification
+  procedures are retained.
 - `docs/reports/HIL_SUMMARY.md` and the `docs/reports/` directory. The ledger
   recorded fixture-specific, revision-specific hardware runs and was packaged
   for every library consumer; git history retains it. `tools/hil_runner.py` now
@@ -165,10 +186,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime ESP-IDF version reporting in the native diagnostic CLI.
 - PlatformIO archive-content validation, including packaged Markdown link
   checks and an explicit public-package allowlist.
-- Revision-specific evidence for the completed 24-hour MB85RC256V strict soak:
-  34/34 functional checks and 221,222 soak checks passed with zero failures,
-  unknowns, target resets, reconnects, or framing recoveries; the driver ended
-  `READY` after 3,837,088 successful operations and zero failures.
 
 ### Changed
 
@@ -183,12 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardware execution and makes the release checklist the canonical full matrix.
 - Version bump/set tooling now synchronizes package, ESP-IDF, README, Doxygen,
   and generated-header version fields.
-- Documentation now separates API reference, device facts, release
-  qualification, and revision-specific HIL evidence into their canonical
-  owners. The 24-hour result is recorded as strong fixture regression/endurance
-  evidence, not clean-release qualification, because the firmware identified
-  itself as `d31d2b4-dirty`; the aborted "48-hour" attempt is classified as a
-  host serial-write interruption rather than a device failure or completed soak.
+- Documentation separates API reference, device facts, release qualification,
+  and revision-specific hardware evidence.
 - Strict Doxygen generation now also rejects undocumented public enum values and
   reports warnings in file/line form.
 - Contributor and release commands now consistently use the repository's
@@ -557,7 +570,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stress_mix` no longer schedules `currentAddr` immediately after `recover()`, which intentionally invalidates the current-address state.
 - README device characteristics and documentation references were aligned with the validated MB85RC256V datasheet behavior.
 
-[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/janhavelka/MB85RC/compare/v4.2.0...HEAD
+[4.2.0]: https://github.com/janhavelka/MB85RC/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/janhavelka/MB85RC/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/janhavelka/MB85RC/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/janhavelka/MB85RC/compare/v2.0.0...v3.0.0

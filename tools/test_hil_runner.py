@@ -69,6 +69,58 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runner.classify(runner.CommandStep('x','health','drv'),healthy,.01).status,'PASS')
         for old,new in [('Total failures: 0\n',''),('READY','OFFLINE'),('Consecutive failures: 0','Consecutive failures: 1')]:
             self.assertEqual(runner.classify(runner.CommandStep('x','health','drv'),healthy.replace(old,new),.01).status,'FAIL')
+
+    def test_generated_idf_confirmed_plans_require_complete_diagnostics(self):
+        # Use real plan commands, including their required '!'. The fixtures
+        # follow the native CLI's distinct summaries rather than Arduino output.
+        fixtures = {
+            'selftest!': (
+                'selftest read original: OK\nselftest write: OK\n'
+                'selftest readback: OK\nselftest_pattern=PASS\nselftest restore: OK\n',
+                ('selftest restore: OK\n',)),
+            'rw_suite!': (
+                'rw_suite backup: OK\nrw_suite write: OK\nverify: MATCH\n'
+                'rw_suite fill: OK\nrw_suite restore: OK\n',
+                ('rw_suite write: OK\n', 'verify: MATCH\n',
+                 'rw_suite fill: OK\n', 'rw_suite restore: OK\n')),
+            'xfer_demo!': (
+                'xfer_demo pollVerifyRestore: PASS\nxfer_demo_result pass=8 fail=0\n',
+                ('pass=8 ',)),
+            'typed_demo!': (
+                'typed_demo backup: OK\ntyped_demo write fixed-width bytes: OK\n'
+                'verify: MATCH\ntyped_demo restore: OK\n',
+                ('typed_demo write fixed-width bytes: OK\n', 'verify: MATCH\n')),
+            'stress!': (
+                'stress restore: OK\nstress_ok=3/3\n',
+                ('stress restore: OK\n', '3/3')),
+            'stress_mix!': (
+                'stress_mix restore: OK\nstress_mix_ok=3/3\n',
+                ('stress_mix restore: OK\n', '3/3')),
+            'randbench!': (
+                'randbench final verify: OK\n'
+                'randbench_ok=3/3 elapsed_us=2 final_match=yes\nrandbench restore: OK\n',
+                ('3/3', ' final_match=yes', 'randbench restore: OK\n')),
+        }
+        steps = (runner.make_functional_steps('idf', 3, True)
+                 + runner.make_soak_steps('idf', 3))
+        checked = set()
+        for step in steps:
+            name = step.command.split()[0]
+            if name not in fixtures:
+                continue
+            checked.add(name)
+            good, required = fixtures[name]
+            with self.subTest(plan_step=step.test_id, command=step.command):
+                self.assertEqual(runner.classify(step, good + '> ', .01).status, 'PASS')
+                for field in required:
+                    with self.subTest(missing=field):
+                        incomplete = good.replace(field, '') + '> '
+                        self.assertEqual(runner.classify(step, incomplete, .01).status, 'FAIL')
+                if name == 'rw_suite!':
+                    self.assertEqual(runner.classify(
+                        step, 'rw_suite restore: OK\n> ', .01).status, 'FAIL')
+        self.assertEqual(checked, set(fixtures))
+
     def test_timeout_never_sends_sync_and_stops_next_command(self):
         clock=Clock()
         with tempfile.TemporaryDirectory() as folder,patch.object(runner,'time',clock):

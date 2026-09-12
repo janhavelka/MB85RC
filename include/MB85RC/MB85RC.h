@@ -68,10 +68,10 @@ struct SettingsSnapshot {
   uint8_t offlineThreshold = 0;   ///< Optional diagnostic threshold; zero disables OFFLINE.
   uint32_t lastOkMs = 0;          ///< Last successful tracked I2C timestamp.
   uint32_t lastErrorMs = 0;       ///< Last failed tracked I2C timestamp.
-  Status lastError = Status::Ok(); ///< Most recent tracked I2C/semantic error.
+  Status lastError = Status::Ok(); ///< Most recent tracked transport error.
   uint8_t consecutiveFailures = 0; ///< Consecutive tracked failures since last success.
-  uint32_t totalFailures = 0;     ///< Lifetime tracked failure count; wraps at uint32_t max.
-  uint32_t totalSuccess = 0;      ///< Lifetime tracked success count; wraps at uint32_t max.
+  uint32_t totalFailures = 0;     ///< Tracked failures since successful bind(); end() resets to zero; wraps at uint32_t max.
+  uint32_t totalSuccess = 0;      ///< Tracked successes since successful bind(); end() resets to zero; wraps at uint32_t max.
   bool hasNowMsHook = false;      ///< True when Config::nowMs is supplied.
   DeviceVariant expectedVariant = DeviceVariant::AUTO; ///< Configured variant expectation.
   DeviceVariant activeVariant = DeviceVariant::AUTO; ///< Active runtime variant after bind/identity.
@@ -467,12 +467,14 @@ public:
   /// @return Diagnostic failure streak; never used to gate transport.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
   
-  /// Total failure count (lifetime).
-  /// @return Lifetime tracked failure count.
+  /// Total tracked failures for the current binding.
+  /// Successful bind() and end() reset the count; uint32_t overflow wraps.
+  /// @return Tracked failure count since the latest reset.
   uint32_t totalFailures() const { return _totalFailures; }
   
-  /// Total success count (lifetime).
-  /// @return Lifetime tracked success count.
+  /// Total tracked successes for the current binding.
+  /// Successful bind() and end() reset the count; uint32_t overflow wraps.
+  /// @return Tracked success count since the latest reset.
   uint32_t totalSuccess() const { return _totalSuccess; }
 
   /// Maximum memory-data bytes accepted by writeOnce() for the active variant.

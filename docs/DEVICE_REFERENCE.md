@@ -3,6 +3,23 @@
 Maintained device-behavior reference for the supported MB85RC-family driver
 surface, summarizing the vendor PDFs kept in `docs/reference-pdfs/`.
 
+## Source Documents
+
+The repository retains these vendor documents in
+[`docs/reference-pdfs/`](https://github.com/janhavelka/MB85RC/tree/main/docs/reference-pdfs).
+They are source material for this reference and are excluded from the library
+archive; use the exact document revision matching the production part.
+
+| Part | Repository PDF |
+| --- | --- |
+| MB85RC04V | `MB85RC04V-DS5v1-E.pdf` |
+| MB85RC16V | `MB85RC16V-DS11v0-E.pdf` |
+| MB85RC64TA | `MB85RC64TA-DS5v1-E.pdf` |
+| MB85RC256V | `MB85RC256V-Data-Sheet-DS501-00017-11v2-E.pdf` |
+| MB85RC256V fact sheet | `MB85RC256V-Fact-Sheet-NP501-00019-2v0-E.pdf` |
+| MB85RC512T | `MB85RC512T-DS6v1-E.pdf` |
+| MB85RC1MT | `MB85RC1MT-DS5v1-E.pdf` |
+
 ## Variant Matrix
 
 | Variant | Capacity | Last address | Address model | Device ID | Bus speed | Supply | Notes |
@@ -76,6 +93,11 @@ timing.
 
 ## Memory Model
 
+For two-byte memory addresses, the valid high-byte masks are `0x1F` for
+MB85RC64TA, `0x7F` for MB85RC256V, and `0xFF` for MB85RC512T and MB85RC1MT.
+MB85RC1MT carries A16 separately in the slave address. Unused high address bits
+must be zero in driver-generated transfers.
+
 The MB85RC parts are linear byte-addressable FRAM memories, not register-file
 peripherals. There are no software block-protect registers, status registers,
 or configuration registers in the supported local datasheets.
@@ -96,8 +118,7 @@ Sequential read/write transactions auto-increment the internal address and the
 physical device rolls over to address 0 at the end of its array, including
 across the address bits carried in the slave byte. A burst crossing a 256-byte
 boundary therefore needs no new slave address. The public driver API
-intentionally rejects cross-capacity ranges unless an explicit wrap API is
-added and tested.
+intentionally rejects cross-capacity ranges; it exposes no wrapping bulk API.
 
 For variants that carry memory address bits in the slave byte (`MB85RC04V` A8,
 `MB85RC16V` A10:A8, `MB85RC1MT` A16), two datasheet rules constrain the driver:
@@ -123,7 +144,7 @@ addressed reads for deterministic production paths.
 | Current-address read | START, device address read, data byte(s), NACK final byte, STOP. Use only after a known pointer-setting transaction. |
 | Device ID read | Reserved write address `0xF8`, active device address word, repeated START, reserved read address `0xF9`, three ID bytes, NACK final byte, STOP. ACK after byte 3 may repeat the ID stream. |
 | High-speed transfer | HS-capable variants use `START, 0000 1XXX, expected NACK, repeated START, normal memory command`; STOP exits HS state. |
-| Sleep entry | HS/Sleep-capable variants use `F8h`, active device address word, repeated START, `86h`, STOP. |
+| Sleep entry | HS/Sleep-capable variants use `F8h`, active device address word, repeated START, `86h`, STOP. The device enters Sleep after acknowledging `86h`; the transport must check that ACK. |
 | Sleep wake | Send a START plus active device address word; normal access resumes after the datasheet recovery time. |
 
 The expected NACK on the High-speed master-code byte belongs only inside the
@@ -165,8 +186,10 @@ records this state contract but does not insert a hidden delay.
 - The core owns no I2C controller, pins, bus locks, retries, clock changes, or
   framework time sources.
 - Each injected callback is one terminal physical attempt with complete-length
-  reporting. A failed memory write is indeterminate unless the transport can
-  prove that no requested data was accepted.
+  reporting. A failed memory write remains `INDETERMINATE` unless the transport
+  proves `NOT_COMMITTED`, or proves full `ACCEPTED` completion before a later
+  controller/STOP failure. NACKs cannot prove full acceptance, and acceptance
+  alone does not prove persistence when WP is high.
 - `Config::expectedVariant = DeviceVariant::AUTO` works only for variants with
   a Device ID command. Fixed-BOM products should set the exact expected variant.
 - `MB85RC16V` has no Device ID command in the local datasheet set and must be

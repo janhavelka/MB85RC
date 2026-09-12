@@ -309,7 +309,8 @@ def _set_version(project_root: Path, new_version: str) -> str:
              f'PROJECT_BRIEF          = "MB85RC-family FRAM embedded library API documentation for version {new_version}"'),
         ],
         "README.md": [
-            (r'^Library version:\s*`[^`]+`$', f'Library version: `{new_version}`'),
+            (r'^Library version:\s*`[^`]+`(?:\s*\(package metadata\)\.)?$',
+             f'Library version: `{new_version}` (package metadata).'),
         ],
     }
     for relative_path, rules in replacements.items():

@@ -83,6 +83,10 @@ one completed physical attempt, exact TX/RX lengths, and conservative write
 commit knowledge; it performs no retry or bus recovery. The example calls
 zero-I/O `bind()` before scheduling the explicit identity read.
 
+The callback timeout is forwarded to each synchronous SDK transaction. This
+does not impose a deadline on the whole initialization or reset sequence, which
+also performs controller management and the explicit wake recovery wait.
+
 ESP-IDF's transmit result does not identify which byte was NACKed. The example
 therefore maps an invalid-response/not-found result to
 `TransportCode::NACK_UNSPECIFIED` (`Err::I2C_NACK`) and retains
@@ -93,6 +97,8 @@ Startup and `iface_reset` clear cached driver state before initializing the
 interface. Once the bus is usable, the example sends an address-only wake and
 waits at least the configured/datasheet recovery time before binding and checking
 identity. This also handles a FRAM that stayed asleep while the MCU restarted.
+If controller deletion fails, reset retains the live handle and does not take
+over its GPIO pins. GPIO errors or SDA/SCL still LOW also fail reset.
 An interface or wake failure leaves the driver unbound so a later reset can
 retry. Failed identification retains the new binding for explicit `id`/`recover`
 attempts. Reset does not consume retained cooperative results or restore
@@ -112,8 +118,10 @@ For a production adapter:
   outside the MB85RC instance;
 - return only terminal results and enforce the supplied per-transaction timeout;
 - report exact callback-buffer TX/RX progress, excluding hidden special framing;
-- preserve `WriteCommit::INDETERMINATE` unless the backend can prove that no
-  requested memory data was accepted;
+- preserve `WriteCommit::INDETERMINATE` unless the backend proves no requested
+  data was accepted, or proves complete acceptance before a later
+  timeout/bus/I/O failure; full acceptance requires exact completion counts and
+  cannot be inferred from a NACK;
 - implement Device ID, High-speed, Sleep, and wake framing only through
   `Config::i2cSpecial`, without admitting reserved `0x7C` as a normal device;
 - keep callback contexts alive until `end()` or an accepted replacement binding,

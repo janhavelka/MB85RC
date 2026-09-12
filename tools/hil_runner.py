@@ -251,6 +251,13 @@ def payload_failure_reason(step: CommandStep, clean: str) -> str | None:
     if not args or step.area == "validation":
         return None
     name = args[0]
+    # Native-IDF plans send explicit confirmation forms. Dispatch their payload
+    # checks by operation while preserving the actual command and all run gates.
+    if name.endswith("!") and name[:-1] in {
+        "selftest", "rw_suite", "xfer_demo", "typed_demo",
+        "stress", "stress_mix", "randbench",
+    }:
+        name = name[:-1]
     def exactly(pattern):
         found = list(re.finditer(pattern, clean, re.MULTILINE))
         return found[0] if len(found) == 1 else None

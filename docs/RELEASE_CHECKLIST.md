@@ -18,6 +18,8 @@ Use this checklist before tagging and publishing a release.
   `.\scripts\pio.cmd run -e esp32s2dev`, then build the previous 54.03.20
   stack with `.\scripts\pio.cmd run -e esp32s3dev_legacy_54`.
 - Run guard scripts: `python tools/hil_runner.py --parser-self-test`,
+  `python tools/test_hil_runner.py`,
+  `python tools/test_hil_health_snapshot.py`,
   `python tools/check_core_timing_guard.py`,
   `python tools/check_cli_contract.py`, and
   `python tools/check_idf_example_contract.py`.
@@ -34,17 +36,17 @@ Use this checklist before tagging and publishing a release.
     `--soak-max-consecutive-failures`
 
   Run `python tools/hil_runner.py --help` for the complete flag list.
-- Attach the generated `.pio/hil` transcript, JSON, and Markdown result to the
-  release draft or retain them in a durable release CI artifact. Do not include
-  these fixture-specific logs in the published library package.
+- Retain the generated `.pio/hil` transcript, JSON, and Markdown results in
+  private storage with the fixture and exact firmware identity. These files can
+  contain original FRAM bytes. Publish only reviewed, redacted summaries; keep
+  raw evidence out of public release attachments and the library package.
 - Run package validation:
   `.\scripts\pio.cmd pkg pack --output MB85RC.tar.gz`, then
   `python tools/check_package_contents.py MB85RC.tar.gz`. Remove the generated
   artifact after inspection.
 - Run `doxygen Doxyfile`. The strict configuration must complete with no
-  undocumented-public-API, parameter/return, or documentation warnings. Remove
-  generated `docs/doxygen` output unless the repository intentionally starts
-  tracking it.
+  undocumented-public-API, parameter/return, or documentation warnings.
+  Generated output belongs in `.pio/doxygen/`, outside maintained docs.
 - Check maintained Markdown links and ensure `README.md`,
   `CONTRIBUTING.md`, and `SECURITY.md` describe the same supported release and
   validation commands.
@@ -67,12 +69,30 @@ Keep each item pending until the board log, wiring, command output, commit, and
 result are captured for the release under test. A pass applies only to the
 tested revision, BOM, wiring, voltage, bus settings, framework, and firmware
 identity; do not project one fixture's result onto another configuration.
+Record the exact flashed build and require a clean, reproducible source revision
+for release qualification. An uncommitted working-tree run does not qualify a
+later commit merely because it contains similar changes.
 
 Production HIL must use strict mode, required variant/product/capacity gates,
 zero FAIL, zero UNKNOWN, final `READY` health, zero total driver failures, zero
 target resets/reconnects, and documented heap thresholds. The reference gates
 use a maximum heap drop of 1024 bytes and minimum free heap of 8192 bytes;
 record the rationale for board-specific changes.
+
+The collector retains serial bytes as they arrive and validates complete memory
+payloads, diagnostic counters, restore results, and unique health snapshots.
+Each command sequence stops at its first failed result. A functional failure
+skips soak; final diagnostics may still run if prompt framing remains intact.
+Missing framing, a short command write, or a serial failure stops further
+commands without automatic resynchronization or reconnect during collection.
+Native-IDF binary scratch is checked through hexadecimal reads and CRC; the
+plan omits ASCII text/string commands whose output could imitate CLI framing.
+
+The maintained functional and soak plans require Device ID commands. Setting
+`--require-variant MB85RC16V` does not make them suitable for a no-ID device.
+Qualify that part with an explicit-variant build and a dedicated fixture plan
+that replaces Device ID steps with presence and memory checks, while retaining
+the applicable identity, bounds, integrity, and health requirements below.
 
 - [ ] Identity, addressing, and boundaries: cover every production variant and
   strap, Device-ID `AUTO` selection where supported, explicit `MB85RC16V`

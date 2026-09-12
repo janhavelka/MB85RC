@@ -47,6 +47,8 @@ python scripts/generate_version.py check
 python tools/check_metadata_consistency.py
 python tools/check_core_timing_guard.py
 python tools/hil_runner.py --parser-self-test
+python tools/test_hil_runner.py
+python tools/test_hil_health_snapshot.py
 python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 .\scripts\pio.cmd test -e native
@@ -60,8 +62,14 @@ ESP-IDF example should build both configured IDF targets when `idf.py` is
 available.
 Doxygen is strict: undocumented public members or enum values, missing
 parameter/return documentation, and documentation errors fail the build.
+Generated HTML is written to `.pio/doxygen/html/`.
 The complete packaging and hardware qualification commands live in the
 [release checklist](docs/RELEASE_CHECKLIST.md).
+
+Keep maintained device facts in `docs/DEVICE_REFERENCE.md`, integration details
+in README and the port notes, and release changes in `CHANGELOG.md`. Preserve
+vendor datasheets in `docs/reference-pdfs/`; keep task prompts, completed audit
+reports, generated documentation, and raw fixture logs out of maintained docs.
 
 ### What We Accept
 
