@@ -29,15 +29,12 @@ inline void scan(transport::WireContext& context) {
   }
   TwoWire& wire = *context.wire;
   LOGI("Scanning I2C bus (owner-configured timeout)...");
-  LOG_SERIAL.flush();
 
   LOGI("     0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F");
-  LOG_SERIAL.flush();
 
   uint8_t count = 0;
   for (uint8_t row = 0; row < 8; row++) {
     LOG_SERIAL.printf("%02X: ", row * 16);
-    LOG_SERIAL.flush();
 
     for (uint8_t col = 0; col < 16; col++) {
       uint8_t addr = row * 16 + col;
@@ -66,11 +63,9 @@ inline void scan(transport::WireContext& context) {
       delay(1);
     }
     LOG_SERIAL.println();
-    LOG_SERIAL.flush();
   }
 
   LOGI("Scan complete. Found %d device(s).", count);
-  LOG_SERIAL.flush();
 
   if (count > 0) {
     LOGI("Common addresses: 0x3C/0x3D=OLED, 0x50-0x57=FRAM, 0x51=RV3032, 0x76/0x77=BME280");

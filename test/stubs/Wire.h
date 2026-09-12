@@ -13,18 +13,47 @@
 static constexpr int OUTPUT_OPEN_DRAIN = 1;
 static constexpr int HIGH = 1;
 static constexpr int LOW = 0;
-inline void pinMode(int, int) {}
-inline void digitalWrite(int, int) {}
-inline int digitalRead(int) { return HIGH; }
-inline void delayMicroseconds(unsigned int) {}
+struct ArduinoStubPin {
+  int mode = 0;
+  int level = HIGH;
+  bool heldLow = false;
+  uint32_t lowReadsRemaining = 0;
+};
+inline ArduinoStubPin arduinoStubPins[64];
+inline uint32_t arduinoStubMicros = 0;
+inline bool arduinoStubWireActive = false;
+inline uint32_t arduinoStubGpioWhileWireActive = 0;
+inline void resetArduinoStubPins() {
+  for (auto& pin : arduinoStubPins) pin = ArduinoStubPin{};
+  arduinoStubGpioWhileWireActive = 0;
+}
+inline void pinMode(int pin, int mode) {
+  if (arduinoStubWireActive) ++arduinoStubGpioWhileWireActive;
+  arduinoStubPins[pin].mode = mode;
+}
+inline void digitalWrite(int pin, int level) { arduinoStubPins[pin].level = level; }
+inline int digitalRead(int pin) {
+  auto& state = arduinoStubPins[pin];
+  if (state.heldLow) return LOW;
+  if (state.lowReadsRemaining > 0) {
+    --state.lowReadsRemaining;
+    return LOW;
+  }
+  return state.level;
+}
+inline uint32_t micros() { return arduinoStubMicros; }
+inline void delayMicroseconds(unsigned int us) { arduinoStubMicros += us; }
+inline void delay(uint32_t ms) { arduinoStubMicros += ms * 1000U; }
 
 class TwoWire {
 public:
   bool begin(int sda = -1, int scl = -1, uint32_t frequency = 0U) {
+    ++_beginCalls;
     (void)sda;
     (void)scl;
     (void)frequency;
     _buffersFreed = !_beginResult;
+    arduinoStubWireActive = _beginResult;
     return _beginResult;
   }
   void setTimeOut(uint32_t timeoutMs) { _timeoutMs = timeoutMs; }
@@ -66,6 +95,7 @@ public:
       return _nonStopEndTransmissionResult;
     }
     _openTransaction = false;
+    if (!_physicalAttempt()) return 5U;
     return _endTransmissionResult;
   }
 
@@ -75,6 +105,7 @@ public:
     if (_buffersFreed) {
       return 0U;
     }
+    if (len > 0U && !_physicalAttempt()) return 0U;
     size_t returned = len > _bufferSize ? _bufferSize : len;
     if (_requestReturnOverrideEnabled && _requestReturnOverride < returned) {
       returned = _requestReturnOverride;
@@ -88,7 +119,7 @@ public:
   int available() { return _rxPos < _rxLen ? 1 : 0; }
   int read() { return _rxPos < _rxLen ? _rxBuf[_rxPos++] : -1; }
 
-  void end() { ++_endCalls; }
+  void end() { ++_endCalls; arduinoStubWireActive = false; }
 
   // Test helpers
   void _setEndTransmissionResult(uint8_t result) { _endTransmissionResult = result; }
@@ -124,12 +155,25 @@ public:
   bool _isTransactionOpen() const { return _openTransaction; }
   bool _lastEndTransmissionSentStop() const { return _lastStop; }
 
+  uint32_t _lastPhysicalTimeoutMs = 0U;
+  uint32_t _physicalCalls = 0U;
+  uint32_t _requiredPhysicalWaitMs = 0U;
   uint8_t _addr = 0;
   uint32_t _endCalls = 0U;
+  uint32_t _beginCalls = 0U;
   uint8_t _txBuf[256] = {};
   size_t _txLen = 0;
 
 private:
+  bool _physicalAttempt() {
+    _lastPhysicalTimeoutMs = _timeoutMs;
+    ++_physicalCalls;
+    const uint32_t elapsedMs =
+        _requiredPhysicalWaitMs > _timeoutMs ? _timeoutMs : _requiredPhysicalWaitMs;
+    arduinoStubMicros += elapsedMs * 1000U;
+    return _requiredPhysicalWaitMs <= _timeoutMs;
+  }
+
   uint32_t _timeoutMs = 50;
   bool _beginResult = true;
   uint8_t _endTransmissionResult = 0;

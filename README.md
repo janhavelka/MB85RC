@@ -163,6 +163,12 @@ configuration. A rejected replacement leaves the previous binding active.
 
 The example transport adapter maps Arduino `Wire` outcomes to terminal
 `TransportResult` values and keeps bus timeout ownership outside the library.
+Each callback temporarily applies its supplied `1..1000` ms controller timeout
+and restores the prior Wire timeout on every return path, including failures.
+The application must serialize the bus for the complete callback and keep the
+Wire/controller mutex uncontended: Arduino's mutex wait is not bounded by its
+controller timeout. Scheduler and framework overhead are not a hard real-time
+guarantee.
 `TransportCode::NACK_UNSPECIFIED` becomes `Err::I2C_NACK` when the backend
 cannot identify which byte was rejected. ESP32 Wire result 2 does not prove
 that no memory data was accepted; its write effect remains `INDETERMINATE`.
@@ -511,6 +517,8 @@ paths or use a short session-local core path, for example
 ```powershell
 .\scripts\pio.cmd test -e native
 python tools/hil_runner.py --parser-self-test
+python tools/test_hil_runner.py
+python tools/test_hil_health_snapshot.py
 python tools/check_cli_contract.py
 python tools/check_core_timing_guard.py
 python tools/check_idf_example_contract.py
@@ -523,6 +531,17 @@ doxygen Doxyfile
 `--dry-run` never opens hardware. The canonical full build, package, and real
 strict-HIL commands, including framework, transport-envelope, heap, and soak
 gates are in the [release checklist](docs/RELEASE_CHECKLIST.md).
+
+Start each collector run with a fresh CLI startup prompt. Responses are written
+to the transcript as they arrive. A missing prompt, short command write, or
+serial failure stops the run without hidden resynchronization or reconnect;
+the collector does not call an unbounded serial flush. A returned prompt alone
+does not prove delivery: memory byte counts, diagnostic counters, restoration
+results, and normal driver health are checked separately. Native ESP-IDF's
+ambiguous unescaped `text` display is excluded from automatic byte validation;
+its hexadecimal reads and CRC remain covered. Full transcripts and result
+excerpts can contain original FRAM contents, so keep them private and publish
+only reviewed summaries without those bytes.
 
 ## Documentation
 

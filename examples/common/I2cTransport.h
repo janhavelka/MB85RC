@@ -4,7 +4,9 @@
  *
  * This file provides Wire-compatible I2C callbacks that can be
  * used with the MB85RC driver. The library does not depend on Wire
- * directly; this adapter bridges them.
+ * directly; this adapter bridges them. The application must serialize the bus
+ * for the complete callback: Arduino Wire's internal mutex acquisition is not
+ * bounded by setTimeOut(), so the controller must remain uncontended.
  *
  * NOT part of the library API. Example-only.
  */
@@ -47,6 +49,22 @@ struct WireContext {
   bool resetSafe = true;  ///< False if the legacy core may still own its mutex.
 };
 
+/// Apply the driver's per-transaction limit without changing the owner's default.
+class ScopedWireTimeout {
+ public:
+  ScopedWireTimeout(TwoWire& wire, uint16_t timeoutMs)
+      : _wire(wire), _previousTimeoutMs(wire.getTimeOut()) {
+    _wire.setTimeOut(timeoutMs);
+  }
+  ~ScopedWireTimeout() { _wire.setTimeOut(_previousTimeoutMs); }
+  ScopedWireTimeout(const ScopedWireTimeout&) = delete;
+  ScopedWireTimeout& operator=(const ScopedWireTimeout&) = delete;
+
+ private:
+  TwoWire& _wire;
+  uint16_t _previousTimeoutMs;
+};
+
 #if defined(ARDUINO_ARCH_ESP32)
 static constexpr bool WIRE_RELEASES_MISSING_BUFFERS =
     ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 3, 11);
@@ -86,30 +104,49 @@ inline bool interfaceReset(WireContext& context, int sda, int scl,
   // 9 SCL pulses + STOP is the standard bus recovery / interface-reset sequence.
   // Open drain only: a stuck slave may be holding SDA low, and a push-pull
   // HIGH would short both output stages together.
+  const uint32_t startedUs = micros();
+  const uint32_t timeoutUs = static_cast<uint32_t>(timeoutMs) * 1000U;
   pinMode(scl, OUTPUT_OPEN_DRAIN);
   pinMode(sda, OUTPUT_OPEN_DRAIN);
   digitalWrite(sda, HIGH);
+  const auto releaseClock = [&]() {
+    digitalWrite(scl, HIGH);
+    while (digitalRead(scl) == LOW) {
+      if (static_cast<uint32_t>(micros() - startedUs) >= timeoutUs) {
+        digitalWrite(sda, HIGH);
+        return false;
+      }
+      delay(1);
+    }
+    if (static_cast<uint32_t>(micros() - startedUs) >= timeoutUs) {
+      digitalWrite(sda, HIGH);
+      return false;
+    }
+    return true;
+  };
+  if (!releaseClock()) return false;
   for (int i = 0; i < 9; i++) {
     digitalWrite(scl, LOW);
     delayMicroseconds(5);
-    digitalWrite(scl, HIGH);
+    if (!releaseClock()) return false;
     delayMicroseconds(5);
   }
 
   // STOP: SDA rises while SCL is high.
+  digitalWrite(scl, LOW);
   digitalWrite(sda, LOW);
   delayMicroseconds(5);
-  digitalWrite(scl, HIGH);
+  if (!releaseClock()) return false;
   delayMicroseconds(5);
   digitalWrite(sda, HIGH);
   delayMicroseconds(5);
-  const bool sdaReleased = digitalRead(sda) != LOW;
+  if (digitalRead(sda) == LOW || digitalRead(scl) == LOW) return false;
   if (wire.setBufferSize(WIRE_BUFFER_BYTES) < WIRE_BUFFER_BYTES) {
     return false;
   }
   const bool started = wire.begin(sda, scl, freq);
   wire.setTimeOut(timeoutMs);
-  context.ready = started && sdaReleased;
+  context.ready = started;
   return context.ready;
 #else
   // This example package targets ESP32-S2/S3. Keep transaction callbacks
@@ -158,12 +195,13 @@ inline MB85RC::TransportResult mapWireResult(uint8_t result, size_t txBytes,
  * @brief Wire-based I2C write implementation.
  *
  * Pass to Config::i2cWrite and pass the initialized WireContext to i2cUser.
- * The timeout parameter is advisory; bus timeout ownership stays with initWire().
+ * The callback applies its timeout for the physical transaction, then restores
+ * the owner's previous Wire timeout on every return path.
  *
  * @param addr I2C 7-bit address
  * @param data Data buffer to send
  * @param len Number of bytes
- * @param timeoutMs Timeout requested by the driver (advisory only)
+ * @param timeoutMs Per-transaction timeout in MB85RC's supported 1..1000 ms range
  * @param user Pointer to the initialized WireContext
  * @return Terminal result for exactly one physical I2C transaction.
  */
@@ -177,7 +215,6 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
         MB85RC::WriteCommit::NOT_COMMITTED);
   }
   TwoWire* wire = context->wire;
-  (void)timeoutMs;
   if (!data || len == 0) {
     return MB85RC::TransportResult::Error(
         MB85RC::TransportCode::IO_ERROR, -2,
@@ -190,6 +227,13 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
         MB85RC::WriteCommit::NOT_COMMITTED);
   }
 
+  if (timeoutMs < MB85RC::MIN_I2C_TIMEOUT_MS ||
+      timeoutMs > MB85RC::MAX_I2C_TIMEOUT_MS) {
+    return MB85RC::TransportResult::Error(
+        MB85RC::TransportCode::IO_ERROR, -6,
+        MB85RC::WriteCommit::NOT_COMMITTED);
+  }
+  ScopedWireTimeout timeout(*wire, static_cast<uint16_t>(timeoutMs));
   wire->beginTransmission(addr);
   size_t written = wire->write(data, len);
   if (written != len) {
@@ -215,14 +259,15 @@ inline MB85RC::TransportResult wireWrite(uint8_t addr, const uint8_t* data,
  * @brief Wire-based I2C write-read implementation.
  *
  * Pass to Config::i2cWriteRead and pass the initialized WireContext to i2cUser.
- * The timeout parameter is advisory; bus timeout ownership stays with initWire().
+ * The callback applies its timeout for the physical transaction, then restores
+ * the owner's previous Wire timeout on every return path.
  *
  * @param addr I2C 7-bit address
  * @param tx TX buffer to send (nullable when txLen == 0)
  * @param txLen TX length
  * @param rx RX buffer for readback
  * @param rxLen RX length
- * @param timeoutMs Timeout requested by the driver (advisory only)
+ * @param timeoutMs Per-transaction timeout in MB85RC's supported 1..1000 ms range
  * @param user Pointer to the initialized WireContext
  * @return Terminal result for exactly one physical I2C transaction.
  */
@@ -235,7 +280,6 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -1);
   }
   TwoWire* wire = context->wire;
-  (void)timeoutMs;
   if ((txLen > 0 && tx == nullptr) || (rxLen > 0 && rx == nullptr)) {
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -2);
   }
@@ -246,6 +290,11 @@ inline MB85RC::TransportResult wireWriteRead(uint8_t addr, const uint8_t* tx,
     return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -4);
   }
 
+  if (timeoutMs < MB85RC::MIN_I2C_TIMEOUT_MS ||
+      timeoutMs > MB85RC::MAX_I2C_TIMEOUT_MS) {
+    return MB85RC::TransportResult::Error(MB85RC::TransportCode::IO_ERROR, -6);
+  }
+  ScopedWireTimeout timeout(*wire, static_cast<uint16_t>(timeoutMs));
   if (txLen > 0) {
     wire->beginTransmission(addr);
     size_t written = wire->write(tx, txLen);

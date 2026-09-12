@@ -730,6 +730,7 @@ void assertTransferInProgress(const Status& status) {
 
 void setUp() {
   Wire._clearEndTransmissionResult();
+  resetArduinoStubPins();
 }
 
 void tearDown() {}
@@ -4528,6 +4529,102 @@ void test_idf_transport_dispatches_read_write_and_combined_transactions() {
   }
 }
 
+TransportResult runExampleTimeoutOperation(int operation,
+                                           transport::WireContext& context,
+                                           uint32_t timeoutMs) {
+  const uint8_t tx[3] = {0U, 1U, 0x55U};
+  uint8_t rx[cmd::DEVICE_ID_LEN] = {};
+  switch (operation) {
+    case 0:
+      return transport::wireWrite(0x50U, tx, sizeof(tx), timeoutMs, &context);
+    case 1:
+      return transport::wireWriteRead(0x50U, nullptr, 0U, rx, sizeof(rx),
+                                      timeoutMs, &context);
+    case 2:
+      return transport::wireWriteRead(0x50U, tx, 2U, rx, sizeof(rx),
+                                      timeoutMs, &context);
+    case 3:
+      return transport::wireWriteRead(0x50U, tx, 2U, nullptr, 0U,
+                                      timeoutMs, &context);
+    default: {
+      I2cSpecialTransfer transfer;
+      transfer.txData = tx;
+      transfer.txLen = 1U;
+      transfer.rxData = rx;
+      transfer.rxLen = sizeof(rx);
+      return transport::wireSpecial(I2cSpecialOp::READ_DEVICE_ID, transfer,
+                                    timeoutMs, &context);
+    }
+  }
+}
+
+void test_example_transport_applies_and_restores_callback_timeout() {
+  for (const uint32_t timeoutMs : {1U, 7U, 1000U}) {
+    for (int operation = 0; operation < 5; ++operation) {
+      TwoWire wire;
+      transport::WireContext context;
+      TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 77));
+      const TransportResult result = runExampleTimeoutOperation(operation, context, timeoutMs);
+      TEST_ASSERT_TRUE(result.ok());
+      TEST_ASSERT_EQUAL_UINT32(timeoutMs, wire._lastPhysicalTimeoutMs);
+      TEST_ASSERT_EQUAL_UINT32(1U, wire._physicalCalls);
+      TEST_ASSERT_EQUAL_UINT32(77U, wire.getTimeOut());
+      TEST_ASSERT_FALSE(wire._isTransactionOpen());
+    }
+  }
+}
+
+void test_example_transport_failure_wait_uses_callback_timeout() {
+  for (int operation = 0; operation < 5; ++operation) {
+    TwoWire wire;
+    transport::WireContext context;
+    TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 77));
+    wire._requiredPhysicalWaitMs = 8U;
+    const uint32_t startedUs = arduinoStubMicros;
+    const TransportResult result = runExampleTimeoutOperation(operation, context, 3U);
+    // Wire exposes timeout code 5 for writes; short reads lose the backend code.
+    TEST_ASSERT_TRUE(result.code == ((operation == 0 || operation == 3)
+                                        ? TransportCode::TIMEOUT : TransportCode::IO_ERROR));
+    if (operation == 0) TEST_ASSERT_TRUE(result.writeCommit == WriteCommit::INDETERMINATE);
+    TEST_ASSERT_EQUAL_UINT32(3000U, arduinoStubMicros - startedUs);
+    TEST_ASSERT_EQUAL_UINT32(3U, wire._lastPhysicalTimeoutMs);
+    TEST_ASSERT_EQUAL_UINT32(1U, wire._physicalCalls);
+    TEST_ASSERT_EQUAL_UINT32(77U, wire.getTimeOut());
+    TEST_ASSERT_FALSE(wire._isTransactionOpen());
+  }
+}
+
+void test_example_transport_invalid_timeout_is_zero_io() {
+  for (const uint32_t timeoutMs : {0U, 1001U, 65536U, UINT32_MAX}) {
+    for (int operation = 0; operation < 5; ++operation) {
+      TwoWire wire;
+      transport::WireContext context;
+      TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 77));
+      const TransportResult result = runExampleTimeoutOperation(operation, context, timeoutMs);
+      TEST_ASSERT_FALSE(result.ok());
+      if (operation == 0) TEST_ASSERT_TRUE(result.writeCommit == WriteCommit::NOT_COMMITTED);
+      TEST_ASSERT_EQUAL_UINT32(0U, wire._physicalCalls);
+      TEST_ASSERT_EQUAL_UINT32(77U, wire.getTimeOut());
+      TEST_ASSERT_FALSE(wire._isTransactionOpen());
+    }
+  }
+}
+
+void test_example_transport_short_staging_restores_callback_timeout() {
+  for (const bool readback : {false, true}) {
+    TwoWire wire;
+    transport::WireContext context;
+    TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 77));
+    wire._setWriteReturnOverride(1U);
+    const TransportResult result = runExampleTimeoutOperation(readback ? 2 : 0, context, 4U);
+    TEST_ASSERT_TRUE(result.code == TransportCode::IO_ERROR);
+    TEST_ASSERT_EQUAL_UINT32(4U, wire._lastPhysicalTimeoutMs);
+    TEST_ASSERT_EQUAL_UINT32(1U, wire._physicalCalls);
+    TEST_ASSERT_EQUAL_UINT32(77U, wire.getTimeOut());
+    TEST_ASSERT_FALSE(wire._isTransactionOpen());
+  }
+}
+
 void test_example_transport_maps_wire_errors() {
   Wire._clearEndTransmissionResult();
   Wire._clearWriteReturnOverride();
@@ -4675,6 +4772,40 @@ void test_example_transport_refuses_reset_with_a_possibly_held_legacy_mutex() {
   TEST_ASSERT_FALSE(transport::interfaceReset(context, 8, 9, 400000, 50));
   TEST_ASSERT_EQUAL_UINT32(endCalls, wire._endCalls);
   TEST_ASSERT_FALSE(context.ready);
+}
+
+void test_example_bus_reset_bounds_stuck_lines_and_detaches_wire() {
+  for (const int stuckPin : {-1, 9, 8}) {
+    TwoWire wire;
+    transport::WireContext context;
+    resetArduinoStubPins();
+    arduinoStubMicros = UINT32_MAX - 500U;
+    const uint32_t startedUs = arduinoStubMicros;
+    if (stuckPin >= 0) arduinoStubPins[stuckPin].heldLow = true;
+    TEST_ASSERT_EQUAL(stuckPin < 0,
+                      transport::initWire(context, wire, 8, 9, 400000, 3));
+    TEST_ASSERT_EQUAL(stuckPin < 0, context.ready);
+    TEST_ASSERT_EQUAL_UINT32(stuckPin < 0 ? 1U : 0U, wire._beginCalls);
+    TEST_ASSERT_EQUAL_UINT32(1, wire._endCalls);
+    TEST_ASSERT_EQUAL_UINT32(0, arduinoStubGpioWhileWireActive);
+    TEST_ASSERT_EQUAL_INT(OUTPUT_OPEN_DRAIN, arduinoStubPins[8].mode);
+    TEST_ASSERT_EQUAL_INT(OUTPUT_OPEN_DRAIN, arduinoStubPins[9].mode);
+    TEST_ASSERT_EQUAL_INT(HIGH, arduinoStubPins[8].level);
+    TEST_ASSERT_EQUAL_INT(HIGH, arduinoStubPins[9].level);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(3000U, arduinoStubMicros - startedUs);
+  }
+  TwoWire wire;
+  transport::WireContext context;
+  resetArduinoStubPins();
+  arduinoStubMicros = 0;
+  arduinoStubPins[9].lowReadsRemaining = 2;
+  TEST_ASSERT_TRUE(transport::initWire(context, wire, 8, 9, 400000, 3));
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2000U, arduinoStubMicros);
+  TEST_ASSERT_TRUE(transport::interfaceReset(context, 8, 9, 400000, 3));
+  TEST_ASSERT_EQUAL_UINT32(2, wire._endCalls);
+  TEST_ASSERT_EQUAL_UINT32(2, wire._beginCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, arduinoStubGpioWhileWireActive);
+  resetArduinoStubPins();
 }
 
 void test_example_transport_supports_read_only_transactions() {
@@ -6243,11 +6374,16 @@ int main() {
   RUN_TEST(test_unspecified_nack_preserves_health_and_conservative_write_evidence);
   RUN_TEST(test_idf_transport_maps_error_codes_and_memory_write_commit);
   RUN_TEST(test_idf_transport_dispatches_read_write_and_combined_transactions);
+  RUN_TEST(test_example_transport_applies_and_restores_callback_timeout);
+  RUN_TEST(test_example_transport_failure_wait_uses_callback_timeout);
+  RUN_TEST(test_example_transport_invalid_timeout_is_zero_io);
+  RUN_TEST(test_example_transport_short_staging_restores_callback_timeout);
   RUN_TEST(test_example_transport_maps_wire_errors);
   RUN_TEST(test_example_transport_closes_failed_nonstop_transaction);
   RUN_TEST(test_example_transport_releases_lock_when_buffers_are_freed);
   RUN_TEST(test_example_transport_refuses_reset_with_a_possibly_held_legacy_mutex);
   RUN_TEST(test_example_transport_supports_read_only_transactions);
+  RUN_TEST(test_example_bus_reset_bounds_stuck_lines_and_detaches_wire);
   RUN_TEST(test_example_wire_special_encodes_reserved_device_id_transaction);
 
   // Memory size

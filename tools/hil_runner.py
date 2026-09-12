@@ -199,6 +199,144 @@ def expected_summary(step: CommandStep) -> str:
     return "; ".join(parts) if parts else "prompt returns bounded output"
 
 
+def health_failure_reason(clean: str) -> str | None:
+    """Require one complete current health record, including diagnostic fields."""
+    def field(prefix: str, pattern: str):
+        lines = [line.strip() for line in clean.splitlines() if line.strip().startswith(prefix)]
+        return re.fullmatch(pattern, lines[0]) if len(lines) == 1 else None
+
+    if "=== Driver Health ===" in clean:
+        if clean.count("=== Driver Health ===") != 1:
+            return "duplicate driver health snapshot"
+        fields = (
+            ("State:", r"State:[ \t]+(READY)"),
+            ("Online:", r"Online:[ \t]+(yes)"),
+            ("Consecutive failures:", r"Consecutive failures:[ \t]+(0)"),
+            ("Total success:", r"Total success:[ \t]+([0-9]+)"),
+            ("Total failures:", r"Total failures:[ \t]+(0)"),
+            ("Success rate:", r"Success rate:[ \t]+([0-9]+(?:\.[0-9]+)?)%"),
+            ("Last OK:", r"Last OK:[ \t]+(never|[0-9]+ ms ago \(at [0-9]+ ms\))"),
+            ("Last error:", r"Last error:[ \t]+(never|[0-9]+ ms ago \(at [0-9]+ ms\))"),
+        )
+        parsed = [field(prefix, pattern) for prefix, pattern in fields]
+        if not all(parsed):
+            return "missing, malformed or unhealthy current driver snapshot"
+        successes, rate = int(parsed[3][1]), float(parsed[5][1])
+        if successes > 0xFFFFFFFF or abs(rate - (100.0 if successes else 0.0)) > 0.051:
+            return "invalid health success count or percentage"
+        error_lines = [line.strip() for line in clean.splitlines() if line.strip().startswith("Error ")]
+        if parsed[7][1] != "never" or error_lines:
+            if not field("Error code:", r"Error code:[ \t]+[A-Z][A-Z0-9_]*") or not field("Error detail:", r"Error detail:[ \t]+-?[0-9]+"):
+                return "incomplete retained error diagnostics"
+            messages = [line for line in error_lines if line.startswith("Error msg:")]
+            if len(messages) > 1 or (messages and not re.fullmatch(r"Error msg:[ \t]+\S.*", messages[0])):
+                return "malformed retained error message"
+        return None
+
+    # Native-IDF drv prints three complete lines. Parse each as a unit so
+    # missing tokens cannot be supplied by an earlier or unrelated response.
+    state = field("state=", r"state=1 initialized=1 online=1 addr=0x[0-9A-Fa-f]{2} capacity=([0-9]+) variant=MB85RC[0-9A-Z]+ ok=([0-9]+) fail=0 consecutive=0")
+    transport = field("transport_timeout_ms=", r"transport_timeout_ms=[0-9]+ max_tx=[0-9]+ max_rx=[0-9]+ write_data=[0-9]+ read_data=[0-9]+")
+    capabilities = field("hs_support=", r"hs_support=(?:yes|no) hs_enabled=(?:yes|no) normal_hz=[0-9]+ hs_hz=[0-9]+ sleep_support=(?:yes|no) sleep_state=(?:AWAKE|ASLEEP|WAKING|UNKNOWN) tREC_us=[0-9]+ wake_ready_ms=[0-9]+")
+    if not state or not transport or not capabilities:
+        return "missing, malformed or unhealthy current driver snapshot"
+    if not 0 < int(state[1]) <= 0xFFFFFFFF or int(state[2]) > 0xFFFFFFFF:
+        return "invalid health capacity or success count"
+    return None
+
+
+def payload_failure_reason(step: CommandStep, clean: str) -> str | None:
+    """Require complete data/health fields even if USB delivered the prompt."""
+    args = step.command.split()
+    if not args or step.area == "validation":
+        return None
+    name = args[0]
+    def exactly(pattern):
+        found = list(re.finditer(pattern, clean, re.MULTILINE))
+        return found[0] if len(found) == 1 else None
+    def has(pattern):
+        return exactly(pattern) is not None
+    if name in ("selftest", "rw_suite", "xfer_demo"):
+        label = {"selftest": "Selftest result:", "rw_suite": "Read/write suite result:", "xfer_demo": "(?:Transfer demo result:|xfer_demo_result)"}[name]
+        summary = exactly(r"^" + label + r" pass=(\d+) fail=(\d+)(?: skip=(\d+))?\s*$")
+        if summary:
+            return None if int(summary[1]) > 0 and int(summary[2]) == 0 else "failed or empty diagnostic summary"
+        expected = {"selftest": (r"^selftest_pattern=PASS\s*$", r"^selftest restore: OK\b"),
+                    "rw_suite": (r"^rw_suite write: OK\b", r"^verify: MATCH\s*$", r"^rw_suite fill: OK\b", r"^rw_suite restore: OK\b")}.get(name, ())
+        return None if expected and all(has(pattern) for pattern in expected) else "incomplete diagnostic result"
+    if name in ("stress", "stress_mix", "randbench"):
+        count = int(args[1], 0)
+        prefix = {"stress": "stress", "stress_mix": "stress_mix", "randbench": "randbench"}[name]
+        ratio = exactly(r"^" + prefix + r"_ok=(\d+)/(\d+)\b.*$")
+        if ratio:
+            valid = int(ratio[1]) == int(ratio[2]) == count and has(r"^" + prefix + r" restore: OK\b")
+            if name == "randbench": valid = valid and has(r"\bfinal_match=yes\b")
+            return None if valid else "incomplete operation count or unproven restoration"
+        if name == "stress":
+            fields = [(r"^\s*" + label + r":\s*(\d+)\s*$", value)
+                      for label, value in (("Target", count), ("Attempts", count), ("Success", count), ("Errors", 0))]
+            valid = all((value := exactly(pattern)) is not None and int(value[1]) == expected for pattern, expected in fields)
+            valid = valid and has(r"^\s*\[PASS\] restore stress byte\s*$")
+        elif name == "stress_mix":
+            summary = exactly(r"^\s*Total: ok=(\d+) fail=(\d+) .*$")
+            valid = bool(summary and int(summary[1]) == count and int(summary[2]) == 0 and has(r"^\s*\[PASS\] restore stress_mix scratch\s*$"))
+        else:
+            valid = has(r"^\s*Final window verify: PASS\s*$") and has(r"^\s*Read mismatches: 0\s*$") and has(r"^\s*\[PASS\] restore benchmark window\s*$")
+            for operation in ("random-write-byte", "random-read-byte"):
+                value = exactly(r"^\s*" + operation + r"\s+ops=(\d+)\b.*$")
+                valid = valid and bool(value and int(value[1]) == count)
+        return None if valid else "incomplete diagnostic counters or restoration proof"
+    if name == "typed_demo":
+        if "=== Typed Value Demo ===" in clean:
+            fields = (("uint8", "0x7E"), ("uint16", "0x1234"), ("int32", "-1234567"),
+                      ("uint64", "0x1122334455667788"), ("float", "1.250000"),
+                      ("double", "-42.500000"), ("bool", "true"))
+            valid = all(has(r"^\s*" + label + r"\s*=\s*" + re.escape(value) + r"\s*$") for label, value in fields)
+            valid = valid and has(r"^\s*Cross-boundary guard: PASS\s*$") and has(r"^\s*\[PASS\] restore typed demo region\s*$")
+        else:
+            valid = has(r"^typed_demo write fixed-width bytes: OK\b") and has(r"^verify: MATCH\s*$") and has(r"^typed_demo restore: OK\b")
+        return None if valid else "incomplete typed readback or restoration proof"
+    if name == "drv":
+        return health_failure_reason(clean)
+    if name == "crc" and len(args) == 3:
+        base, length = int(args[1], 0), int(args[2], 0)
+        value = exactly(r"^\s*CRC32\[0x([0-9A-Fa-f]+) \+ (\d+)\] = 0x([0-9A-Fa-f]{8})\s*$")
+        if value:
+            return None if (int(value[1], 16), int(value[2])) == (base, length) else "CRC range differs"
+        value = exactly(r"^crc32=0x([0-9A-Fa-f]{8}) addr=0x([0-9A-Fa-f]+) len=(\d+)\s*$")
+        return None if value and (int(value[2], 16), int(value[3])) == (base, length) else "missing or ambiguous CRC payload"
+    if name not in ("read", "dump", "hexdump", "current", "cur", "text"):
+        return None
+    base = None if name in ("current", "cur") else int(args[1], 0)
+    length = int(args[-1], 0)
+    rows = []
+    for line in clean.splitlines():
+        if name == "text":
+            match = re.fullmatch(r'\s*(?:0x)?([0-9A-Fa-f]{2,8}): "((?:\\x[0-9A-Fa-f]{2}|\\[\\"rnt0]|[^\\"\r\n])*)"\s*', line)
+            if match:
+                values = re.findall(r'\\x[0-9A-Fa-f]{2}|\\[\\"rnt0]|[^\\"\r\n]', match[2])
+                rows.append((int(match[1], 16), len(values)))
+        else:
+            match = re.fullmatch(r"\s*(?:0x)?([0-9A-Fa-f]{2,8}):\s*((?:[0-9A-Fa-f]{2}\s*)+)(?:\|[^\r\n]*\|)?\s*", line)
+            if match:
+                values = bytes.fromhex(match[2])
+                if not 1 <= len(values) <= 16:
+                    return "malformed memory row"
+                rows.append((int(match[1], 16), len(values)))
+    if base is None and not rows:
+        # Native IDF prints current-address bytes on one plain hexadecimal line.
+        plain = exactly(r"^\s*((?:[0-9A-Fa-f]{2}[ \t]*)+)\s*$")
+        return None if plain and len(bytes.fromhex(plain[1])) == length else "missing current-address payload"
+    seen = 0
+    if base is None and rows:
+        base = rows[0][0]
+    for address, count in rows:
+        if address != base + seen:
+            return "non-contiguous memory payload"
+        seen += count
+    return None if seen == length else "incomplete or oversized memory payload"
+
+
 def classify(
     step: CommandStep,
     output: str,
@@ -239,6 +377,9 @@ def classify(
             if failure_notes:
                 break
 
+    payload_failure = payload_failure_reason(step, clean)
+    if payload_failure:
+        failure_notes.append(payload_failure)
     missing = [token for token in step.expected_all if token not in clean]
     any_ok = True
     if step.expected_any:
@@ -247,17 +388,17 @@ def classify(
     if failure_notes:
         status = "FAIL"
         notes = "; ".join(failure_notes)
-    elif not prompt_detected:
-        status = "UNKNOWN"
+    elif not prompt_detected or not re.search(r"(?:^|\n)> \Z", clean):
+        status = "FAIL"
         notes = "command prompt was not recovered"
     elif not completed_within_deadline:
-        status = "UNKNOWN"
+        status = "FAIL"
         notes = "command exceeded its bounded response deadline"
     elif missing:
-        status = "UNKNOWN"
+        status = "FAIL"
         notes = "missing expected token(s): " + ", ".join(missing)
     elif not any_ok:
-        status = "UNKNOWN"
+        status = "FAIL"
         notes = "no expected alternative matched"
     else:
         status = "PASS"
@@ -536,6 +677,8 @@ def make_functional_steps(profile: str, sample_count: int, include_stress: bool)
                                      expected_any=(("stress_mix summary",), ("stress_mix_ok=",)),
                                      timeout_s=60,
                                      notes="Uses a backed-up scratch window and restores it."))
+    if profile == "idf":
+        steps = [step for step in steps if not step.command.startswith("text ")]
     return steps
 
 
@@ -605,8 +748,9 @@ class SerialSession:
         self.verbose = verbose
         self.reconnect_count = 0
         self.framing_sync_count = 0
-        self.framing_lost = False
+        self.framing_lost = True
         self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        self.transcript_path.open("x", encoding="utf-8").close()
         self.ser = self._open_serial()
         time.sleep(0.1)
 
@@ -624,9 +768,9 @@ class SerialSession:
             port=None,
             baudrate=self.baud,
             timeout=0.05,
-            write_timeout=self.timeout_s,
+            write_timeout=min(2.0, self.timeout_s),
         )
-        ser.dtr = False
+        ser.dtr = True
         ser.rts = False
         ser.port = self.port
         ser.open()
@@ -679,99 +823,65 @@ class SerialSession:
     def read_until_prompt(self, timeout_s: float | None = None) -> tuple[str, bool]:
         timeout = self.timeout_s if timeout_s is None else timeout_s
         deadline = time.monotonic() + timeout
-        last_rx = time.monotonic()
         chunks: list[str] = []
-        nudged = False
-        required_prompts = 1
+        size = 0
         while time.monotonic() < deadline:
             try:
-                waiting = self.ser.in_waiting
-                data = self.ser.read(waiting or 1)
-            except (self.serial_mod.SerialException, OSError):
-                self._reopen_until(deadline, count_reconnect=True)
+                data = self.ser.read(self.ser.in_waiting or 1)
+            except (self.serial_mod.SerialException, OSError) as exc:
+                self.append_transcript("HOST SERIAL READ ERROR", str(exc))
+                self.framing_lost = True
+                return "".join(chunks), False
+            if not data:
                 continue
-            if data:
-                text = data.decode("utf-8", errors="replace")
-                chunks.append(text)
-                last_rx = time.monotonic()
-            elif chunks and (time.monotonic() - last_rx) >= self.idle_timeout_s:
-                clean = normalize_output("".join(chunks))
-                if len(PROMPT_RE.findall(clean)) >= required_prompts:
-                    return "".join(chunks), True
-                if not nudged:
-                    # Native USB CDC can retain the tail of a short response
-                    # until the host transmits again. A single read-only version
-                    # command provides a bounded framing marker without
-                    # replaying the original command. An empty line is not
-                    # sufficient because both CLI shells may ignore it.
-                    try:
-                        self.ser.write(b"version\n")
-                        self.ser.flush()
-                        self.framing_sync_count += 1
-                        # Consume both the original command prompt and the
-                        # read-only sync prompt. Returning after the first
-                        # would leave the sync response queued for the next
-                        # command and could misattribute its result.
-                        required_prompts = 2
-                    except (self.serial_mod.SerialException, OSError):
-                        self._reopen_until(deadline, count_reconnect=True)
-                    nudged = True
-        output = "".join(chunks)
-        prompt_count = len(PROMPT_RE.findall(normalize_output(output)))
-        return output, prompt_count >= required_prompts
+            text = data.decode("utf-8", errors="replace")
+            # Persist every received chunk before inspecting completion.
+            with self.transcript_path.open("a", encoding="utf-8") as stream:
+                stream.write(text)
+                stream.flush()
+            chunks.append(text)
+            size += len(data)
+            clean = normalize_output("".join(chunks))
+            if size > 2_000_000:
+                break
+            if re.search(r"(?:^|\n)> \Z", clean):
+                complete = len(PROMPT_RE.findall(clean)) == 1
+                self.framing_lost = not complete
+                return "".join(chunks), complete
+        self.framing_lost = True
+        return "".join(chunks), False
 
     def wait_for_prompt(self, boot_settle_s: float, timeout_s: float) -> str:
+        self.append_transcript("BOOT", "")
         time.sleep(boot_settle_s)
-        boot, prompt_detected = self.read_until_prompt(timeout_s)
-        if not prompt_detected:
-            self.ser.write(b"version\n")
-            self.ser.flush()
-            self.framing_sync_count += 1
-            more, _ = self.read_until_prompt(timeout_s)
-            boot += more
-        self.append_transcript("BOOT", boot)
+        boot, _ = self.read_until_prompt(timeout_s)
         return boot
 
     def command(self, command: str, timeout_s: float | None = None) -> CommandCapture:
+        if self.framing_lost:
+            raise RuntimeError("Serial framing lost; reset and fresh startup capture required")
         if self.verbose:
             print(f">>> {command}")
+        self.append_transcript("COMMAND " + command, "")
         start = time.monotonic()
+        self.framing_lost = True
         try:
-            self.ser.write((command + "\n").encode("utf-8"))
-            self.ser.flush()
+            payload = (command + "\n").encode("utf-8")
+            if self.ser.write(payload) != len(payload):
+                raise OSError("short command write")
         except (self.serial_mod.SerialException, OSError) as exc:
-            deadline = start + (self.timeout_s if timeout_s is None else timeout_s)
-            self._reopen_until(deadline, count_reconnect=True)
             output = f"HOST SERIAL WRITE ERROR: {exc}\n"
-            elapsed = time.monotonic() - start
+            self.append_transcript("WRITE FAILED", output)
+            return CommandCapture(output, time.monotonic() - start, False, False)
+        output, complete = self.read_until_prompt(timeout_s)
+        if count_target_resets(output):
             self.framing_lost = True
-            self.append_transcript(f"COMMAND {command} ({elapsed:.3f}s)", output)
-            return CommandCapture(
-                output=output,
-                elapsed_s=elapsed,
-                prompt_detected=False,
-                completed_within_deadline=False,
-            )
-        output, prompt_detected = self.read_until_prompt(timeout_s)
-        completed_within_deadline = prompt_detected
-        if not prompt_detected:
-            # Do not issue another command into an unfinished response. Allow
-            # one bounded framing-recovery window, while retaining the timeout
-            # as an UNKNOWN result for the command that exceeded its deadline.
-            more, prompt_detected = self.read_until_prompt(self.timeout_s)
-            output += more
-        if not prompt_detected:
-            self.framing_lost = True
+            complete = False
         elapsed = time.monotonic() - start
-        self.append_transcript(f"COMMAND {command} ({elapsed:.3f}s)", output)
+        self.append_transcript("RESULT", f"elapsed_s={elapsed:.3f} complete={complete}")
         if self.verbose:
             print(excerpt(output, 500))
-        return CommandCapture(
-            output=output,
-            elapsed_s=elapsed,
-            prompt_detected=prompt_detected,
-            completed_within_deadline=completed_within_deadline,
-        )
+        return CommandCapture(output, elapsed, complete, complete)
 
 
 def detect_profile(requested: str, boot: str) -> str:
@@ -803,7 +913,7 @@ def run_steps(
             completed_within_deadline=capture.completed_within_deadline,
         )
         results.append(result)
-        if not capture.prompt_detected:
+        if result.status != "PASS":
             break
 
     return results
@@ -876,7 +986,7 @@ def run_soak(
                 in_failure_burst = True
 
         summary.worst_consecutive_failures = max(summary.worst_consecutive_failures, consecutive)
-        if not capture.prompt_detected:
+        if result.status != "PASS":
             summary.status = "FAIL"
             break
         if consecutive >= max_consecutive_failures:
@@ -1208,7 +1318,7 @@ def parser_self_test() -> int:
         prompt_detected=False,
         completed_within_deadline=False,
     )
-    if incomplete.status != "UNKNOWN":
+    if incomplete.status != "FAIL":
         ok = False
         print("parser self-test failed for incomplete prompt framing")
 
@@ -1565,7 +1675,7 @@ def main(argv: list[str]) -> int:
         profile = detect_profile(args.profile, boot)
         steps = make_functional_steps(profile, args.sample_count, args.include_stress)
         results = run_steps(session, steps, args.timeout_s, observations)
-        if session.framing_lost:
+        if session.framing_lost or any(result.status != "PASS" for result in results):
             # Never enqueue more device commands after an incomplete response.
             # A requested soak is a failed run; without a requested soak this
             # remains an ordinary functional failure/UNKNOWN result.

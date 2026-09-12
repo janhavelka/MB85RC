@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Require complete, unique HIL health snapshots, including success totals,
+  percentages, timestamps and retained error details. Truncated or stale
+  Arduino and native-IDF records cannot pass from healthy state tokens alone.
+- Remove redundant console drains from I2C scan output; probe order and bus
+  timing are unchanged, without explicit USB transmit-buffer clearing.
+- Calculate the Arduino diagnostic success percentage using a 64-bit total,
+  preventing overflow when adding the two 32-bit health counters.
+- The HIL collector retains serial data live, rejects short command writes,
+  and stops at its first failed command. Lost framing cannot trigger a hidden
+  resynchronization or reconnect. Complete memory payloads, diagnostic counts,
+  restoration results, and healthy driver fields are required even when the
+  final prompt arrives.
+- Arduino Wire callbacks now apply the requested per-transaction timeout and
+  restore the owner's previous timeout on success and failure, instead of
+  treating the supplied limit as advisory. Invalid timeout values fail before
+  any transaction. The serialized bus-owner requirement remains explicit.
+- Bound SCL stretching during the Arduino example's open-drain interface
+  reset and reject a still-LOW SDA or SCL before restarting Wire. Runtime
+  reset retains its existing detach-before-GPIO ownership order.
 - Audit item 7 (stage 1): both CLIs use the framework-neutral `DiagnosticCore.h`
   for CRC, range checks, verified restoration, staged polling/results, and enum
   names. Printing and demo suites stay local. Native tests cover the shared

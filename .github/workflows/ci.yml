@@ -85,7 +85,10 @@ jobs:
         run: python tools/check_core_timing_guard.py
 
       - name: Test HIL parser and strict gates
-        run: python tools/hil_runner.py --parser-self-test
+        run: |
+          python tools/hil_runner.py --parser-self-test
+          python tools/test_hil_runner.py
+          python tools/test_hil_health_snapshot.py
 
       - name: Run native tests
         run: pio test -e native
