@@ -38,7 +38,7 @@
     "url": "https://github.com/janhavelka/MB85RC.git"
   },
   "license": "MIT",
-  "homepage": "https://www.thymos.cz",
+  "homepage": "https://github.com/janhavelka/MB85RC",
   "frameworks": [
     "arduino",
     "espidf"
