@@ -1,6 +1,8 @@
 version: "4.2.0"
 description: "Production-oriented MB85RC-family FRAM I2C memory driver"
 license: "MIT"
+maintainers:
+  - "Jan Havelka (THYMOS Solution s.r.o.) <info@thymos.cz>"
 url: "https://github.com/janhavelka/MB85RC"
 repository: "https://github.com/janhavelka/MB85RC.git"
 targets:
